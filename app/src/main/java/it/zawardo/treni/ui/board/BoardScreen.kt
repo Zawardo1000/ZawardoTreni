@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
@@ -32,6 +33,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.delayColor
@@ -64,8 +67,18 @@ private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 @Composable
 fun BoardScreen(
     onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
+    initialRfi: String? = null,
+    initialName: String? = null,
+    onBack: (() -> Unit)? = null,
     vm: BoardViewModel = viewModel(),
 ) {
+    // Arrivando da una fermata del dettaglio corsa il tabellone si apre gia'
+    // su quella stazione, senza farla ridigitare.
+    if (initialRfi != null) {
+        LaunchedEffect(initialRfi) {
+            vm.preselect(Station(initialRfi, 0L, initialName ?: initialRfi))
+        }
+    }
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,7 +104,17 @@ fun BoardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.station?.name ?: "Tabellone") },
+                title = { Text(state.station?.name ?: initialName ?: "Tabellone") },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Indietro",
+                            )
+                        }
+                    }
+                },
                 actions = {
                     if (state.station != null) {
                         IconButton(onClick = vm::load) {

@@ -51,6 +51,16 @@ class BoardViewModel : ViewModel() {
         ServiceLocator.currentDeparture.value?.let { select(it) }
     }
 
+    /**
+     * Apre il tabellone su una stazione decisa da fuori, oggi arrivando da una
+     * fermata toccata nel dettaglio corsa. Si ignora se e' gia' quella mostrata,
+     * altrimenti ogni ricomposizione ricaricherebbe.
+     */
+    fun preselect(station: Station) {
+        if (_state.value.station?.rfiCode == station.rfiCode) return
+        select(station)
+    }
+
     fun onQueryChange(text: String) {
         _state.update { it.copy(query = text, suggestionsOpen = true) }
         queries.value = text

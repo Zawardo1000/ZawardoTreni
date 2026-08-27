@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,6 +85,7 @@ fun TrainDetailScreen(
     boardingRfi: String? = null,
     boardingName: String? = null,
     onBack: () -> Unit,
+    onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
     val vm: TrainDetailViewModel = viewModel(
         factory = viewModelFactory { initializer { TrainDetailViewModel(trainNumber, date) } },
@@ -188,6 +190,7 @@ fun TrainDetailScreen(
                             stop = stop,
                             isFirst = i == 0,
                             isLast = i == status.stops.lastIndex,
+                            onOpenStation = onOpenStation,
                             // La fermata da cui sali e' quella che stai cercando
                             // nell'elenco: va trovata senza doverla leggere.
                             isBoarding = boardingRfi != null && stop.stationCode == boardingRfi,
@@ -276,7 +279,11 @@ private fun StopRow(
     isFirst: Boolean,
     isLast: Boolean,
     isBoarding: Boolean = false,
+    onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
+    // Senza codice RFI non esiste un tabellone da aprire: la riga resta inerte
+    // invece di portare a una schermata vuota.
+    val code = stop.stationCode?.takeIf { it.isNotBlank() }
     val done = stop.status == StopStatus.DONE
     val current = stop.status == StopStatus.CURRENT
     val cancelled = stop.status == StopStatus.CANCELLED
@@ -293,6 +300,13 @@ private fun StopRow(
         Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
+            .then(
+                if (code != null) {
+                    Modifier.clickable { onOpenStation(code, stop.stationName) }
+                } else {
+                    Modifier
+                }
+            )
             .then(
                 if (isBoarding) {
                     Modifier.background(

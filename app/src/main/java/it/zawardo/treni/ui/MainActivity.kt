@@ -58,6 +58,19 @@ object BoardRoute
 object AboutRoute
 
 /**
+ * Tabellone di una stazione precisa, aperto da una fermata del dettaglio corsa.
+ *
+ * E' una rotta a se' e non la scheda "Stazione": cosi' finisce nello stack e il
+ * tasto indietro riporta alla corsa da cui si era partiti, invece di cambiare
+ * scheda sotto le dita.
+ */
+@Serializable
+data class StationBoardRoute(
+    val rfiCode: String,
+    val name: String,
+)
+
+/**
  * Le rotte type-safe di Navigation Compose serializzano i parametri per noi:
  * niente stringhe da codificare a mano, e lo stato sopravvive alla morte del processo.
  */
@@ -216,6 +229,18 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                 )
             }
 
+            composable<StationBoardRoute> { entry ->
+                val r = entry.toRoute<StationBoardRoute>()
+                BoardScreen(
+                    initialRfi = r.rfiCode,
+                    initialName = r.name,
+                    onBack = { nav.popBackStack() },
+                    onOpenTrain = { number, date, rfi, name ->
+                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
+                    },
+                )
+            }
+
             composable<AboutRoute> {
                 AboutScreen(onBack = { nav.popBackStack() })
             }
@@ -242,6 +267,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     boardingRfi = r.boardingRfi,
                     boardingName = r.boardingName,
                     onBack = { nav.popBackStack() },
+                    onOpenStation = { rfi, name -> nav.navigate(StationBoardRoute(rfi, name)) },
                 )
             }
         }

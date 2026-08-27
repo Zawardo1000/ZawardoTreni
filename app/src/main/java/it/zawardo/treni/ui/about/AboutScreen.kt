@@ -142,10 +142,16 @@ fun AboutScreen(onBack: () -> Unit) {
 
             Section(
                 title = "Da dove arrivano i dati",
-                body = "Orari e itinerari dal backend Le Frecce. Ritardi, fermate, binari " +
-                    "e posizione dei treni da ViaggiaTreno, il portale di RFI.\n\n" +
-                    "Sono servizi pubblici ma non documentati: possono cambiare senza " +
-                    "preavviso.",
+                body = "Tre sorgenti, perché nessuna da sola basta.\n\n" +
+                    "• Le Frecce — orari e itinerari sulla rete nazionale.\n\n" +
+                    "• ViaggiaTreno (RFI) — ritardi, fermate, binari e posizione " +
+                    "dei treni in tempo reale.\n\n" +
+                    "• Trenord — il servizio regionale e suburbano lombardo, " +
+                    "comprese le linee S del Passante milanese, che le altre due " +
+                    "non conoscono. È anche l'unica che segnala lavori, " +
+                    "sospensioni di linea e servizi sostitutivi.\n\n" +
+                    "Sono servizi pubblici ma non documentati: possono cambiare " +
+                    "senza preavviso.",
             )
 
             SourceLink(

@@ -21,8 +21,13 @@ App Android per orari e stato in tempo reale dei treni italiani.
 
 | Fonte | Uso |
 |---|---|
-| [Le Frecce BFF](https://app.lefrecce.it) | ricerca stazioni e itinerari A→B |
+| [Le Frecce BFF](https://app.lefrecce.it) | ricerca stazioni e itinerari A→B sulla rete nazionale |
 | [ViaggiaTreno](http://www.viaggiatreno.it) | stato realtime: ritardi, fermate, binari, posizione |
+| [Trenord](https://www.trenord.it) | regionale e suburbano lombardo, linee S del Passante, avvisi di servizio |
+
+Trenord non espone un'API propria: dietro c'e' **HAFAS**, e le risposte sono
+offuscate in AES-256-ECB con chiave derivata da una stringa presente in chiaro
+nel bundle JavaScript del loro store.
 
 Entrambe sono API **non ufficiali e non documentate**, ricostruite dal traffico dei siti
 in produzione. Possono cambiare o smettere di funzionare senza preavviso.

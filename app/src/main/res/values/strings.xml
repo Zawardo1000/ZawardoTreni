@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ZawardoTreni</string>
-    <string name="disclaimer">App non ufficiale, non affiliata né approvata da Trenitalia S.p.A. o Ferrovie dello Stato Italiane. Dati da ViaggiaTreno e Le Frecce.</string>
+    <string name="disclaimer">App non ufficiale, non affiliata né approvata da Trenitalia S.p.A., Ferrovie dello Stato Italiane o Trenord S.r.l. Dati da ViaggiaTreno, Le Frecce e Trenord.</string>
 </resources>
