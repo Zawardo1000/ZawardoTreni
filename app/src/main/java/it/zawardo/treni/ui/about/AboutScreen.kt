@@ -84,6 +84,23 @@ fun AboutScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Il commit esatto da cui nasce questa build: toccandolo si
+                    // apre su GitHub. Serve per sapere cosa si ha in mano quando
+                    // si segnala un problema.
+                    Text(
+                        "build ${BuildConfig.GIT_SHA} · ${BuildConfig.BUILD_DATE}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.clickable {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    "$SOURCE_URL/commit/${BuildConfig.GIT_SHA}".toUri(),
+                                ),
+                            )
+                        },
+                    )
                 }
             }
 

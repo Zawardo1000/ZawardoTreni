@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Senza, a schermo spento la CPU dorme e il polling da 60s non scatta -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".TreniApp"

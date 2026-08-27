@@ -48,7 +48,7 @@ private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrainNumberScreen(
-    onOpenTrain: (String, LocalDate) -> Unit,
+    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
     vm: TrainNumberViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -114,12 +114,12 @@ fun TrainNumberScreen(
 }
 
 @Composable
-private fun RunCard(ref: TrainRef, onOpenTrain: (String, LocalDate) -> Unit) {
+private fun RunCard(ref: TrainRef, onOpenTrain: (String, LocalDate, String?, String?) -> Unit) {
     val date = Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME_ZONE).toLocalDate()
     Card(
         Modifier
             .fillMaxWidth()
-            .clickable { onOpenTrain(ref.number, date) },
+            .clickable { onOpenTrain(ref.number, date, null, null) },
     ) {
         Row(
             Modifier.padding(16.dp),

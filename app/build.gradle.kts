@@ -5,6 +5,28 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+/**
+ * Versione derivata da git.
+ *
+ * Scritta a mano restava "1.0.0" per sempre e non permetteva di capire quale
+ * build si avesse in mano: inutile proprio quando serve, cioe' segnalando un
+ * problema. Il conteggio dei commit e' monotono crescente, requisito di Play
+ * per il versionCode.
+ *
+ * `providers.exec` e non un ProcessBuilder diretto: quest'ultimo romperebbe la
+ * configuration cache. I fallback coprono build da un archivio senza .git.
+ */
+fun git(vararg args: String, fallback: String): String = runCatching {
+    providers.exec { commandLine(*args) }.standardOutput.asText.get().trim()
+}.getOrDefault(fallback).ifBlank { fallback }
+
+val gitCommitCount = git("git", "rev-list", "--count", "HEAD", fallback = "1").toIntOrNull() ?: 1
+val gitSha = git("git", "rev-parse", "--short", "HEAD", fallback = "sconosciuto")
+val gitDate = git(
+    "git", "log", "-1", "--format=%cd", "--date=format:%d/%m/%Y",
+    fallback = "data sconosciuta",
+)
+
 android {
     namespace = "it.zawardo.treni"
     compileSdk = 37
@@ -13,8 +35,11 @@ android {
         applicationId = "it.zawardo.treni"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = gitCommitCount
+        versionName = "1.1.$gitCommitCount"
+
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "BUILD_DATE", "\"$gitDate\"")
     }
 
     buildTypes {

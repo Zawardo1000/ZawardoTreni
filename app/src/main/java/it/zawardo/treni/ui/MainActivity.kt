@@ -72,10 +72,18 @@ data class ResultsRoute(
     val whenEpochSec: Long,
 )
 
+/**
+ * [boardingRfi] e' la stazione da cui l'utente sale, quando la si conosce.
+ * Serve a due cose: mostrare il ritardo **alla sua fermata** invece che quello
+ * globale del treno, e sapere quando smettere di seguire.
+ * E' null se si arriva dalla ricerca per numero, dove quel contesto non esiste.
+ */
 @Serializable
 data class TrainRoute(
     val number: String,
     val dateEpochDay: Long,
+    val boardingRfi: String? = null,
+    val boardingName: String? = null,
 )
 
 private data class TabItem(
@@ -189,13 +197,19 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
 
             composable<TrainSearchRoute> {
                 TrainNumberScreen(
-                    onOpenTrain = { number, date -> nav.navigate(TrainRoute(number, date.toEpochDay())) },
+                    // Cercando per numero non esiste una stazione di salita:
+                    // qui il monitoraggio ripiega sull'arrivo a destinazione.
+                    onOpenTrain = { number, date, _, _ ->
+                        nav.navigate(TrainRoute(number, date.toEpochDay()))
+                    },
                 )
             }
 
             composable<BoardRoute> {
                 BoardScreen(
-                    onOpenTrain = { number, date -> nav.navigate(TrainRoute(number, date.toEpochDay())) },
+                    onOpenTrain = { number, date, rfi, name ->
+                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
+                    },
                 )
             }
 
@@ -210,8 +224,8 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     to = Station(r.toRfi, r.toId, r.toName),
                     departure = LocalDateTime.ofEpochSecond(r.whenEpochSec, 0, ZoneOffset.UTC),
                     onBack = { nav.popBackStack() },
-                    onOpenTrain = { number, date ->
-                        nav.navigate(TrainRoute(number, date.toEpochDay()))
+                    onOpenTrain = { number, date, rfi, name ->
+                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
                     },
                 )
             }
@@ -221,6 +235,8 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                 TrainDetailScreen(
                     trainNumber = r.number,
                     date = LocalDate.ofEpochDay(r.dateEpochDay),
+                    boardingRfi = r.boardingRfi,
+                    boardingName = r.boardingName,
                     onBack = { nav.popBackStack() },
                 )
             }

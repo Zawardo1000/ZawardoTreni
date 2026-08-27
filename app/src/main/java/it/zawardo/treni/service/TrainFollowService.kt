@@ -10,11 +10,14 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import it.zawardo.treni.R
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.ui.MainActivity
@@ -28,22 +31,35 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
- * Segui treno: aggiorna il ritardo ogni 60 secondi e avvisa quando cambia
- * di piu' di 3 minuti.
+ * Segui treno: sorveglia la partenza dalla **tua** stazione e avvisa quando lo
+ * scarto cambia di oltre 3 minuti.
  *
- * Perche' un foreground service e non WorkManager: l'intervallo periodico minimo
- * di WorkManager e' 15 minuti, imposto dal sistema. Un polling a 60 secondi si
- * ottiene solo cosi', e Android in cambio pretende una notifica permanente.
+ * Lo scopo e' prendere il treno, non accompagnarlo: il monitoraggio si chiude
+ * appena il treno lascia la stazione da cui sali. Da li' in poi non c'e' piu'
+ * niente su cui agire, e tenerlo acceso sarebbe solo consumo.
  *
- * Il tipo dichiarato e' `dataSync`: su Android 15 ha un tetto di 6 ore al giorno,
- * sufficiente per un viaggio, e a differenza di `specialUse` non e' a rischio di
- * rigetto in review sul Play Store.
+ * **Perche' un foreground service.** L'intervallo periodico minimo di
+ * WorkManager e' 15 minuti, imposto dal sistema; JobScheduler e AlarmManager in
+ * Doze non scendono sotto i ~9 minuti. Per stare al minuto resta solo questa
+ * strada, e Android in cambio pretende una notifica permanente.
+ *
+ * **Perche' il wake lock.** Un foreground service tiene vivo il processo ma non
+ * tiene sveglia la CPU: `delay()` non e' una sveglia. A schermo spento il giro
+ * salta e riprende solo riaccendendo, che e' precisamente il modo in cui questa
+ * funzione risulta inutile.
+ *
+ * **Come si contiene il consumo.** Non riducendo l'affidabilita', ma diradando
+ * le chiamate quando non servono: il costo dominante e' la radio che si accende,
+ * non la CPU inattiva. Un'ora prima della partenza il ritardo non cambia di
+ * minuto in minuto, negli ultimi dieci si'.
  */
 class TrainFollowService : Service() {
 
@@ -51,15 +67,20 @@ class TrainFollowService : Service() {
     private val scope = CoroutineScope(job)
     private var pollJob: Job? = null
 
-    /** Ritardo dell'ultimo avviso emesso, non dell'ultimo rilevamento. */
+    /** Scarto dell'ultimo avviso emesso, non dell'ultimo rilevamento. */
     private var lastAlertedDelay: Int? = null
 
-    /** La soppressione si annuncia una volta sola, non a ogni giro di polling. */
+    /** La soppressione si annuncia una volta sola, non a ogni giro. */
     private var alertedCancellation = false
 
-    /** Corsa seguita: serve a costruire l'Intent che riapre la sua schermata. */
     private var followedNumber: String? = null
     private var followedDate: LocalDate? = null
+    private var boardingName: String? = null
+
+    /** Ora dell'ultimo giro riuscito: e' cio' che dice se il servizio e' vivo. */
+    private var lastPollAt: LocalDateTime? = null
+
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -69,47 +90,71 @@ class TrainFollowService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> {
-                stopFollowing()
-                return START_NOT_STICKY
-            }
+        if (intent?.action == ACTION_STOP) {
+            stopFollowing()
+            return START_NOT_STICKY
         }
 
         val number = intent?.getStringExtra(EXTRA_NUMBER) ?: return START_NOT_STICKY
-        val epochDay = intent.getLongExtra(EXTRA_EPOCH_DAY, LocalDate.now().toEpochDay())
-        val date = LocalDate.ofEpochDay(epochDay)
+        val date = LocalDate.ofEpochDay(
+            intent.getLongExtra(EXTRA_EPOCH_DAY, LocalDate.now().toEpochDay()),
+        )
+        val boardingRfi = intent.getStringExtra(EXTRA_BOARDING_RFI)
+
+        // Riavvio sulla stessa corsa: non azzerare lo storico degli avvisi,
+        // altrimenti la soglia dei 3 minuti riparte da capo.
+        if (followedNumber == number && followedDate == date && pollJob?.isActive == true) {
+            return START_REDELIVER_INTENT
+        }
 
         followedNumber = number
         followedDate = date
-        startForegroundSafely(buildOngoing(number, "Ricerca dello stato in corso…", null))
-        _followed.value = number
+        boardingName = intent.getStringExtra(EXTRA_BOARDING_NAME)
         lastAlertedDelay = null
         alertedCancellation = false
-        startPolling(number, date)
-        return START_STICKY
+        lastPollAt = null
+
+        startForegroundSafely(buildOngoing(number, "Ricerca dello stato in corso…", null))
+        _followed.value = number
+        acquireWakeLock()
+        startPolling(number, date, boardingRfi)
+
+        // REDELIVER e non STICKY: con STICKY il sistema puo' riavviare il servizio
+        // con Intent nullo, e senza numero treno non saprebbe cosa seguire.
+        return START_REDELIVER_INTENT
     }
 
-    private fun startForegroundSafely(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceCompatStart.start(this, notification)
-        } else {
-            startForeground(NOTIF_ONGOING_ID, notification)
-        }
+    /**
+     * Android 15 concede ai foreground service `dataSync` 6 ore ogni 24, poi
+     * chiama questo metodo. Chi non lo implementa non viene fermato: viene
+     * terminato con un ANR.
+     *
+     * Con la chiusura alla partenza non dovrebbe mai scattare, ma una rete che
+     * non risponde per mezza giornata basterebbe ad arrivarci.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        notifyStoppedByBudget()
+        stopFollowing()
     }
 
-    private fun startPolling(number: String, date: LocalDate) {
+    @Deprecated("Sostituito da onTimeout(startId, fgsType) in Android 15")
+    override fun onTimeout(startId: Int) {
+        notifyStoppedByBudget()
+        stopFollowing()
+    }
+
+    // ------------------------------------------------------------- polling
+
+    private fun startPolling(number: String, date: LocalDate, boardingRfi: String?) {
         pollJob?.cancel()
         pollJob = scope.launch {
             val trains = ServiceLocator.trainStatusRepository
 
             /*
-             * La corsa si risolve UNA volta sola, all'avvio.
-             *
-             * Risolverla a ogni giro costava una chiamata di rete in piu' al minuto,
-             * ma soprattutto era fragile: lo stesso numero puo' corrispondere a piu'
-             * corse, e la scelta poteva cambiare fra un giro e l'altro spostando la
-             * notifica su un altro treno senza preavviso.
+             * La corsa si risolve UNA volta sola, all'avvio. Risolverla a ogni
+             * giro costava una chiamata in piu' al minuto, ma soprattutto era
+             * fragile: lo stesso numero puo' avere piu' corse, e la scelta poteva
+             * cambiare spostando la notifica su un altro treno senza preavviso.
              */
             val ref = runCatching { trains.resolveFor(number, date) }.getOrNull()
 
@@ -118,36 +163,119 @@ class TrainFollowService : Service() {
                     if (ref != null) trains.status(ref) else trains.statusByNumber(number, date)
                 }.getOrNull()
 
-                if (status != null) {
-                    updateOngoing(number, status)
-                    maybeAlert(number, status)
+                var boarding: Stop? = null
 
-                    // Treno arrivato: non c'e' piu' niente da seguire, il servizio si spegne
-                    // da solo invece di restare acceso a consumare batteria.
-                    if (status.state == TrainState.ARRIVED) {
-                        notifyArrived(number, status)
+                if (status != null) {
+                    lastPollAt = LocalDateTime.now()
+                    boarding = boardingRfi?.let { code ->
+                        status.stops.firstOrNull { it.stationCode == code }
+                    }
+
+                    updateOngoing(number, status, boarding)
+                    maybeAlert(number, status, boarding)
+
+                    if (shouldStop(status, boarding)) {
+                        notifyFinished(number, status, boarding)
                         stopFollowing()
                         return@launch
                     }
                 }
 
-                delay(POLL_INTERVAL_MS)
+                delay(pollIntervalMs(boarding))
             }
         }
     }
 
-    private fun updateOngoing(number: String, status: TrainStatus) {
-        val text = describe(status)
-        val sub = status.lastDetectionStation?.let { st ->
-            // L'ora rende evidente se l'aggiornamento si e' fermato.
-            val at = status.lastDetectionTime?.format(HHMM)
-            if (at != null) "Ultimo rilevamento: $st alle $at" else "Ultimo rilevamento: $st"
+    /**
+     * Il monitoraggio finisce quando il treno lascia la stazione da cui sali:
+     * da quel momento non c'e' piu' nulla su cui agire.
+     *
+     * Senza stazione di salita (arrivo dalla ricerca per numero) si ripiega
+     * sull'arrivo a destinazione.
+     */
+    private fun shouldStop(status: TrainStatus, boarding: Stop?): Boolean = when {
+        boarding != null -> boarding.status == StopStatus.DONE ||
+            boarding.status == StopStatus.CANCELLED ||
+            boarding.actualDeparture != null
+        else -> status.state == TrainState.ARRIVED
+    }
+
+    /**
+     * Frequenza adattiva. Il consumo dipende soprattutto da quante volte si
+     * accende la radio: lontano dalla partenza il ritardo non cambia di minuto
+     * in minuto, e interrogare ogni 60 secondi sarebbe spreco puro.
+     */
+    private fun pollIntervalMs(boarding: Stop?): Long {
+        val departure = boarding?.effectiveDeparture ?: boarding?.effectiveArrival
+            ?: return POLL_NEAR_MS
+        val minutes = Duration.between(LocalDateTime.now(), departure).toMinutes()
+        return when {
+            minutes > 30 -> POLL_FAR_MS
+            minutes > 10 -> POLL_MID_MS
+            else -> POLL_NEAR_MS
         }
-        NotificationManagerCompat.from(this).also { nm ->
+    }
+
+    // -------------------------------------------------------- notifiche
+
+    private fun updateOngoing(number: String, status: TrainStatus, boarding: Stop?) {
+        /*
+         * Due orari diversi, e servono entrambi:
+         *  - dove e quando il treno e' stato rilevato da RFI;
+         *  - quando NOI abbiamo controllato l'ultima volta.
+         * Il secondo e' l'unico modo per accorgersi che il polling si e' fermato.
+         */
+        val detection = status.lastDetectionStation?.let { st ->
+            val at = status.lastDetectionTime?.format(HHMM)
+            if (at != null) "$st alle $at" else st
+        }
+        val checked = lastPollAt?.format(HHMM)?.let { "aggiornato $it" }
+        val sub = listOfNotNull(detection, checked).joinToString(" · ").ifBlank { null }
+
+        NotificationManagerCompat.from(this).let { nm ->
             if (hasNotificationPermission()) {
-                nm.notify(NOTIF_ONGOING_ID, buildOngoing(status.label.ifBlank { number }, text, sub))
+                nm.notify(
+                    NOTIF_ONGOING_ID,
+                    buildOngoing(status.label.ifBlank { number }, describe(status, boarding), sub),
+                )
             }
         }
+    }
+
+    /**
+     * Il testo principale parla della **tua** partenza quando la conosciamo: il
+     * ritardo globale della corsa e' un'informazione peggiore, perche' quello
+     * che ti riguarda e' a che ora passa da te.
+     */
+    private fun describe(status: TrainStatus, boarding: Stop?): String {
+        stateWord(status.state)?.let { return it }
+
+        if (boarding != null) {
+            val time = boarding.effectiveDeparture?.format(HHMM)
+                ?: boarding.scheduledDeparture?.format(HHMM)
+            val delay = boarding.departureDelayMinutes
+            val where = boardingName ?: boarding.stationName
+            val suffix = when {
+                delay > 0 -> " (+$delay)"
+                delay < 0 -> " (${delay})"
+                else -> ""
+            }
+            if (time != null) return "Parte da $where alle $time$suffix"
+        }
+
+        return when {
+            status.delayMinutes > 0 -> "Ritardo ${status.delayMinutes} min"
+            status.delayMinutes < 0 -> "In anticipo di ${-status.delayMinutes} min"
+            else -> "In orario"
+        }
+    }
+
+    private fun stateWord(state: TrainState): String? = when (state) {
+        TrainState.CANCELLED -> "Soppresso"
+        TrainState.PARTIALLY_CANCELLED -> "Soppresso in parte"
+        TrainState.DIVERTED -> "Percorso variato"
+        TrainState.ARRIVED -> "Arrivato"
+        else -> null
     }
 
     /**
@@ -155,20 +283,18 @@ class TrainFollowService : Service() {
      * Confrontarlo con l'ultimo rilevamento farebbe suonare il telefono a ogni
      * oscillazione di un minuto.
      */
-    private fun maybeAlert(number: String, status: TrainStatus) {
-        val previous = lastAlertedDelay
-        val current = status.delayMinutes
-        val cancelled = status.state == TrainState.CANCELLED
+    private fun maybeAlert(number: String, status: TrainStatus, boarding: Stop?) {
+        // Quando si conosce la fermata di salita e' il suo scarto a contare.
+        val current = boarding?.departureDelayMinutes ?: status.delayMinutes
 
-        // Una soppressione va annunciata sempre, anche se e' la prima lettura:
-        // prima veniva silenziata dal ramo che gestisce l'assenza di storico.
-        if (cancelled && !alertedCancellation) {
+        if (status.state == TrainState.CANCELLED && !alertedCancellation) {
             alertedCancellation = true
             lastAlertedDelay = current
             emitAlert(number, status, "Il treno è stato soppresso.")
             return
         }
 
+        val previous = lastAlertedDelay
         if (previous == null) {
             // Prima lettura: si stabilisce il riferimento, non si suona.
             lastAlertedDelay = current
@@ -177,15 +303,13 @@ class TrainFollowService : Service() {
         if (kotlin.math.abs(current - previous) <= DELAY_THRESHOLD_MIN) return
 
         lastAlertedDelay = current
-        if (!hasNotificationPermission()) return
-
+        val where = boardingName ?: boarding?.stationName
+        val at = boarding?.effectiveDeparture?.format(HHMM)
+        val tail = if (where != null && at != null) " Partenza da $where prevista alle $at." else ""
         emitAlert(
             number,
             status,
-            when {
-                current > previous -> "Il ritardo è passato da ${describeDelay(previous)} a ${describeDelay(current)}."
-                else -> "Lo scarto è cambiato da ${describeDelay(previous)} a ${describeDelay(current)}."
-            },
+            "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail",
         )
     }
 
@@ -193,6 +317,38 @@ class TrainFollowService : Service() {
         minutes > 0 -> "$minutes min di ritardo"
         minutes < 0 -> "${-minutes} min di anticipo"
         else -> "orario regolare"
+    }
+
+    private fun notifyFinished(number: String, status: TrainStatus, boarding: Stop?) {
+        val where = boardingName ?: boarding?.stationName
+        val body = when {
+            boarding?.status == StopStatus.CANCELLED && where != null ->
+                "La fermata di $where è stata soppressa. Monitoraggio terminato."
+            where != null -> {
+                val at = boarding?.actualDeparture?.format(HHMM)
+                if (at != null) "Partito da $where alle $at. Monitoraggio terminato."
+                else "Partito da $where. Monitoraggio terminato."
+            }
+            else -> "Arrivato a ${status.destination.orEmpty()}. Monitoraggio terminato."
+        }
+        emitAlert(number, status, body)
+    }
+
+    private fun notifyStoppedByBudget() {
+        if (!hasNotificationPermission()) return
+        val body = "Android limita a 6 ore al giorno il monitoraggio in background. " +
+            "Riapri l'app e tocca di nuovo la campanella per riprendere."
+        NotificationManagerCompat.from(this).notify(
+            NOTIF_ALERT_ID,
+            NotificationCompat.Builder(this, CHANNEL_ALERTS)
+                .setSmallIcon(R.mipmap.ic_launcher_foreground)
+                .setContentTitle("Monitoraggio interrotto")
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setContentIntent(openAppIntent())
+                .build(),
+        )
     }
 
     private fun emitAlert(number: String, status: TrainStatus, body: String) {
@@ -209,33 +365,6 @@ class TrainFollowService : Service() {
                 .setContentIntent(openAppIntent())
                 .build(),
         )
-    }
-
-    private fun notifyArrived(number: String, status: TrainStatus) {
-        if (!hasNotificationPermission()) return
-        NotificationManagerCompat.from(this).notify(
-            NOTIF_ALERT_ID,
-            NotificationCompat.Builder(this, CHANNEL_ALERTS)
-                .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle(status.label.ifBlank { "Treno $number" })
-                .setContentText("Arrivato a ${status.destination.orEmpty()}.")
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setAutoCancel(true)
-                .build(),
-        )
-    }
-
-    private fun describe(status: TrainStatus): String = when (status.state) {
-        TrainState.CANCELLED -> "Soppresso"
-        TrainState.PARTIALLY_CANCELLED -> "Soppresso in parte"
-        TrainState.DIVERTED -> "Percorso variato"
-        TrainState.NOT_DEPARTED -> "Non ancora partito"
-        TrainState.ARRIVED -> "Arrivato"
-        else -> when {
-            status.delayMinutes > 0 -> "Ritardo ${status.delayMinutes} min"
-            status.delayMinutes < 0 -> "In anticipo di ${-status.delayMinutes} min"
-            else -> "In orario"
-        }
     }
 
     private fun buildOngoing(title: String, text: String, sub: String?): Notification =
@@ -261,7 +390,7 @@ class TrainFollowService : Service() {
             .build()
 
     /**
-     * Toccare la notifica deve aprire **quel** treno, non genericamente l'app.
+     * Toccare la notifica apre **quel** treno, non genericamente l'app.
      * Gli extra viaggiano nell'Intent e MainActivity li trasforma in navigazione.
      */
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
@@ -274,19 +403,52 @@ class TrainFollowService : Service() {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    // ------------------------------------------------------------- ciclo di vita
+
+    private fun startForegroundSafely(notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIF_ONGOING_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIF_ONGOING_ID, notification)
+        }
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
+            setReferenceCounted(false)
+            // Tetto di guardia: se qualcosa andasse storto il lock non resta
+            // appeso a consumare batteria per sempre.
+            acquire(MAX_FOLLOW_MS)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+    }
+
     private fun hasNotificationPermission(): Boolean =
         NotificationManagerCompat.from(this).areNotificationsEnabled()
 
     private fun stopFollowing() {
         pollJob?.cancel()
+        releaseWakeLock()
         followedNumber = null
         followedDate = null
+        boardingName = null
         _followed.value = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
+        releaseWakeLock()
         _followed.value = null
         scope.cancel()
         super.onDestroy()
@@ -294,32 +456,52 @@ class TrainFollowService : Service() {
 
     companion object {
         private const val ACTION_STOP = "it.zawardo.treni.FOLLOW_STOP"
+        private const val EXTRA_NUMBER = "number"
+        private const val EXTRA_EPOCH_DAY = "epochDay"
+        private const val EXTRA_BOARDING_RFI = "boardingRfi"
+        private const val EXTRA_BOARDING_NAME = "boardingName"
 
         /** Letti da MainActivity per aprire direttamente la corsa seguita. */
         const val EXTRA_OPEN_TRAIN = "open_train_number"
         const val EXTRA_OPEN_DATE = "open_train_epoch_day"
-
-        private const val EXTRA_NUMBER = "number"
-        private const val EXTRA_EPOCH_DAY = "epochDay"
 
         private const val CHANNEL_ONGOING = "follow_ongoing"
         private const val CHANNEL_ALERTS = "follow_alerts"
         private const val NOTIF_ONGOING_ID = 1001
         private const val NOTIF_ALERT_ID = 1002
 
-        /** Richiesta esplicita: polling ogni minuto. */
-        private const val POLL_INTERVAL_MS = 60_000L
+        /** Ultimi dieci minuti: qui cambiano binario e ritardo, si guarda spesso. */
+        private const val POLL_NEAR_MS = 60_000L
+
+        /** Fra dieci e trenta minuti: cambia qualcosa, ma non ogni minuto. */
+        private const val POLL_MID_MS = 120_000L
+
+        /** Oltre la mezz'ora: il dato e' quasi fermo, la radio puo' riposare. */
+        private const val POLL_FAR_MS = 300_000L
 
         /** Si avvisa oltre i 3 minuti di scarto, non a ogni sussulto. */
         private const val DELAY_THRESHOLD_MIN = 3
 
+        private const val WAKE_LOCK_TAG = "ZawardoTreni:segui-treno"
+
+        /** Limite di guardia del wake lock: nessuna attesa dura otto ore. */
+        private const val MAX_FOLLOW_MS = 8 * 60 * 60 * 1000L
+
         private val _followed = MutableStateFlow<String?>(null)
         val followed: StateFlow<String?> = _followed.asStateFlow()
 
-        fun start(context: Context, trainNumber: String, date: LocalDate) {
+        fun start(
+            context: Context,
+            trainNumber: String,
+            date: LocalDate,
+            boardingRfi: String? = null,
+            boardingName: String? = null,
+        ) {
             val intent = Intent(context, TrainFollowService::class.java)
                 .putExtra(EXTRA_NUMBER, trainNumber)
                 .putExtra(EXTRA_EPOCH_DAY, date.toEpochDay())
+                .putExtra(EXTRA_BOARDING_RFI, boardingRfi)
+                .putExtra(EXTRA_BOARDING_NAME, boardingName)
             ContextCompat.startForegroundService(context, intent)
         }
 
@@ -337,26 +519,15 @@ class TrainFollowService : Service() {
                     "Treno seguito",
                     // Silenziosa: e' un cruscotto sempre presente, non un avviso.
                     NotificationManager.IMPORTANCE_LOW,
-                ).apply { description = "Notifica permanente col ritardo aggiornato" },
+                ).apply { description = "Notifica permanente con la tua partenza aggiornata" },
             )
             nm.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ALERTS,
                     "Avvisi ritardo",
                     NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "Avvisa quando il ritardo cambia di oltre 3 minuti" },
+                ).apply { description = "Avvisa quando lo scarto cambia di oltre 3 minuti" },
             )
         }
-    }
-}
-
-/** Isolato perché `startForeground` con tipo esiste solo da Android 10. */
-private object ServiceCompatStart {
-    fun start(service: Service, notification: Notification) {
-        service.startForeground(
-            1001,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-        )
     }
 }

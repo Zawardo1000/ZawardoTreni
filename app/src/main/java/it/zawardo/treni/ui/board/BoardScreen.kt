@@ -63,7 +63,7 @@ private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BoardScreen(
-    onOpenTrain: (String, LocalDate) -> Unit,
+    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
     vm: BoardViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -198,7 +198,9 @@ fun BoardScreen(
 
                     else -> LazyColumn {
                         items(state.entries, key = { it.trainRef.number + it.trainRef.departureDateMillis }) { e ->
-                            BoardRow(e, onOpenTrain)
+                            BoardRow(e) { number, date ->
+                                onOpenTrain(number, date, state.station?.rfiCode, state.station?.name)
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                         }
                     }

@@ -40,6 +40,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.delayLabel
@@ -60,7 +61,7 @@ fun ResultsScreen(
     to: Station,
     departure: LocalDateTime,
     onBack: () -> Unit,
-    onOpenTrain: (String, LocalDate) -> Unit,
+    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
 ) {
     val vm: ResultsViewModel = viewModel(
         factory = viewModelFactory {
@@ -137,8 +138,13 @@ fun ResultsScreen(
                     }
 
                     items(state.journeys, key = { it.key }) { row ->
-                        JourneyCard(row) { number ->
-                            onOpenTrain(number, row.journey.departure.toLocalDate())
+                        JourneyCard(row) { number, leg ->
+                            onOpenTrain(
+                                number,
+                                row.journey.departure.toLocalDate(),
+                                leg.from.rfiCode,
+                                leg.from.name,
+                            )
                         }
                     }
 
@@ -158,13 +164,15 @@ fun ResultsScreen(
 }
 
 @Composable
-private fun JourneyCard(row: JourneyRow, onOpenTrain: (String) -> Unit) {
+private fun JourneyCard(row: JourneyRow, onOpenTrain: (String, Leg) -> Unit) {
     val j: Journey = row.journey
     Card(
         Modifier
             .fillMaxWidth()
             .clickable {
-                j.legs.firstOrNull()?.trainNumber?.let(onOpenTrain)
+                j.legs.firstOrNull()?.let { leg ->
+                    leg.trainNumber?.let { onOpenTrain(it, leg) }
+                }
             },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -195,7 +203,7 @@ private fun JourneyCard(row: JourneyRow, onOpenTrain: (String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 j.legs.forEach { leg ->
                     AssistChip(
-                        onClick = { leg.trainNumber?.let(onOpenTrain) },
+                        onClick = { leg.trainNumber?.let { onOpenTrain(it, leg) } },
                         label = { Text(leg.label, style = MaterialTheme.typography.labelMedium) },
                         colors = AssistChipDefaults.assistChipColors(
                             labelColor = MaterialTheme.colorScheme.onSurface,

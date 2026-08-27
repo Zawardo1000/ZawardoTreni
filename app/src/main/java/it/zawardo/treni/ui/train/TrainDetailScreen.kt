@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,6 +81,8 @@ private fun LocalDateTime?.hhmm(): String = this?.format(TIME) ?: "--:--"
 fun TrainDetailScreen(
     trainNumber: String,
     date: LocalDate,
+    boardingRfi: String? = null,
+    boardingName: String? = null,
     onBack: () -> Unit,
 ) {
     val vm: TrainDetailViewModel = viewModel(
@@ -99,7 +103,7 @@ fun TrainDetailScreen(
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) TrainFollowService.start(context, trainNumber, date)
+        if (granted) TrainFollowService.start(context, trainNumber, date, boardingRfi, boardingName)
     }
     val requestNotifications: () -> Unit = {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -108,7 +112,7 @@ fun TrainDetailScreen(
         ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            TrainFollowService.start(context, trainNumber, date)
+            TrainFollowService.start(context, trainNumber, date, boardingRfi, boardingName)
         }
     }
 
@@ -184,6 +188,9 @@ fun TrainDetailScreen(
                             stop = stop,
                             isFirst = i == 0,
                             isLast = i == status.stops.lastIndex,
+                            // La fermata da cui sali e' quella che stai cercando
+                            // nell'elenco: va trovata senza doverla leggere.
+                            isBoarding = boardingRfi != null && stop.stationCode == boardingRfi,
                         )
                     }
                     state.error?.let {
@@ -264,7 +271,12 @@ private fun Header(status: TrainStatus) {
 }
 
 @Composable
-private fun StopRow(stop: Stop, isFirst: Boolean, isLast: Boolean) {
+private fun StopRow(
+    stop: Stop,
+    isFirst: Boolean,
+    isLast: Boolean,
+    isBoarding: Boolean = false,
+) {
     val done = stop.status == StopStatus.DONE
     val current = stop.status == StopStatus.CURRENT
     val cancelled = stop.status == StopStatus.CANCELLED
@@ -277,7 +289,21 @@ private fun StopRow(stop: Stop, isFirst: Boolean, isLast: Boolean) {
         else -> scheme.outlineVariant
     }
 
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .then(
+                if (isBoarding) {
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                        RoundedCornerShape(8.dp),
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+    ) {
 
         /*
          * Il binario visivo del percorso.
@@ -344,7 +370,7 @@ private fun StopRow(stop: Stop, isFirst: Boolean, isLast: Boolean) {
             Text(
                 stop.stationName,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (current || isBoarding) FontWeight.Bold else FontWeight.Normal,
                 textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                 color = if (cancelled) scheme.error else scheme.onSurface,
                 maxLines = 1,
