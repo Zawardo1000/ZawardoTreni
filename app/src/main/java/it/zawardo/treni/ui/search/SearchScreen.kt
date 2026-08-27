@@ -52,6 +52,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -83,6 +85,9 @@ fun SearchScreen(
     var showTime by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
 
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -107,9 +112,19 @@ fun SearchScreen(
                 onQueryChange = vm::onQueryChange,
                 onFieldFocused = vm::onFieldFocused,
                 onClearField = vm::clearField,
-                onSwap = vm::swap,
-                onPickDate = { showDate = true },
-                onPickTime = { showTime = true },
+                onSwap = {
+                    keyboard?.hide()
+                    focus.clearFocus(force = true)
+                    vm.swap()
+                },
+                onPickDate = {
+                    focus.clearFocus(force = true)
+                    showDate = true
+                },
+                onPickTime = {
+                    focus.clearFocus(force = true)
+                    showTime = true
+                },
                 onNow = vm::setNow,
                 onToggleRemember = vm::setRememberLast,
                 onSave = vm::saveCurrent,
@@ -117,6 +132,8 @@ fun SearchScreen(
                     val f = state.from
                     val t = state.to
                     if (f != null && t != null) {
+                        keyboard?.hide()
+                        focus.clearFocus(force = true)
                         vm.recordSearch()
                         onSearch(f, t, state.dateTime)
                     }
@@ -127,7 +144,13 @@ fun SearchScreen(
                 SuggestionList(
                     suggestions = state.suggestions,
                     loading = state.loadingSuggestions,
-                    onPick = { vm.select(state.activeField!!, it) },
+                    onPick = { station ->
+                        vm.select(state.activeField!!, station)
+                        // Scelta la stazione, il campo ha finito: via cursore e tastiera,
+                        // altrimenti la tastiera copre il resto della schermata.
+                        keyboard?.hide()
+                        focus.clearFocus(force = true)
+                    },
                 )
             } else {
                 HistoryAndSaved(
@@ -135,7 +158,7 @@ fun SearchScreen(
                     onTabChange = { tab = it },
                     history = history,
                     saved = saved,
-                    onPick = vm::applyPair,
+                    onPick = { f, t, minutes -> vm.applyPair(f, t, minutes) },
                     onDeleteHistory = vm::deleteHistory,
                     onClearHistory = vm::clearHistory,
                     onDeleteSaved = vm::deleteSaved,
@@ -248,11 +271,18 @@ private fun SearchCard(
                     Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
                     Text("  Cerca")
                 }
-                IconButton(onClick = onSave, enabled = state.canSearch && !state.alreadySaved) {
+                // Bottone con testo, non solo icona: da icona sola non si capiva
+                // che la ricerca si potesse salvare.
+                OutlinedButton(
+                    onClick = onSave,
+                    enabled = state.canSearch && !state.alreadySaved,
+                ) {
                     Icon(
                         if (state.alreadySaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                        contentDescription = if (state.alreadySaved) "Già salvata" else "Salva ricerca",
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
                     )
+                    Text(if (state.alreadySaved) "  Salvata" else "  Salva")
                 }
             }
 
@@ -357,7 +387,7 @@ private fun HistoryAndSaved(
     onTabChange: (Int) -> Unit,
     history: List<SearchHistoryEntity>,
     saved: List<SavedSearchEntity>,
-    onPick: (Station, Station) -> Unit,
+    onPick: (Station, Station, Int?) -> Unit,
     onDeleteHistory: (Long) -> Unit,
     onClearHistory: () -> Unit,
     onDeleteSaved: (Long) -> Unit,
@@ -376,7 +406,8 @@ private fun HistoryAndSaved(
                     items(history, key = { it.id }) { h ->
                         PairRow(
                             title = "${h.from.name} → ${h.to.name}",
-                            onClick = { onPick(h.from.toStation(), h.to.toStation()) },
+                            // La cronologia riparte sempre da adesso.
+                            onClick = { onPick(h.from.toStation(), h.to.toStation(), null) },
                             onDelete = { onDeleteHistory(h.id) },
                         )
                     }
@@ -389,13 +420,18 @@ private fun HistoryAndSaved(
             }
         } else {
             if (saved.isEmpty()) {
-                EmptyHint("Salva una ricerca col segnalibro per ritrovarla qui")
+                EmptyHint("Imposta una tratta e premi Salva per ritrovarla qui")
             } else {
                 LazyColumn {
                     items(saved, key = { it.id }) { s ->
                         PairRow(
                             title = s.label,
-                            onClick = { onPick(s.from.toStation(), s.to.toStation()) },
+                            subtitle = s.timeMinutes?.let { m ->
+                                "alle %02d:%02d".format(m / 60, m % 60)
+                            },
+                            onClick = {
+                                onPick(s.from.toStation(), s.to.toStation(), s.timeMinutes)
+                            },
                             onDelete = { onDeleteSaved(s.id) },
                         )
                     }
@@ -406,7 +442,12 @@ private fun HistoryAndSaved(
 }
 
 @Composable
-private fun PairRow(title: String, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun PairRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -414,15 +455,25 @@ private fun PairRow(title: String, onClick: () -> Unit, onDelete: () -> Unit) {
             .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            title,
+        Column(
             Modifier
                 .weight(1f)
-                .padding(vertical = 12.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodyLarge,
-        )
+                .padding(vertical = 10.dp),
+        ) {
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            subtitle?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Filled.DeleteOutline,

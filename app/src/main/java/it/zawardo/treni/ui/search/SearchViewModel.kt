@@ -191,14 +191,25 @@ class SearchViewModel : ViewModel() {
         _state.update { it.copy(dateTime = LocalDateTime.now()) }
     }
 
-    fun applyPair(from: Station, to: Station) {
+    /**
+     * Riapre una tratta da cronologia o salvate.
+     *
+     * [timeMinutes] arriva solo dalle salvate, che conservano l'orario abituale.
+     * La data e' sempre oggi: salvare una data significherebbe riproporre un
+     * giorno ormai passato.
+     */
+    fun applyPair(from: Station, to: Station, timeMinutes: Int? = null) {
+        val now = LocalDateTime.now()
+        val target = timeMinutes
+            ?.let { now.toLocalDate().atTime(LocalTime.ofSecondOfDay(it * 60L)) }
+            ?: now
         _state.update {
             it.copy(
                 from = from,
                 to = to,
                 fromQuery = from.name,
                 toQuery = to.name,
-                dateTime = LocalDateTime.now(),
+                dateTime = target,
                 suggestions = emptyList(),
                 activeField = null,
             )
@@ -218,12 +229,14 @@ class SearchViewModel : ViewModel() {
         _state.update { it.copy(alreadySaved = isSaved) }
     }
 
+    /** Salva stazioni e orario impostato. La data no: domani sarebbe gia' vecchia. */
     fun saveCurrent() {
         val s = _state.value
         val from = s.from ?: return
         val to = s.to ?: return
+        val minutes = s.dateTime.toLocalTime().let { it.hour * 60 + it.minute }
         viewModelScope.launch {
-            store.save(from, to)
+            store.save(from, to, timeMinutes = minutes)
             refreshSavedFlag()
         }
     }

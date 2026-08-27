@@ -33,5 +33,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Segui treno. Il tipo dataSync su Android 15 ha un tetto di 6 ore al giorno:
+          basta per un viaggio, e a differenza di specialUse non rischia il rigetto
+          in review sul Play Store.
+        -->
+        <service
+            android:name=".service.TrainFollowService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

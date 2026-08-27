@@ -31,6 +31,15 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnit()
+
+    /*
+     * Questi test interrogano API reali: l'esito dipende dai treni che circolano
+     * in questo momento, non dal codice. Lasciarli cacheare significherebbe
+     * vedere "PASSED" restituito dalla cache mentre l'API e' gia' cambiata,
+     * cioe' esattamente il caso che devono intercettare.
+     */
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
     testLogging {
         showStandardStreams = true
         events("passed", "failed", "skipped")

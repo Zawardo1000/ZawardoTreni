@@ -1,5 +1,10 @@
 package it.zawardo.treni.ui.train
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,11 +47,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
@@ -72,6 +82,28 @@ fun TrainDetailScreen(
     )
     val state by vm.state.collectAsState()
 
+    val context = LocalContext.current
+    val followedNumber by TrainFollowService.followed.collectAsState()
+    val isFollowing = followedNumber == trainNumber
+
+    // Su Android 13+ senza questo permesso il servizio partirebbe muto:
+    // notifica permanente invisibile e nessun avviso. Meglio chiederlo prima.
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) TrainFollowService.start(context, trainNumber, date)
+    }
+    val requestNotifications: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            TrainFollowService.start(context, trainNumber, date)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -82,6 +114,29 @@ fun TrainDetailScreen(
                     }
                 },
                 actions = {
+                    // "Segui" ha senso solo su un treno che sta ancora circolando oggi.
+                    val followable = state.status != null &&
+                        state.status!!.state != TrainState.ARRIVED &&
+                        date == LocalDate.now()
+                    if (followable) {
+                        IconButton(
+                            onClick = {
+                                if (isFollowing) {
+                                    TrainFollowService.stop(context)
+                                } else {
+                                    requestNotifications()
+                                }
+                            },
+                        ) {
+                            Icon(
+                                if (isFollowing) Icons.Filled.NotificationsActive
+                                else Icons.Filled.NotificationsNone,
+                                contentDescription = if (isFollowing) "Smetti di seguire" else "Segui questo treno",
+                                tint = if (isFollowing) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (state.refreshing) {
                         CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
                     } else {

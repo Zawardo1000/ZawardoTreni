@@ -39,15 +39,21 @@ class SearchStore(
     suspend fun deleteHistory(id: Long) = history.delete(id)
     suspend fun clearHistory() = history.clear()
 
-    suspend fun save(from: Station, to: Station, label: String? = null): Long =
-        saved.insert(
-            SavedSearchEntity(
-                from = StationRef.of(from),
-                to = StationRef.of(to),
-                label = label?.takeIf { it.isNotBlank() } ?: "${from.name} → ${to.name}",
-                createdAt = System.currentTimeMillis(),
-            )
+    /** [timeMinutes] e' l'orario abituale della tratta; la data non si salva mai. */
+    suspend fun save(
+        from: Station,
+        to: Station,
+        timeMinutes: Int?,
+        label: String? = null,
+    ): Long = saved.insert(
+        SavedSearchEntity(
+            from = StationRef.of(from),
+            to = StationRef.of(to),
+            label = label?.takeIf { it.isNotBlank() } ?: "${from.name} → ${to.name}",
+            timeMinutes = timeMinutes,
+            createdAt = System.currentTimeMillis(),
         )
+    )
 
     suspend fun isSaved(from: Station, to: Station): Boolean =
         saved.countFor(from.locationId, to.locationId) > 0

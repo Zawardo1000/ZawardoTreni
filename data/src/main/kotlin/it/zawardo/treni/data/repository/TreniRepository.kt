@@ -44,8 +44,15 @@ class StationRepository(
 class JourneyRepository(
     private val lefrecce: LefrecceApi,
 ) {
+    /**
+     * L'offset di fuso e' OBBLIGATORIO.
+     *
+     * Senza, il BFF non da' errore: ignora del tutto l'ora e fa ripartire la
+     * ricerca da mezzanotte. Una richiesta per le 14:00 tornava con i treni
+     * dell'alba. Il pattern `XXX` produce il "+02:00" che serve.
+     */
     private val bffFormat: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.ITALY)
+        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ITALY)
 
     /**
      * Il `searchId` restituito dalla `/search` scade in circa 10 minuti, quindi
@@ -60,7 +67,7 @@ class JourneyRepository(
         val session = lefrecce.search(
             startLocationId = from.locationId,
             endLocationId = to.locationId,
-            departureTime = departure.format(bffFormat),
+            departureTime = departure.atZone(ROME).format(bffFormat),
         )
         if (session.searchId.isBlank()) return@withContext emptyList()
         lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit)

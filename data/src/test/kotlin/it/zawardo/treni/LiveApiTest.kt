@@ -61,6 +61,72 @@ class LiveApiTest {
         )
     }
 
+    /**
+     * Regressione: il BFF pretende l'offset di fuso nella `departure_time`.
+     * Senza, non da' errore ma ignora l'ora e riparte da mezzanotte. Una ricerca
+     * per le 14:00 tornava con i treni dell'alba.
+     */
+    @Test
+    fun `la ricerca rispetta l'orario richiesto`() = runBlocking {
+        val from = stations.search("bologna centrale").first { it.trackable }
+        val to = stations.search("firenze s. m").first { it.trackable }
+
+        // Un orario lontano da adesso, cosi' se venisse ignorato si vede subito.
+        val requested = LocalDateTime.now().toLocalDate().atTime(14, 0)
+        val res = journeys.search(from, to, requested, limit = 5)
+
+        println("\n=== ORARIO RICHIESTO ${requested.fmt()} ===")
+        res.forEach { println("  parte alle ${it.departure.fmt()} da ${it.legs.firstOrNull()?.from?.name}") }
+
+        assertTrue("nessun itinerario", res.isNotEmpty())
+        val first = res.first().departure
+        assertTrue(
+            "la prima soluzione parte alle ${first.fmt()}, prima delle ${requested.fmt()}: " +
+                "l'orario e' stato ignorato dal BFF",
+            !first.toLocalTime().isBefore(requested.toLocalTime()),
+        )
+    }
+
+    /**
+     * L'orario delle soluzioni deve riferirsi alla stazione scelta dall'utente,
+     * non all'origine del treno: un FR Roma->Milano che passa da Bologna deve
+     * comparire con l'ora di Bologna.
+     */
+    @Test
+    fun `l'orario e' quello della stazione scelta, non dell'origine del treno`() = runBlocking {
+        val from = stations.search("bologna centrale").first { it.trackable }
+        val to = stations.search("firenze s. m").first { it.trackable }
+        val requested = LocalDateTime.now().toLocalDate().atTime(14, 0)
+        val res = journeys.search(from, to, requested, limit = 6)
+
+        // Si cerca una soluzione il cui treno NON nasce a Bologna.
+        val passante = res.firstNotNullOfOrNull { j ->
+            val leg = j.legs.firstOrNull() ?: return@firstNotNullOfOrNull null
+            val number = leg.trainNumber ?: return@firstNotNullOfOrNull null
+            val status = trains.statusByNumber(number, requested.toLocalDate())
+                ?: return@firstNotNullOfOrNull null
+            if (status.origin?.contains("BOLOGNA", true) == true) null else Triple(j, leg, status)
+        }
+
+        if (passante == null) {
+            println("\n(nessun treno passante nel campione: verifica non conclusiva)")
+            return@runBlocking
+        }
+
+        val (journey, leg, status) = passante
+        println("\n=== TRENO PASSANTE ${leg.label} ===")
+        println("  origine reale del treno: ${status.origin}")
+        println("  orario mostrato nella soluzione: ${journey.departure.fmt()} da ${leg.from.name}")
+
+        val atBologna = status.stops.firstOrNull { it.stationName.contains("BOLOGNA", true) }
+        println("  partenza da Bologna secondo ViaggiaTreno: ${atBologna?.scheduledDeparture.fmt()}")
+
+        assertTrue(
+            "l'orario della soluzione non e' quello della stazione di partenza scelta",
+            !journey.departure.toLocalTime().isBefore(requested.toLocalTime()),
+        )
+    }
+
     @Test
     fun `stato realtime espone fermate, ritardi e posizione`() = runBlocking {
         // Si parte da un treno realmente in circolazione adesso, preso dal tabellone.

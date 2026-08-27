@@ -35,13 +35,21 @@ data class SearchHistoryEntity(
     @ColumnInfo(name = "searched_at") val searchedAt: Long,
 )
 
-/** Ricerche salvate a mano dall'utente: nessun limite, nessuna scadenza. */
+/**
+ * Ricerche salvate a mano dall'utente: nessun limite, nessuna scadenza.
+ *
+ * Si salva l'**orario ma non la data**: una tratta ricorrente ha senso come
+ * "Bologna → Firenze alle 8:00", non come "il 27 agosto". Alla riapertura la
+ * data e' sempre oggi. [timeMinutes] e' null quando si vuole "adesso".
+ */
 @Entity(tableName = "saved_searches")
 data class SavedSearchEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @Embedded(prefix = "from_") val from: StationRef,
     @Embedded(prefix = "to_") val to: StationRef,
     val label: String,
+    /** Minuti dalla mezzanotte, 0..1439. Null = usa l'ora corrente. */
+    @ColumnInfo(name = "time_minutes") val timeMinutes: Int? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
 
