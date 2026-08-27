@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,9 @@ import java.time.format.DateTimeFormatter
 private val DATE = DateTimeFormatter.ofPattern("d MMM")
 private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 
+private fun TrainRef.dateInRome(): LocalDate =
+    Instant.ofEpochMilli(departureDateMillis).atZone(ROME_ZONE).toLocalDate()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrainNumberScreen(
@@ -63,6 +68,16 @@ fun TrainNumberScreen(
     val favorites by vm.favorite.collectAsState()
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // Un solo risultato: si entra dritti nella corsa. Si consuma subito, cosi'
+    // tornando indietro non si viene rispediti dentro.
+    LaunchedEffect(state.openDirectly) {
+        val ref = state.openDirectly ?: return@LaunchedEffect
+        vm.consumeOpen()
+        keyboard?.hide()
+        focus.clearFocus(force = true)
+        onOpenTrain(ref.number, ref.dateInRome(), null, null)
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Cerca treno") }) },
@@ -81,6 +96,13 @@ fun TrainNumberScreen(
                 placeholder = { Text("es. 2874, 24852") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = vm::clearQuery) {
+                            Icon(Icons.Filled.Clear, contentDescription = "Svuota il campo")
+                        }
+                    }
+                },
                 keyboardOptions = KeyboardOptions(
                     // Il numero e' sempre intero: tastierino numerico, che a
                     // mano e' molto piu' rapido. L'etichetta incollata resta
@@ -164,7 +186,7 @@ fun TrainNumberScreen(
 
 @Composable
 private fun RunCard(ref: TrainRef, onOpenTrain: (String, LocalDate, String?, String?) -> Unit) {
-    val date = Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME_ZONE).toLocalDate()
+    val date = ref.dateInRome()
     Card(
         Modifier
             .fillMaxWidth()

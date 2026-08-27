@@ -25,6 +25,15 @@ data class TrainNumberUiState(
     val suggestions: List<TrainSuggestion> = emptyList(),
     val suggestionsOpen: Boolean = false,
     val message: String? = null,
+    /**
+     * Corsa da aprire senza passare da un elenco.
+     *
+     * La ricerca per numero e' puntuale: quando la risposta e' una sola, farla
+     * toccare sarebbe un passaggio a vuoto. Vale solo per la ricerca chiesta,
+     * mai per quella che parte da sola mentre si digita, perche' a meta' numero
+     * si finirebbe dentro il treno sbagliato.
+     */
+    val openDirectly: TrainRef? = null,
 )
 
 @OptIn(FlowPreview::class)
@@ -103,6 +112,18 @@ class TrainNumberViewModel : ViewModel() {
         }
     }
 
+    /** Svuota il campo e tutto quello che ne dipendeva. */
+    fun clearQuery() {
+        _state.update {
+            TrainNumberUiState(suggestionsOpen = false)
+        }
+        digitato.value = ""
+    }
+
+    fun consumeOpen() {
+        _state.update { it.copy(openDirectly = null) }
+    }
+
     fun closeSuggestions() {
         _state.update { it.copy(suggestionsOpen = false) }
     }
@@ -128,6 +149,7 @@ class TrainNumberViewModel : ViewModel() {
                 it.copy(
                     loading = false,
                     results = refs,
+                    openDirectly = refs.singleOrNull()?.takeIf { _ -> esplicita },
                     suggestionsOpen = it.suggestionsOpen && refs.isEmpty(),
                     message = when {
                         refs.isNotEmpty() -> null
