@@ -52,6 +52,11 @@ android {
     }
 }
 
+ksp {
+    // Schema versionato: senza, le migrazioni future si scrivono alla cieca
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(project(":data"))
 

@@ -1,0 +1,452 @@
+package it.zawardo.treni.ui.search
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Train
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Button
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import it.zawardo.treni.data.local.SavedSearchEntity
+import it.zawardo.treni.data.local.SearchHistoryEntity
+import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.ui.common.DatePickerModal
+import it.zawardo.treni.ui.common.TimePickerModal
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private val DATE_FMT = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
+private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchScreen(
+    onSearch: (Station, Station, LocalDateTime) -> Unit,
+    onOpenAbout: () -> Unit,
+    vm: SearchViewModel = viewModel(),
+) {
+    val state by vm.state.collectAsState()
+    val history by vm.history.collectAsState()
+    val saved by vm.saved.collectAsState()
+
+    var showDate by remember { mutableStateOf(false) }
+    var showTime by remember { mutableStateOf(false) }
+    var tab by remember { mutableIntStateOf(0) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("ZawardoTreni") },
+                actions = {
+                    IconButton(onClick = onOpenAbout) {
+                        Icon(Icons.Outlined.Train, contentDescription = "Info")
+                    }
+                },
+            )
+        },
+    ) { inner ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SearchCard(
+                state = state,
+                onQueryChange = vm::onQueryChange,
+                onFieldFocused = vm::onFieldFocused,
+                onClearField = vm::clearField,
+                onSwap = vm::swap,
+                onPickDate = { showDate = true },
+                onPickTime = { showTime = true },
+                onNow = vm::setNow,
+                onToggleRemember = vm::setRememberLast,
+                onSave = vm::saveCurrent,
+                onSearch = {
+                    val f = state.from
+                    val t = state.to
+                    if (f != null && t != null) {
+                        vm.recordSearch()
+                        onSearch(f, t, state.dateTime)
+                    }
+                },
+            )
+
+            if (state.activeField != null && (state.suggestions.isNotEmpty() || state.loadingSuggestions)) {
+                SuggestionList(
+                    suggestions = state.suggestions,
+                    loading = state.loadingSuggestions,
+                    onPick = { vm.select(state.activeField!!, it) },
+                )
+            } else {
+                HistoryAndSaved(
+                    tab = tab,
+                    onTabChange = { tab = it },
+                    history = history,
+                    saved = saved,
+                    onPick = vm::applyPair,
+                    onDeleteHistory = vm::deleteHistory,
+                    onClearHistory = vm::clearHistory,
+                    onDeleteSaved = vm::deleteSaved,
+                )
+            }
+        }
+    }
+
+    if (showDate) {
+        DatePickerModal(
+            initial = state.dateTime.toLocalDate(),
+            onDismiss = { showDate = false },
+            onConfirm = vm::setDate,
+        )
+    }
+    if (showTime) {
+        TimePickerModal(
+            initial = state.dateTime.toLocalTime(),
+            onDismiss = { showTime = false },
+            onConfirm = vm::setTime,
+        )
+    }
+}
+
+@Composable
+private fun SearchCard(
+    state: SearchUiState,
+    onQueryChange: (SearchField, String) -> Unit,
+    onFieldFocused: (SearchField) -> Unit,
+    onClearField: (SearchField) -> Unit,
+    onSwap: () -> Unit,
+    onPickDate: () -> Unit,
+    onPickTime: () -> Unit,
+    onNow: () -> Unit,
+    onToggleRemember: (Boolean) -> Unit,
+    onSave: () -> Unit,
+    onSearch: () -> Unit,
+) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            // I due campi e il pulsante inverti condividono la stessa riga:
+            // il pulsante sta al centro verticale, tra partenza e arrivo.
+            Box(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = 56.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StationField(
+                        label = "Partenza",
+                        value = state.fromQuery,
+                        onValueChange = { onQueryChange(SearchField.FROM, it) },
+                        onFocused = { onFieldFocused(SearchField.FROM) },
+                        onClear = { onClearField(SearchField.FROM) },
+                    )
+                    StationField(
+                        label = "Arrivo",
+                        value = state.toQuery,
+                        onValueChange = { onQueryChange(SearchField.TO, it) },
+                        onFocused = { onFieldFocused(SearchField.TO) },
+                        onClear = { onClearField(SearchField.TO) },
+                    )
+                }
+                FilledIconButton(
+                    onClick = onSwap,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(48.dp),
+                    shape = CircleShape,
+                ) {
+                    Icon(Icons.Filled.SwapVert, contentDescription = "Inverti partenza e arrivo")
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = onPickDate, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp))
+                    Text(
+                        "  " + state.dateTime.format(DATE_FMT),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(onClick = onPickTime) {
+                    Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp))
+                    Text("  " + state.dateTime.format(TIME_FMT))
+                }
+                TextButton(onClick = onNow) { Text("Adesso") }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onSearch,
+                    enabled = state.canSearch,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
+                    Text("  Cerca")
+                }
+                IconButton(onClick = onSave, enabled = state.canSearch && !state.alreadySaved) {
+                    Icon(
+                        if (state.alreadySaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                        contentDescription = if (state.alreadySaved) "Già salvata" else "Salva ricerca",
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Ricorda ultima ricerca", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (state.rememberLast) {
+                            "All'apertura ripropone le stazioni, con l'orario di adesso"
+                        } else {
+                            "All'apertura i campi restano vuoti"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.rememberLast, onCheckedChange = onToggleRemember)
+            }
+
+            state.error?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StationField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onFocused: () -> Unit,
+    onClear: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {
+            onFocused()
+            onValueChange(it)
+        },
+        label = { Text(label) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        trailingIcon = {
+            if (value.isNotEmpty()) {
+                IconButton(onClick = onClear) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Cancella $label")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun SuggestionList(
+    suggestions: List<Station>,
+    loading: Boolean,
+    onPick: (Station) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        if (loading && suggestions.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(28.dp))
+            }
+        }
+        LazyColumn(Modifier.heightIn(max = 340.dp)) {
+            items(suggestions, key = { it.locationId }) { s ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(s) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, style = MaterialTheme.typography.bodyLarge)
+                        if (!s.trackable) {
+                            // Senza codice RFI il treno non è tracciabile: meglio dirlo prima.
+                            Text(
+                                "Senza dati in tempo reale",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryAndSaved(
+    tab: Int,
+    onTabChange: (Int) -> Unit,
+    history: List<SearchHistoryEntity>,
+    saved: List<SavedSearchEntity>,
+    onPick: (Station, Station) -> Unit,
+    onDeleteHistory: (Long) -> Unit,
+    onClearHistory: () -> Unit,
+    onDeleteSaved: (Long) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { onTabChange(0) }, text = { Text("Cronologia") })
+            Tab(selected = tab == 1, onClick = { onTabChange(1) }, text = { Text("Salvate") })
+        }
+
+        if (tab == 0) {
+            if (history.isEmpty()) {
+                EmptyHint("Le ultime 10 ricerche compaiono qui")
+            } else {
+                LazyColumn {
+                    items(history, key = { it.id }) { h ->
+                        PairRow(
+                            title = "${h.from.name} → ${h.to.name}",
+                            onClick = { onPick(h.from.toStation(), h.to.toStation()) },
+                            onDelete = { onDeleteHistory(h.id) },
+                        )
+                    }
+                    item {
+                        TextButton(onClick = onClearHistory, modifier = Modifier.padding(8.dp)) {
+                            Text("Svuota cronologia")
+                        }
+                    }
+                }
+            }
+        } else {
+            if (saved.isEmpty()) {
+                EmptyHint("Salva una ricerca col segnalibro per ritrovarla qui")
+            } else {
+                LazyColumn {
+                    items(saved, key = { it.id }) { s ->
+                        PairRow(
+                            title = s.label,
+                            onClick = { onPick(s.from.toStation(), s.to.toStation()) },
+                            onDelete = { onDeleteSaved(s.id) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairRow(title: String, onClick: () -> Unit, onDelete: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            Modifier
+                .weight(1f)
+                .padding(vertical = 12.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Filled.DeleteOutline,
+                contentDescription = "Rimuovi",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+}
+
+@Composable
+private fun EmptyHint(text: String) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
