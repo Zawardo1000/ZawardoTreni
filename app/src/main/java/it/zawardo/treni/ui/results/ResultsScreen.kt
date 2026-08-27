@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.delayLabel
@@ -112,53 +113,39 @@ fun ResultsScreen(
                 state.error != null && state.journeys.isEmpty() ->
                     Message(state.error!!, Modifier.align(Alignment.Center))
 
-                state.journeys.isEmpty() ->
-                    Message("Nessun collegamento trovato", Modifier.align(Alignment.Center))
+                /*
+                 * Lista vuota con avviso disponibile: prima l'avviso mostrava
+                 * solo dentro la lista, quindi proprio nel caso in cui serve di
+                 * piu' — nessuna corsa trovata — l'utente leggeva "nessun
+                 * collegamento" senza sapere che la linea e' chiusa per lavori.
+                 */
+                state.journeys.isEmpty() -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "Nessun collegamento trovato",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    state.alerts.forEach { AlertCard(it) }
+                    if (state.alerts.isEmpty()) {
+                        Text(
+                            "Per questa tratta e questo orario non risultano corse. " +
+                                "Prova a cambiare data o orario.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
 
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    if (state.alerts.isNotEmpty()) {
-                        items(state.alerts, key = { it.message.take(60) }) { alert ->
-                            /*
-                             * Gli avvisi arrivano solo da Trenord ed e' l'unica
-                             * fonte che spieghi *perche'* una tratta oggi non
-                             * abbia treni: lavori, sospensioni, bus sostitutivi.
-                             */
-                            Card(
-                                Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (alert.severe) {
-                                        MaterialTheme.colorScheme.errorContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHighest
-                                    },
-                                ),
-                            ) {
-                                Column(Modifier.padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Info,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Text(
-                                            "  " + (alert.title ?: "Avviso di servizio"),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                    }
-                                    Text(
-                                        alert.message,
-                                        Modifier.padding(top = 4.dp),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    items(state.alerts, key = { it.message.take(60) }) { AlertCard(it) }
 
                     if (state.noSameDayResults) {
                         item {
@@ -354,6 +341,40 @@ private fun JourneyCard(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Avviso di servizio. Arriva solo da Trenord ed e' l'unica fonte che spieghi
+ * *perche'* una tratta oggi non abbia treni: lavori, sospensioni, sostitutivi.
+ */
+@Composable
+private fun AlertCard(alert: ServiceAlert) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (alert.severe) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+        ),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    "  " + (alert.title ?: "Avviso di servizio"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Text(
+                alert.message,
+                Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

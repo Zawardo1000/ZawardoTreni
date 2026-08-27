@@ -51,9 +51,17 @@ private fun parseDuration(s: String?): Duration? {
 private fun TrenordStationDto.toStation() = Station(
     // station_id e' il codice RFI: aggancia direttamente il resto dell'app.
     rfiCode = stationId?.takeIf { it.isNotBlank() },
-    // Trenord non espone il locationId del BFF Le Frecce; si ricostruisce dal
-    // codice RFI con la stessa relazione verificata altrove.
-    locationId = stationId?.removePrefix("S")?.toLongOrNull()?.let { 830_000_000L + it } ?: 0L,
+    /*
+     * locationId resta 0: e' l'identificativo del BFF Le Frecce e Trenord non
+     * lo espone.
+     *
+     * Ricavarlo per formula dal codice RFI sembrava funzionare ma e' falso:
+     * Milano Dateo ha codice S01650 e locationId 830001665, non 830001650.
+     * Un id inventato non da' errore, punta a un'ALTRA stazione — ed e'
+     * esattamente il tipo di guasto che non si vede finche' non produce
+     * risultati plausibili e sbagliati.
+     */
+    locationId = 0L,
     name = name.orEmpty().lowercase().replaceFirstChar { it.uppercase() },
 )
 
