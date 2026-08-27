@@ -16,6 +16,7 @@ import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.consolidate
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -128,12 +129,19 @@ private fun FermataDto.toStop() = Stop(
         ?: binarioProgrammatoArrivoDescrizione,
     actualPlatform = binarioEffettivoPartenzaDescrizione
         ?: binarioEffettivoArrivoDescrizione,
+    /*
+     * `actualFermataType` dice se la fermata e' stata effettuata, non dove sia
+     * il treno adesso. Il 2 significa "effettuata ma non rilevata": gli orari
+     * sono ricostruiti. Leggerlo come posizione corrente riempiva il percorso
+     * di "sei qui" - su un IC per la Sicilia erano cinque, da Pisa in giu',
+     * mentre il treno era gia' in vista di Catania.
+     */
     status = when (actualFermataType) {
-        1 -> StopStatus.DONE
-        2 -> StopStatus.CURRENT
+        1, 2 -> StopStatus.DONE
         3 -> StopStatus.CANCELLED
         else -> StopStatus.FUTURE
     },
+    detected = actualFermataType != 2,
 )
 
 /**
@@ -174,7 +182,8 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
         // Le soppresse non sono in `fermate`: vanno riunite e riordinate.
         stops = (fermate + fermateSoppresse)
             .map { it.toStop().projectedBy(ritardo) }
-            .sortedBy { it.index },
+            .sortedBy { it.index }
+            .consolidate(),
     )
 }
 

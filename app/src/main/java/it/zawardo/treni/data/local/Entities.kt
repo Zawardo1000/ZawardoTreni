@@ -92,3 +92,22 @@ data class FavoriteTrainEntity(
     @ColumnInfo(name = "destination_name") val destinationName: String?,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
+
+/**
+ * Treni aperti di recente.
+ *
+ * ViaggiaTreno cerca solo per numero esatto: "282" non restituisce nulla, quindi
+ * un autocompletamento vero non si puo' chiedere a lui. Lo si costruisce su
+ * quello che l'app ha gia' visto passare, che poi e' l'unico insieme che
+ * interessa davvero a chi cerca: i suoi treni.
+ *
+ * Come i preferiti, si tiene solo il numero piu' una descrizione d'appoggio.
+ */
+@Entity(tableName = "recent_trains")
+data class RecentTrainEntity(
+    @PrimaryKey val number: String,
+    val label: String?,
+    @ColumnInfo(name = "origin_name") val originName: String?,
+    @ColumnInfo(name = "destination_name") val destinationName: String?,
+    @ColumnInfo(name = "opened_at") val openedAt: Long,
+)

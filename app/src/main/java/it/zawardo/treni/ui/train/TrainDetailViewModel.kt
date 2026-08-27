@@ -33,7 +33,7 @@ class TrainDetailViewModel(
 
     private val trains = ServiceLocator.trainStatusRepository
     private val trenord = ServiceLocator.trenordRepository
-    private val favorites = ServiceLocator.trainFavorites
+    private val memory = ServiceLocator.trainMemory
 
     private val _state = MutableStateFlow(TrainDetailUiState())
     val state: StateFlow<TrainDetailUiState> = _state.asStateFlow()
@@ -42,7 +42,7 @@ class TrainDetailViewModel(
      * Preferito o no, letto dal database e non tenuto a parte: la stellina
      * resta d'accordo con la lista anche se il treno viene tolto da li'.
      */
-    val isFavorite: StateFlow<Boolean> = favorites.isFavorite(trainNumber)
+    val isFavorite: StateFlow<Boolean> = memory.isFavorite(trainNumber)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var autoRefresh: Job? = null
@@ -61,7 +61,7 @@ class TrainDetailViewModel(
     fun toggleFavorite() {
         val wanted = !isFavorite.value
         viewModelScope.launch {
-            favorites.toggle(trainNumber, wanted, _state.value.status, System.currentTimeMillis())
+            memory.toggleFavorite(trainNumber, wanted, _state.value.status, System.currentTimeMillis())
         }
     }
 
@@ -88,6 +88,12 @@ class TrainDetailViewModel(
                     }
                     return@launch
                 }
+
+            if (status != null) {
+                runCatching {
+                    memory.recordOpened(trainNumber, status, System.currentTimeMillis())
+                }
+            }
 
             _state.update {
                 it.copy(

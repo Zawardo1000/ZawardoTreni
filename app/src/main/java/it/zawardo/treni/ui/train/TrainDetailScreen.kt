@@ -414,6 +414,17 @@ private fun StopRow(
             } else {
                 TimeLine(stop, isFirst, isLast)
                 PlatformLine(stop)
+                if (!stop.detected) {
+                    Text(
+                        if (stop.effectiveArrival != null || stop.effectiveDeparture != null) {
+                            "Orari ricostruiti: passaggio non rilevato"
+                        } else {
+                            "Passaggio non rilevato"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

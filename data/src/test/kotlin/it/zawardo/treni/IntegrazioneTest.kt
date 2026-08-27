@@ -12,6 +12,9 @@ import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.minutesFrom
+import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
+import it.zawardo.treni.domain.model.consolidate
 import it.zawardo.treni.domain.model.trainNumberOf
 import it.zawardo.treni.domain.model.stillCatchable
 import kotlinx.coroutines.runBlocking
@@ -238,6 +241,115 @@ class IntegrazioneTest {
                 superstitiPassati.joinToString { it.scheduledTime.orEmpty() },
             superstitiPassati.isEmpty(),
         )
+    }
+
+    /**
+     * Il percorso deve leggersi come un viaggio: tutto quello che sta prima di
+     * dove si trova il treno e' passato, e la posizione e' una sola. I dati
+     * grezzi non lo garantiscono.
+     */
+    @Test
+    fun `il percorso resta coerente anche coi buchi in mezzo`() {
+        fun fermata(
+            i: Int,
+            nome: String,
+            stato: StopStatus,
+            arrivoReale: LocalDateTime? = null,
+            partenzaReale: LocalDateTime? = null,
+            ritardo: Int = 0,
+        ) = Stop(
+            index = i,
+            stationName = nome,
+            stationCode = null,
+            scheduledArrival = LocalDateTime.of(2026, 8, 26, 20, i),
+            actualArrival = arrivoReale,
+            arrivalDelayMinutes = ritardo,
+            scheduledDeparture = LocalDateTime.of(2026, 8, 26, 20, i + 1),
+            actualDeparture = partenzaReale,
+            departureDelayMinutes = ritardo,
+            scheduledPlatform = null,
+            actualPlatform = null,
+            status = stato,
+            projectedArrival = LocalDateTime.of(2026, 8, 26, 20, i).plusMinutes(ritardo.toLong()),
+        )
+
+        val quando = LocalDateTime.of(2026, 8, 26, 21, 0)
+        val origine = fermata(1, "Origine", StopStatus.DONE, partenzaReale = quando)
+        val senzaOrari = fermata(2, "Piacenza", StopStatus.DONE)
+        val dataFutura = fermata(3, "Buco", StopStatus.FUTURE, ritardo = 9)
+        val soppressa = fermata(4, "Soppressa", StopStatus.CANCELLED)
+        val ultimaFatta = fermata(5, "Acireale", StopStatus.DONE, arrivoReale = quando)
+        val avvenire = fermata(6, "Catania", StopStatus.FUTURE, ritardo = 9)
+
+        val out = listOf(origine, senzaOrari, dataFutura, soppressa, ultimaFatta, avvenire)
+            .consolidate()
+            .associateBy { it.stationName }
+
+        assertTrue(
+            "una fermata gia' superata resta disegnata come da fare",
+            out.getValue("Buco").status == StopStatus.DONE,
+        )
+        assertTrue(
+            "sul passato non si puo' proiettare un ritardo: e' inventato",
+            out.getValue("Buco").arrivalDelayMinutes == 0 &&
+                out.getValue("Buco").projectedArrival == null,
+        )
+        assertTrue(
+            "senza un solo orario reale il passaggio non e' stato rilevato",
+            !out.getValue("Piacenza").detected,
+        )
+        assertTrue(
+            "una fermata con orari reali resta un dato misurato",
+            out.getValue("Acireale").detected && out.getValue("Origine").detected,
+        )
+        assertTrue(
+            "una soppressa non e' un buco da colmare",
+            out.getValue("Soppressa").status == StopStatus.CANCELLED,
+        )
+        assertTrue(
+            "la posizione deve essere l'ultima fermata effettuata",
+            out.getValue("Acireale").status == StopStatus.CURRENT,
+        )
+        assertTrue(
+            "il treno non e' ancora a Catania",
+            out.getValue("Catania").status == StopStatus.FUTURE,
+        )
+        assertTrue(
+            "una posizione sola, non una per ogni buco",
+            out.values.count { it.status == StopStatus.CURRENT } == 1,
+        )
+    }
+
+    @Test
+    fun `sui treni in corsa il percorso non torna indietro`() = runBlocking {
+        val inCorsa = trains.departures("S01700")
+            .take(6)
+            .mapNotNull { runCatching { trains.status(it.trainRef) }.getOrNull() }
+            .filter { s -> s.stops.any { it.status == StopStatus.DONE } }
+
+        println("=== COERENZA PERCORSI ===")
+        assertTrue("nessun treno in corsa da controllare", inCorsa.isNotEmpty())
+
+        for (s in inCorsa) {
+            val utili = s.stops.filter { it.status != StopStatus.CANCELLED }
+            val ultimaFatta = utili.indexOfLast {
+                it.status == StopStatus.DONE || it.status == StopStatus.CURRENT
+            }
+            val primaDaFare = utili.indexOfFirst { it.status == StopStatus.FUTURE }
+            val correnti = utili.count { it.status == StopStatus.CURRENT }
+            println("  " + s.label + ": " + utili.size + " fermate, ultima fatta " +
+                ultimaFatta + ", prima da fare " + primaDaFare + ", correnti " + correnti)
+
+            assertTrue(
+                s.label + ": una fermata da fare (" + primaDaFare + ") prima di una fatta (" +
+                    ultimaFatta + "): il percorso torna indietro",
+                primaDaFare < 0 || primaDaFare > ultimaFatta,
+            )
+            assertTrue(
+                s.label + ": " + correnti + " fermate segnate come posizione corrente",
+                correnti <= 1,
+            )
+        }
     }
 
     @Test

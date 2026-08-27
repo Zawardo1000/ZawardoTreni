@@ -7,7 +7,7 @@ import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.SearchStore
 import it.zawardo.treni.data.repository.StationRepository
-import it.zawardo.treni.data.repository.TrainFavoritesStore
+import it.zawardo.treni.data.repository.TrainMemoryStore
 import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.domain.model.Station
@@ -23,7 +23,7 @@ object ServiceLocator {
         private set
     lateinit var searchStore: SearchStore
         private set
-    lateinit var trainFavorites: TrainFavoritesStore
+    lateinit var trainMemory: TrainMemoryStore
         private set
 
     /**
@@ -55,6 +55,6 @@ object ServiceLocator {
         val db = TreniDatabase.get(context)
         settings = SettingsStore(context.applicationContext)
         searchStore = SearchStore(db.searchHistoryDao(), db.savedSearchDao(), db.stationDao())
-        trainFavorites = TrainFavoritesStore(db.favoriteTrainDao())
+        trainMemory = TrainMemoryStore(db.favoriteTrainDao(), db.recentTrainDao())
     }
 }

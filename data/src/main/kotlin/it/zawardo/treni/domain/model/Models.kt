@@ -157,6 +157,15 @@ data class Stop(
      */
     val projectedArrival: LocalDateTime? = null,
     val projectedDeparture: LocalDateTime? = null,
+    /**
+     * Falso quando la fermata risulta effettuata ma senza rilevamento.
+     *
+     * Gli orari ci sono e sono l'unica cosa che si ha, ma sono ricostruiti, non
+     * misurati: succede dove mancano punti di rilevamento e sulla traversata in
+     * traghetto. Vale la pena dirlo, perche' altrimenti quei minuti sembrano
+     * precisi quanto gli altri.
+     */
+    val detected: Boolean = true,
 ) {
     /** Se true, i minuti mostrati sono una proiezione e non una misura. */
     val isEstimate: Boolean get() = status == StopStatus.FUTURE

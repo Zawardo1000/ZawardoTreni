@@ -14,8 +14,9 @@ import androidx.sqlite.execSQL
         SavedSearchEntity::class,
         StationEntity::class,
         FavoriteTrainEntity::class,
+        RecentTrainEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
@@ -23,6 +24,7 @@ abstract class TreniDatabase : RoomDatabase() {
     abstract fun savedSearchDao(): SavedSearchDao
     abstract fun stationDao(): StationDao
     abstract fun favoriteTrainDao(): FavoriteTrainDao
+    abstract fun recentTrainDao(): RecentTrainDao
 
     companion object {
         /**
@@ -65,6 +67,21 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 aggiunge i treni aperti di recente, per l'autocompletamento. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `recent_trains` (" +
+                        "`number` TEXT NOT NULL, " +
+                        "`label` TEXT, " +
+                        "`origin_name` TEXT, " +
+                        "`destination_name` TEXT, " +
+                        "`opened_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`number`))",
+                )
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -72,7 +89,7 @@ abstract class TreniDatabase : RoomDatabase() {
                 context.applicationContext,
                 TreniDatabase::class.java,
                 "treni.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }

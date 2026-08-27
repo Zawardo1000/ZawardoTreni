@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,10 +16,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +44,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.FavoriteTrainEntity
+import it.zawardo.treni.data.repository.TrainSuggestion
 import it.zawardo.treni.domain.model.TrainRef
 import java.time.Instant
 import java.time.LocalDate
@@ -96,6 +100,17 @@ fun TrainNumberScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            if (state.suggestionsOpen && state.suggestions.isNotEmpty()) {
+                SuggestionCard(
+                    suggestions = state.suggestions,
+                    onPick = {
+                        keyboard?.hide()
+                        focus.clearFocus(force = true)
+                        vm.pick(it)
+                    },
+                )
+            }
+
             Text(
                 "Puoi incollare l'etichetta intera, sigla compresa. " +
                     "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
@@ -137,7 +152,7 @@ fun TrainNumberScreen(
                             onOpen = {
                                 keyboard?.hide()
                                 focus.clearFocus(force = true)
-                                vm.searchFavorite(fav.number)
+                                vm.pick(fav.number)
                             },
                             onRemove = { vm.removeFavorite(fav.number) },
                         )
@@ -219,6 +234,53 @@ private fun FavoriteCard(
                     contentDescription = "Togli dai preferiti",
                     tint = MaterialTheme.colorScheme.tertiary,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * I suggerimenti mentre si digita.
+ *
+ * Non vengono da ViaggiaTreno, che cerca solo per numero esatto, ma da quello
+ * che l'app ha gia' visto: preferiti e corse aperte di recente. E' un insieme
+ * piccolo e per questo utile, perche' sono i treni di chi sta cercando.
+ */
+@Composable
+private fun SuggestionCard(suggestions: List<TrainSuggestion>, onPick: (String) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.heightIn(max = 260.dp)) {
+            suggestions.forEachIndexed { i, s ->
+                if (i > 0) HorizontalDivider()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(s.number) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (s.favorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (s.favorite) MaterialTheme.colorScheme.tertiary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(
+                            s.label ?: "Treno ${s.number}",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        s.description?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

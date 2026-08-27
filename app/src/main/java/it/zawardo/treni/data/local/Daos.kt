@@ -109,3 +109,38 @@ interface FavoriteTrainDao {
     @Query("DELETE FROM favorite_trains WHERE number = :number")
     suspend fun delete(number: String)
 }
+
+@Dao
+interface RecentTrainDao {
+
+    /** Prefisso sul numero: e' l'unico ordinamento che ha senso mentre si digita. */
+    @Query(
+        """
+        SELECT * FROM recent_trains
+        WHERE number LIKE :prefix || '%'
+        ORDER BY opened_at DESC LIMIT :limit
+        """
+    )
+    suspend fun startingWith(prefix: String, limit: Int = RECENT_LIMIT): List<RecentTrainEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: RecentTrainEntity)
+
+    @Query(
+        """
+        DELETE FROM recent_trains WHERE number NOT IN (
+            SELECT number FROM recent_trains ORDER BY opened_at DESC LIMIT :limit
+        )
+        """
+    )
+    suspend fun trim(limit: Int = RECENT_LIMIT)
+
+    /** REPLACE sulla chiave riusa la riga: riaprire un treno lo risale, non lo duplica. */
+    @Transaction
+    suspend fun record(entity: RecentTrainEntity) {
+        insert(entity)
+        trim()
+    }
+
+    companion object { const val RECENT_LIMIT = 20 }
+}
