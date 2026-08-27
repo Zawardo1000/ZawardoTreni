@@ -91,6 +91,8 @@ fun TrainDetailScreen(
     date: LocalDate,
     boardingRfi: String? = null,
     boardingName: String? = null,
+    /** Dove si scende: su una soluzione con cambio e' la stazione del cambio. */
+    alightingRfi: String? = null,
     /** Corsa gia' identificata: presente quando si arriva da un elenco di corse. */
     originCode: String? = null,
     departureMillis: Long? = null,
@@ -102,7 +104,8 @@ fun TrainDetailScreen(
     val vm: TrainDetailViewModel = viewModel(
         factory = viewModelFactory { initializer {
             TrainDetailViewModel(
-                trainNumber, date, boardingRfi, boardingAt, boardingName, originCode, departureMillis,
+                trainNumber, date, boardingRfi, boardingAt, boardingName, alightingRfi,
+                originCode, departureMillis,
             )
         } },
     )
@@ -240,9 +243,19 @@ fun TrainDetailScreen(
                             // le fermate che ViaggiaTreno elenca come soppresse.
                             trainCancelled = status.state == TrainState.CANCELLED,
                             onOpenStation = onOpenStation,
-                            // La fermata da cui sali e' quella che stai cercando
-                            // nell'elenco: va trovata senza doverla leggere.
-                            isBoarding = boardingRfi != null && stop.stationCode == boardingRfi,
+                            /*
+                             * I due capi del tuo viaggio dentro questa corsa.
+                             *
+                             * Sono le uniche due righe che stai cercando in un
+                             * elenco che puo' averne venti, e con un cambio la
+                             * discesa conta piu' della salita: e' li' che devi
+                             * scendere per prendere l'altro treno.
+                             */
+                            // Senza guardare le maiuscole: i codici arrivano da
+                            // quattro sorgenti diverse e basta una minuscola
+                            // perche' l'evidenziazione sparisca in silenzio.
+                            isBoarding = stop.stationCode?.equals(boardingRfi, true) == true,
+                            isAlighting = stop.stationCode?.equals(alightingRfi, true) == true,
                         )
                     }
                     state.error?.let {
@@ -328,6 +341,7 @@ private fun StopRow(
     isFirst: Boolean,
     isLast: Boolean,
     isBoarding: Boolean = false,
+    isAlighting: Boolean = false,
     trainCancelled: Boolean = false,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
@@ -359,7 +373,7 @@ private fun StopRow(
                 }
             )
             .then(
-                if (isBoarding) {
+                if (isBoarding || isAlighting) {
                     Modifier.background(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
                         RoundedCornerShape(8.dp),
@@ -435,12 +449,26 @@ private fun StopRow(
             Text(
                 stop.stationName,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (current || isBoarding) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (current || isBoarding || isAlighting) {
+                    FontWeight.Bold
+                } else {
+                    FontWeight.Normal
+                },
                 textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                 color = if (cancelled) scheme.error else scheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+
+            // In neretto sono uguali: a dire quale sia quale sono due parole.
+            if (isBoarding || isAlighting) {
+                Text(
+                    if (isBoarding) "Sali qui" else "Scendi qui",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = scheme.primary,
+                )
+            }
 
             if (stopCancelled) {
                 Text(

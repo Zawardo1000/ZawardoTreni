@@ -51,6 +51,8 @@ class TrainDetailViewModel(
     private val boardingAt: LocalDateTime? = null,
     /** Nome della stazione di salita: serve a Italo, che di suo non lo dice. */
     private val boardingName: String? = null,
+    /** Dove si scende: con Italo e' anche il modo piu' diretto di avere il percorso. */
+    private val alightingCode: String? = null,
     /**
      * Corsa gia' identificata da chi ci ha portati qui.
      *
@@ -126,7 +128,7 @@ class TrainDetailViewModel(
                     // risponderebbe con quella di oggi.
                     ?: trenord.trainStatus(trainNumber, date)
                     // Ultima: le corse Italo, che nelle altre fonti non esistono.
-                    ?: italo.trainStatus(trainNumber, date, boardingCode, boardingName)
+                    ?: italo.trainStatus(trainNumber, date, boardingCode, boardingName, alightingCode)
             }
                 .getOrElse { e ->
                     _state.update {

@@ -99,6 +99,11 @@ data class ResultsRoute(
  *
  * [boardingRfi] serve comunque anche a mostrare il ritardo **alla fermata
  * dell'utente** invece di quello globale, e a sapere quando smettere di seguire.
+ *
+ * [alightingRfi] e' l'altro capo del pezzo che si percorre. In una soluzione con
+ * cambio e' la stazione dove si scende per prendere l'altro treno, ed e' la
+ * fermata piu' importante di tutto l'elenco: senza, il percorso mostra venti
+ * nomi e nessuno dice quale sia il tuo.
  */
 @Serializable
 data class TrainRoute(
@@ -106,6 +111,7 @@ data class TrainRoute(
     val dateEpochDay: Long,
     val boardingRfi: String? = null,
     val boardingName: String? = null,
+    val alightingRfi: String? = null,
     val originCode: String? = null,
     val departureMillis: Long? = null,
     val boardingEpochSec: Long? = null,
@@ -274,6 +280,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     date = LocalDate.ofEpochDay(r.dateEpochDay),
                     boardingRfi = r.boardingRfi,
                     boardingName = r.boardingName,
+                    alightingRfi = r.alightingRfi,
                     originCode = r.originCode,
                     departureMillis = r.departureMillis,
                     boardingAt = r.boardingEpochSec?.let {

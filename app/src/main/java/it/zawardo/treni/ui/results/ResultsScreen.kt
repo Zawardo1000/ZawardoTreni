@@ -234,6 +234,7 @@ fun ResultsScreen(
                                     dateEpochDay = row.journey.departure.toLocalDate().toEpochDay(),
                                     boardingRfi = leg.from.rfiCode,
                                     boardingName = leg.from.name,
+                                    alightingRfi = leg.to.rfiCode,
                                     // Il BFF non da' la corsa, solo il numero:
                                     // dove e quando si sale e' cio' che
                                     // distingue due treni omonimi.
