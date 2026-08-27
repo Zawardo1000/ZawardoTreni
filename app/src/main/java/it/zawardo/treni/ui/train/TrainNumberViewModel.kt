@@ -25,8 +25,15 @@ class TrainNumberViewModel : ViewModel() {
     val state: StateFlow<TrainNumberUiState> = _state.asStateFlow()
 
     fun onQueryChange(text: String) {
-        // Solo cifre: i numeri di treno non contengono lettere e la tastiera e' numerica.
-        val cleaned = text.filter { it.isDigit() }.take(6)
+        /*
+         * I numeri di treno NON sono solo cifre: esistono suffissi di lettera
+         * ("888A"), sigle di linea e corse straordinarie. Filtrare le lettere
+         * rendeva quelle corse semplicemente introvabili.
+         *
+         * Si tolgono solo spazi e punteggiatura, e si normalizza in maiuscolo
+         * perche' e' cosi' che ViaggiaTreno li indicizza.
+         */
+        val cleaned = text.filter { it.isLetterOrDigit() }.take(10).uppercase()
         _state.update { it.copy(query = cleaned, message = null) }
     }
 

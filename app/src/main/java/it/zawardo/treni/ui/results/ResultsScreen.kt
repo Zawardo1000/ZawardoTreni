@@ -13,12 +13,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,6 +55,7 @@ import java.util.Locale
 
 private val TIME = DateTimeFormatter.ofPattern("HH:mm")
 private val DATE = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
+private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIAN)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +119,39 @@ fun ResultsScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    if (state.noSameDayResults) {
+                        item {
+                            /*
+                             * Il caso eccezionale: linea chiusa per lavori, servizio
+                             * sostituito, ultimo treno gia' passato. Senza dirlo,
+                             * due corse notturne di domani sembrano un guasto.
+                             */
+                            Card(
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                ),
+                            ) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(
+                                        "Nessun collegamento per " +
+                                            departure.format(FULL_DATE),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                    Text(
+                                        "Le corse qui sotto sono di un altro giorno. " +
+                                            "Può succedere con lavori in linea, servizi " +
+                                            "sostitutivi o quando l'ultima corsa è già passata.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if (!state.realtimeAvailable) {
                         item {
                             // Meglio dirlo che lasciar credere che tutti i treni siano in orario.
@@ -138,7 +174,7 @@ fun ResultsScreen(
                     }
 
                     items(state.journeys, key = { it.key }) { row ->
-                        JourneyCard(row) { number, leg ->
+                        JourneyCard(row, requestedDate = departure.toLocalDate()) { number, leg ->
                             onOpenTrain(
                                 number,
                                 row.journey.departure.toLocalDate(),
@@ -164,18 +200,40 @@ fun ResultsScreen(
 }
 
 @Composable
-private fun JourneyCard(row: JourneyRow, onOpenTrain: (String, Leg) -> Unit) {
+private fun JourneyCard(
+    row: JourneyRow,
+    requestedDate: LocalDate,
+    onOpenTrain: (String, Leg) -> Unit,
+) {
     val j: Journey = row.journey
+    val otherDay = j.departure.toLocalDate() != requestedDate
+
     Card(
         Modifier
             .fillMaxWidth()
             .clickable {
-                j.legs.firstOrNull()?.let { leg ->
+                // Solo i treni hanno un dettaglio: aprirlo per un bus porterebbe
+                // a una schermata che dice "non trovato".
+                j.legs.firstOrNull { it.isTrain }?.let { leg ->
                     leg.trainNumber?.let { onOpenTrain(it, leg) }
                 }
             },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            if (otherDay) {
+                /*
+                 * Il BFF puo' restituire corse di un altro giorno quando per quello
+                 * richiesto non c'e' nulla. Senza questa riga si legge "01:01" e si
+                 * capisce stanotte, mentre e' la notte dopo.
+                 */
+                Text(
+                    j.departure.format(FULL_DATE).replaceFirstChar { c -> c.uppercase() },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -203,8 +261,21 @@ private fun JourneyCard(row: JourneyRow, onOpenTrain: (String, Leg) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 j.legs.forEach { leg ->
                     AssistChip(
+                        // Un bus non ha dettaglio da aprire: il chip resta inerte.
+                        enabled = leg.isTrain,
                         onClick = { leg.trainNumber?.let { onOpenTrain(it, leg) } },
                         label = { Text(leg.label, style = MaterialTheme.typography.labelMedium) },
+                        leadingIcon = if (leg.isTrain) {
+                            null
+                        } else {
+                            {
+                                Icon(
+                                    Icons.Filled.DirectionsBus,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        },
                         colors = AssistChipDefaults.assistChipColors(
                             labelColor = MaterialTheme.colorScheme.onSurface,
                         ),
@@ -213,6 +284,14 @@ private fun JourneyCard(row: JourneyRow, onOpenTrain: (String, Leg) -> Unit) {
             }
 
             when {
+                // Va detto, invece di lasciare la riga vuota come se
+                // l'informazione stesse ancora arrivando.
+                !row.realtimePossible -> Text(
+                    "Servizio sostitutivo: nessun dato in tempo reale",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
                 row.loadingStatus -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                     Text(

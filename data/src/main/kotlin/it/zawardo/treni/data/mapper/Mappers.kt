@@ -11,6 +11,7 @@ import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
+import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
@@ -57,13 +58,21 @@ fun SolutionDto.toJourney(): Journey? {
         .mapNotNull { node ->
             val from = node.startLocation?.toStation() ?: return@mapNotNull null
             val to = node.endLocation?.toStation() ?: return@mapNotNull null
+            val mean = node.offeredTransportMeanDeparture
+            val cls = mean?.classification
             Leg(
-                trainNumber = node.offeredTransportMeanDeparture?.name?.takeIf { it.isNotBlank() },
-                category = node.offeredTransportMeanDeparture?.classification?.acronym,
+                trainNumber = mean?.name?.takeIf { it.isNotBlank() },
+                category = cls?.acronym,
                 from = from,
                 to = to,
                 departure = node.departureTime.parseIso() ?: dep,
                 arrival = node.arrivalTime.parseIso() ?: arr,
+                kind = when (cls?.type?.uppercase()) {
+                    "BUS" -> TransportKind.BUS
+                    "TRAIN", null -> TransportKind.TRAIN
+                    else -> TransportKind.OTHER
+                },
+                kindLabel = cls?.classification,
             )
         }
 

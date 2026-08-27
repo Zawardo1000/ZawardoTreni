@@ -126,7 +126,22 @@ class BoardViewModel : ViewModel() {
                 it.copy(
                     loading = false,
                     entries = entries,
-                    message = if (entries.isEmpty()) "Nessun treno nel prossimo intervallo." else null,
+                    /*
+                     * Un tabellone vuoto ha due cause indistinguibili dalla
+                     * risposta: nessun treno adesso, oppure stazione che
+                     * ViaggiaTreno non copre affatto. Succede sulle fermate del
+                     * Passante milanese servite da Trenord, che hanno un codice
+                     * RFI ma nessun dato: dirlo evita di far cercare un guasto
+                     * che non c'e'.
+                     */
+                    message = if (entries.isEmpty()) {
+                        "Nessun treno in arrivo nel prossimo intervallo.\n\n" +
+                            "Alcune fermate urbane e regionali non sono coperte da " +
+                            "ViaggiaTreno: per quelle il tabellone resta vuoto anche " +
+                            "quando i treni ci sono."
+                    } else {
+                        null
+                    },
                 )
             }
         }

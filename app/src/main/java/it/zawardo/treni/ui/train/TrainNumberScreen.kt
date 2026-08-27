@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -69,11 +70,15 @@ fun TrainNumberScreen(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Numero treno") },
-                placeholder = { Text("es. 9505") },
+                placeholder = { Text("es. 9505, 2618, 888A") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
+                    // Non Number: con la tastiera numerica le lettere di "888A"
+                    // non erano nemmeno digitabili.
+                    keyboardType = KeyboardType.Text,
+                    capitalization = KeyboardCapitalization.Characters,
+                    autoCorrectEnabled = false,
                     imeAction = ImeAction.Search,
                 ),
                 keyboardActions = KeyboardActions(

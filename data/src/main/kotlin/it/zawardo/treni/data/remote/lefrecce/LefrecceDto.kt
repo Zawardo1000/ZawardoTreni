@@ -82,7 +82,17 @@ data class TransportMeanDto(
 
 @Serializable
 data class ClassificationDto(
-    /** FR, FA, FB, IC, ICN, EC, REG, RE, RV, MET... */
+    /** FR, FA, FB, IC, ICN, EC, REG, RE, RV, MET, BU, UB... */
     val acronym: String? = null,
     val name: String? = null,
+    /**
+     * TRAIN, BUS, UNCLASSIFIED.
+     *
+     * Le tratte sostitutive sono BUS e i collegamenti urbani UNCLASSIFIED:
+     * non hanno un numero treno interrogabile e vanno distinte, altrimenti
+     * l'app promette un tempo reale che per loro non esiste.
+     */
+    val type: String? = null,
+    /** Testo leggibile: "Autobus", "Urbano", "Frecciarossa"... */
+    val classification: String? = null,
 )

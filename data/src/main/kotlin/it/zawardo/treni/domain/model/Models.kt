@@ -30,9 +30,21 @@ data class Journey(
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
     val isDirect: Boolean get() = legs.size <= 1
+
+    /** Se nessuna tratta e' un treno, non c'e' alcun tempo reale da mostrare. */
+    val hasTrain: Boolean get() = legs.any { it.isTrain }
 }
 
-/** Una singola tratta servita da un treno. */
+/**
+ * Che mezzo serve una tratta.
+ *
+ * Non tutte le soluzioni sono treni: i bus sostitutivi e i collegamenti urbani
+ * non hanno un numero interrogabile su ViaggiaTreno. Confonderli con i treni
+ * significa promettere un tempo reale che per loro non esistera' mai.
+ */
+enum class TransportKind { TRAIN, BUS, OTHER }
+
+/** Una singola tratta del viaggio. */
 data class Leg(
     val trainNumber: String?,
     val category: String?,
@@ -40,9 +52,20 @@ data class Leg(
     val to: Station,
     val departure: LocalDateTime,
     val arrival: LocalDateTime,
+    val kind: TransportKind = TransportKind.TRAIN,
+    /** Testo leggibile fornito dal BFF: "Autobus", "Urbano", "Frecciarossa". */
+    val kindLabel: String? = null,
 ) {
-    /** Es. "FR 9505". */
-    val label: String get() = listOfNotNull(category, trainNumber).joinToString(" ").ifBlank { "—" }
+    /** Solo i treni si possono seguire in tempo reale. */
+    val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
+
+    /** Es. "FR 9505", "Bus 888A", "Urbano". */
+    val label: String
+        get() = when (kind) {
+            TransportKind.TRAIN -> listOfNotNull(category, trainNumber).joinToString(" ")
+            TransportKind.BUS -> listOfNotNull("Bus", trainNumber).joinToString(" ")
+            TransportKind.OTHER -> kindLabel ?: "Collegamento"
+        }.ifBlank { kindLabel ?: "—" }
 }
 
 /** Riferimento univoco a una corsa, necessario per interrogare ViaggiaTreno. */

@@ -28,6 +28,12 @@ data class JourneyRow(
     val key: String
         get() = journey.departure.toString() + "|" +
             journey.legs.joinToString(",") { it.trainNumber ?: "?" }
+
+    /**
+     * Bus sostitutivi e collegamenti urbani non esistono su ViaggiaTreno.
+     * Lasciare "stato in aggiornamento" all'infinito sarebbe una bugia.
+     */
+    val realtimePossible: Boolean get() = journey.hasTrain
 }
 
 data class ResultsUiState(
@@ -39,6 +45,15 @@ data class ResultsUiState(
     val noMoreEarlier: Boolean = false,
     val noMoreLater: Boolean = false,
     val error: String? = null,
+    /**
+     * Vero quando nessuna corsa cade nel giorno richiesto.
+     *
+     * Succede nei casi eccezionali: linea chiusa per lavori, servizio sostituito
+     * da bus, ultimo treno gia' passato. Il BFF non manda alcun avviso, quindi
+     * la condizione va dedotta e dichiarata: due corse notturne di domani,
+     * mostrate senza spiegazione, sembrano un guasto dell'app.
+     */
+    val noSameDayResults: Boolean = false,
 )
 
 class ResultsViewModel(
@@ -83,8 +98,16 @@ class ResultsViewModel(
                     return@launch
                 }
 
-            val rows = list.map { JourneyRow(it, loadingStatus = isToday) }
-            _state.update { it.copy(loading = false, journeys = rows) }
+            val rows = list.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
+            val requestedDay = departure.toLocalDate()
+            _state.update {
+                it.copy(
+                    loading = false,
+                    journeys = rows,
+                    noSameDayResults = rows.isNotEmpty() &&
+                        rows.none { r -> r.journey.departure.toLocalDate() == requestedDay },
+                )
+            }
             enrich(rows)
         }
     }
@@ -126,7 +149,7 @@ class ResultsViewModel(
             }
 
             val existing = current.journeys.map { it.key }.toSet()
-            val rows = found.map { JourneyRow(it, loadingStatus = isToday) }
+            val rows = found.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
                 .filter { it.key !in existing }
 
             _state.update { s ->
@@ -152,7 +175,7 @@ class ResultsViewModel(
             val existing = current.journeys.map { it.key }.toSet()
             val rows = batch
                 .filter { it.departure.isAfter(last) }
-                .map { JourneyRow(it, loadingStatus = isToday) }
+                .map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
                 .filter { it.key !in existing }
                 .take(PAGE)
 
@@ -184,7 +207,9 @@ class ResultsViewModel(
             val enriched = coroutineScope {
                 rows.map { row ->
                     async {
-                        val number = row.journey.legs.firstOrNull()?.trainNumber
+                        // Solo i treni: interrogare ViaggiaTreno col "888A" di un bus
+                        // sostitutivo e' una chiamata sprecata che fallisce sempre.
+                        val number = row.journey.legs.firstOrNull { it.isTrain }?.trainNumber
                             ?: return@async row.copy(loadingStatus = false)
                         val status = runCatching { trains.statusByNumber(number, date) }.getOrNull()
                         row.copy(
