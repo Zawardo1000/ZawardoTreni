@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -33,7 +34,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,6 +80,27 @@ fun ResultsScreen(
         },
     )
     val state by vm.state.collectAsState()
+
+    val listState = rememberLazyListState()
+
+    /*
+     * Caricamento automatico arrivando in fondo.
+     *
+     * Il pulsante "Corse successive" resta, ma non deve essere l'unico modo:
+     * era stato segnalato come mancante e non sono riuscito a riprodurre il
+     * caso. Scorrere fino in fondo e vedere comparire altre corse funziona a
+     * prescindere da dove finisca il pulsante nel layout.
+     */
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+            info.totalItemsCount > 0 && last >= info.totalItemsCount - 2
+        }
+    }
+    LaunchedEffect(shouldLoadMore, state.journeys.size) {
+        if (shouldLoadMore && !state.loading) vm.loadLater()
+    }
 
     Scaffold(
         topBar = {
@@ -154,6 +179,7 @@ fun ResultsScreen(
 
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
