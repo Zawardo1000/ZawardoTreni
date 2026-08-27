@@ -46,12 +46,27 @@ Il progetto non richiede Android Studio. La toolchain è portabile e vive in `.t
 (esclusa dal versionamento).
 
 ```bash
-source .tools/env.sh          # JAVA_HOME, ANDROID_HOME, PATH
-./gradlew :app:assembleDebug  # APK di debug
-./gradlew :app:bundleRelease  # AAB per Play Store
+source .tools/env.sh            # JAVA_HOME, ANDROID_HOME, PATH
+./gradlew :app:assembleDebug    # APK di debug, non minificato
+./gradlew :app:assembleRelease  # APK firmato e minificato (~2,4 MB)
+./gradlew :app:bundleRelease    # AAB per Play Store
 ```
 
-Requisiti: JDK 17, Android SDK platform 36, build-tools 36.0.0.
+Requisiti: JDK 17, Android SDK platform 37, build-tools 36.0.0.
+
+La versione e' derivata da git: `versionCode` e' il numero di commit, `versionName`
+e' `1.1.<commit>`, e nella schermata Info compare lo sha esatto della build.
+
+### Firma di release
+
+Le credenziali stanno in `keystore.properties`, **non versionato**. Senza quel file
+la debug compila lo stesso e la release resta non firmata, cosi' chi clona il
+repository puo' lavorare senza possedere la chiave.
+
+R8 e' attivo in release: le regole in `app/proguard-rules.pro` proteggono i
+serializer di `kotlinx.serialization` (DTO e rotte di navigazione), le interfacce
+Retrofit e le entita' Room. Senza quelle regole l'app si rompe **solo** in release,
+a runtime.
 
 ### Test di integrazione
 

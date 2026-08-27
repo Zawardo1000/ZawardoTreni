@@ -10,3 +10,6 @@ keystore.properties
 
 # Piano di lavoro: appunti interni, non fanno parte del progetto
 PLAN.md
+
+# APK distribuibili: non vanno nel repository
+dist/

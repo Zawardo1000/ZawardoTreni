@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
@@ -27,9 +29,36 @@ val gitDate = git(
     fallback = "data sconosciuta",
 )
 
+/**
+ * Credenziali di firma lette da `keystore.properties`, fuori dal versionamento.
+ *
+ * Il file puo' mancare: chi clona il repo deve poter compilare la debug senza
+ * possedere la chiave. In quel caso la release resta non firmata invece di far
+ * fallire l'intera configurazione del progetto.
+ */
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
 android {
     namespace = "it.zawardo.treni"
     compileSdk = 37
+
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // v3 abilita la rotazione della chiave: se un domani il keystore
+                // va sostituito, si puo' fare senza perdere gli aggiornamenti.
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "it.zawardo.treni"
@@ -48,6 +77,7 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
