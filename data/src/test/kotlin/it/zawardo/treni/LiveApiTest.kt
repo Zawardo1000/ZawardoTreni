@@ -159,6 +159,51 @@ class LiveApiTest {
         assertTrue("nessuna fermata: andamentoTreno ha cambiato struttura", status.stops.isNotEmpty())
     }
 
+    /**
+     * ViaggiaTreno lascia a zero il ritardo di tutte le fermate non ancora
+     * raggiunte, anche su un treno dichiarato in ritardo. Il ricalcolo lo fa
+     * l'app: questo test verifica che lo faccia davvero.
+     */
+    @Test
+    fun `il ritardo viene proiettato sulle fermate future`() = runBlocking {
+        // Serve un treno realmente in ritardo: si cerca fra i tabelloni.
+        val board = listOf("S08409", "S01700", "S05043")
+            .flatMap { trains.departures(it) }
+
+        val delayed = board
+            .filter { it.delayMinutes >= 3 }
+            .firstNotNullOfOrNull { entry ->
+                trains.status(entry.trainRef)?.takeIf { st ->
+                    st.delayMinutes != 0 && st.stops.any { it.status == StopStatus.FUTURE }
+                }
+            }
+
+        if (delayed == null) {
+            println("\n(nessun treno in ritardo con fermate future: verifica non conclusiva)")
+            return@runBlocking
+        }
+
+        println("\n=== PROIEZIONE ${delayed.label}, ritardo dichiarato ${delayed.delayMinutes} min ===")
+        val future = delayed.stops.filter { it.status == StopStatus.FUTURE }
+        future.take(4).forEach {
+            println(
+                "  ${it.stationName.take(24).padEnd(24)} " +
+                    "previsto ${it.scheduledArrival.fmt()} -> ricalcolato ${it.effectiveArrival.fmt()} " +
+                    "(${it.arrivalDelayMinutes} min)"
+            )
+        }
+
+        assertTrue(
+            "le fermate future riportano ancora ritardo 0: la proiezione non e' stata applicata",
+            future.all { it.arrivalDelayMinutes == delayed.delayMinutes },
+        )
+        val withArrival = future.filter { it.scheduledArrival != null }
+        assertTrue(
+            "manca l'orario ricalcolato sulle fermate future",
+            withArrival.isEmpty() || withArrival.all { it.projectedArrival != null },
+        )
+    }
+
     @Test
     fun `andamentoTreno non copre le date future`() = runBlocking {
         val refs = trains.resolve("9505")

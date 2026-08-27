@@ -19,11 +19,12 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Train
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,7 +62,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.Station
+import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
+import it.zawardo.treni.ui.common.currentLocation
+import it.zawardo.treni.ui.common.rememberLocationRequester
+import kotlinx.coroutines.launch
 import it.zawardo.treni.ui.common.TimePickerModal
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -87,6 +93,24 @@ fun SearchScreen(
 
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val requestLocation = rememberLocationRequester { granted ->
+        if (!granted) {
+            vm.reportLocationProblem("Permesso posizione negato.")
+        } else {
+            vm.setLocating(true)
+            scope.launch {
+                val loc = currentLocation(context)
+                if (loc == null) {
+                    vm.reportLocationProblem("Posizione non disponibile. Il GPS è attivo?")
+                } else {
+                    vm.useNearestAsDeparture(loc.latitude, loc.longitude)
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -94,7 +118,7 @@ fun SearchScreen(
                 title = { Text("ZawardoTreni") },
                 actions = {
                     IconButton(onClick = onOpenAbout) {
-                        Icon(Icons.Outlined.Train, contentDescription = "Info")
+                        Icon(Icons.Outlined.HelpOutline, contentDescription = "Info")
                     }
                 },
             )
@@ -128,6 +152,11 @@ fun SearchScreen(
                 onNow = vm::setNow,
                 onToggleRemember = vm::setRememberLast,
                 onSave = vm::saveCurrent,
+                onUseLocation = {
+                    keyboard?.hide()
+                    focus.clearFocus(force = true)
+                    requestLocation()
+                },
                 onSearch = {
                     val f = state.from
                     val t = state.to
@@ -195,6 +224,7 @@ private fun SearchCard(
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
     onSave: () -> Unit,
+    onUseLocation: () -> Unit,
     onSearch: () -> Unit,
 ) {
     Card(
@@ -218,6 +248,10 @@ private fun SearchCard(
                         onValueChange = { onQueryChange(SearchField.FROM, it) },
                         onFocused = { onFieldFocused(SearchField.FROM) },
                         onClear = { onClearField(SearchField.FROM) },
+                        // Il mirino sta qui e non altrove: "vicino a me" ha senso
+                        // sulla partenza, non sulla destinazione.
+                        onUseLocation = onUseLocation,
+                        locating = state.locating,
                     )
                     StationField(
                         label = "Arrivo",
@@ -322,6 +356,8 @@ private fun StationField(
     onValueChange: (String) -> Unit,
     onFocused: () -> Unit,
     onClear: () -> Unit,
+    onUseLocation: (() -> Unit)? = null,
+    locating: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
@@ -333,9 +369,23 @@ private fun StationField(
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
         trailingIcon = {
-            if (value.isNotEmpty()) {
-                IconButton(onClick = onClear) {
-                    Icon(Icons.Filled.Clear, contentDescription = "Cancella $label")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (value.isNotEmpty()) {
+                    IconButton(onClick = onClear) {
+                        Icon(Icons.Filled.Clear, contentDescription = "Cancella $label")
+                    }
+                }
+                if (onUseLocation != null) {
+                    if (locating) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp).padding(end = 8.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        IconButton(onClick = onUseLocation) {
+                            Icon(Icons.Filled.MyLocation, contentDescription = "Stazione più vicina")
+                        }
+                    }
                 }
             }
         },
@@ -426,12 +476,9 @@ private fun HistoryAndSaved(
                     items(saved, key = { it.id }) { s ->
                         PairRow(
                             title = s.label,
-                            subtitle = s.timeMinutes?.let { m ->
-                                "alle %02d:%02d".format(m / 60, m % 60)
-                            },
-                            onClick = {
-                                onPick(s.from.toStation(), s.to.toStation(), s.timeMinutes)
-                            },
+                            // Le salvate conservano solo le stazioni: l'orario
+                            // riparte sempre da adesso.
+                            onClick = { onPick(s.from.toStation(), s.to.toStation(), null) },
                             onDelete = { onDeleteSaved(s.id) },
                         )
                     }

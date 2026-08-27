@@ -29,6 +29,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
  * Segui treno: aggiorna il ritardo ogni 60 secondi e avvisa quando cambia
@@ -51,6 +54,13 @@ class TrainFollowService : Service() {
     /** Ritardo dell'ultimo avviso emesso, non dell'ultimo rilevamento. */
     private var lastAlertedDelay: Int? = null
 
+    /** La soppressione si annuncia una volta sola, non a ogni giro di polling. */
+    private var alertedCancellation = false
+
+    /** Corsa seguita: serve a costruire l'Intent che riapre la sua schermata. */
+    private var followedNumber: String? = null
+    private var followedDate: LocalDate? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -70,9 +80,12 @@ class TrainFollowService : Service() {
         val epochDay = intent.getLongExtra(EXTRA_EPOCH_DAY, LocalDate.now().toEpochDay())
         val date = LocalDate.ofEpochDay(epochDay)
 
+        followedNumber = number
+        followedDate = date
         startForegroundSafely(buildOngoing(number, "Ricerca dello stato in corso…", null))
         _followed.value = number
         lastAlertedDelay = null
+        alertedCancellation = false
         startPolling(number, date)
         return START_STICKY
     }
@@ -89,8 +102,21 @@ class TrainFollowService : Service() {
         pollJob?.cancel()
         pollJob = scope.launch {
             val trains = ServiceLocator.trainStatusRepository
+
+            /*
+             * La corsa si risolve UNA volta sola, all'avvio.
+             *
+             * Risolverla a ogni giro costava una chiamata di rete in piu' al minuto,
+             * ma soprattutto era fragile: lo stesso numero puo' corrispondere a piu'
+             * corse, e la scelta poteva cambiare fra un giro e l'altro spostando la
+             * notifica su un altro treno senza preavviso.
+             */
+            val ref = runCatching { trains.resolveFor(number, date) }.getOrNull()
+
             while (isActive) {
-                val status = runCatching { trains.statusByNumber(number, date) }.getOrNull()
+                val status = runCatching {
+                    if (ref != null) trains.status(ref) else trains.statusByNumber(number, date)
+                }.getOrNull()
 
                 if (status != null) {
                     updateOngoing(number, status)
@@ -112,7 +138,11 @@ class TrainFollowService : Service() {
 
     private fun updateOngoing(number: String, status: TrainStatus) {
         val text = describe(status)
-        val sub = status.lastDetectionStation?.let { "Ultimo rilevamento: $it" }
+        val sub = status.lastDetectionStation?.let { st ->
+            // L'ora rende evidente se l'aggiornamento si e' fermato.
+            val at = status.lastDetectionTime?.format(HHMM)
+            if (at != null) "Ultimo rilevamento: $st alle $at" else "Ultimo rilevamento: $st"
+        }
         NotificationManagerCompat.from(this).also { nm ->
             if (hasNotificationPermission()) {
                 nm.notify(NOTIF_ONGOING_ID, buildOngoing(status.label.ifBlank { number }, text, sub))
@@ -128,34 +158,50 @@ class TrainFollowService : Service() {
     private fun maybeAlert(number: String, status: TrainStatus) {
         val previous = lastAlertedDelay
         val current = status.delayMinutes
+        val cancelled = status.state == TrainState.CANCELLED
 
-        val worthAlerting = when {
-            status.state == TrainState.CANCELLED -> true
-            previous == null -> false
-            else -> kotlin.math.abs(current - previous) > DELAY_THRESHOLD_MIN
+        // Una soppressione va annunciata sempre, anche se e' la prima lettura:
+        // prima veniva silenziata dal ramo che gestisce l'assenza di storico.
+        if (cancelled && !alertedCancellation) {
+            alertedCancellation = true
+            lastAlertedDelay = current
+            emitAlert(number, status, "Il treno è stato soppresso.")
+            return
         }
 
         if (previous == null) {
+            // Prima lettura: si stabilisce il riferimento, non si suona.
             lastAlertedDelay = current
             return
         }
-        if (!worthAlerting) return
+        if (kotlin.math.abs(current - previous) <= DELAY_THRESHOLD_MIN) return
 
         lastAlertedDelay = current
         if (!hasNotificationPermission()) return
 
-        val title = status.label.ifBlank { "Treno $number" }
-        val body = when {
-            status.state == TrainState.CANCELLED -> "Il treno è stato soppresso."
-            current > previous -> "Il ritardo è passato da $previous a $current minuti."
-            else -> "Il ritardo è sceso da $previous a $current minuti."
-        }
+        emitAlert(
+            number,
+            status,
+            when {
+                current > previous -> "Il ritardo è passato da ${describeDelay(previous)} a ${describeDelay(current)}."
+                else -> "Lo scarto è cambiato da ${describeDelay(previous)} a ${describeDelay(current)}."
+            },
+        )
+    }
 
+    private fun describeDelay(minutes: Int): String = when {
+        minutes > 0 -> "$minutes min di ritardo"
+        minutes < 0 -> "${-minutes} min di anticipo"
+        else -> "orario regolare"
+    }
+
+    private fun emitAlert(number: String, status: TrainStatus, body: String) {
+        if (!hasNotificationPermission()) return
         NotificationManagerCompat.from(this).notify(
             NOTIF_ALERT_ID,
             NotificationCompat.Builder(this, CHANNEL_ALERTS)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle(title)
+                .setContentTitle(status.label.ifBlank { "Treno $number" })
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -214,11 +260,17 @@ class TrainFollowService : Service() {
             )
             .build()
 
+    /**
+     * Toccare la notifica deve aprire **quel** treno, non genericamente l'app.
+     * Gli extra viaggiano nell'Intent e MainActivity li trasforma in navigazione.
+     */
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
         this,
         0,
         Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(EXTRA_OPEN_TRAIN, followedNumber)
+            .putExtra(EXTRA_OPEN_DATE, followedDate?.toEpochDay() ?: LocalDate.now().toEpochDay()),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -227,6 +279,8 @@ class TrainFollowService : Service() {
 
     private fun stopFollowing() {
         pollJob?.cancel()
+        followedNumber = null
+        followedDate = null
         _followed.value = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -240,6 +294,11 @@ class TrainFollowService : Service() {
 
     companion object {
         private const val ACTION_STOP = "it.zawardo.treni.FOLLOW_STOP"
+
+        /** Letti da MainActivity per aprire direttamente la corsa seguita. */
+        const val EXTRA_OPEN_TRAIN = "open_train_number"
+        const val EXTRA_OPEN_DATE = "open_train_epoch_day"
+
         private const val EXTRA_NUMBER = "number"
         private const val EXTRA_EPOCH_DAY = "epochDay"
 

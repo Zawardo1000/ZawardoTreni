@@ -20,7 +20,8 @@ data class BoardUiState(
     val station: Station? = null,
     val query: String = "",
     val suggestions: List<Station> = emptyList(),
-    val picking: Boolean = true,
+    /** Il campo stazione resta sempre visibile: si cambia senza tornare indietro. */
+    val suggestionsOpen: Boolean = false,
     val mode: BoardMode = BoardMode.DEPARTURES,
     val loading: Boolean = false,
     val entries: List<BoardEntry> = emptyList(),
@@ -44,10 +45,14 @@ class BoardViewModel : ViewModel() {
         viewModelScope.launch {
             queries.debounce(250).distinctUntilChanged().collect { suggest(it) }
         }
+        // Se nella scheda Tratta e' gia' stata scelta una partenza, il tabellone
+        // si apre su quella e carica subito: aprire un campo vuoto sarebbe un
+        // passaggio in piu' per un'informazione gia' nota.
+        ServiceLocator.currentDeparture.value?.let { select(it) }
     }
 
     fun onQueryChange(text: String) {
-        _state.update { it.copy(query = text, picking = true) }
+        _state.update { it.copy(query = text, suggestionsOpen = true) }
         queries.value = text
     }
 
@@ -72,7 +77,8 @@ class BoardViewModel : ViewModel() {
                 it.copy(
                     station = station,
                     query = station.name,
-                    picking = false,
+                    suggestionsOpen = false,
+                    suggestions = emptyList(),
                     entries = emptyList(),
                     message = "Per questa fermata non esiste un tabellone in tempo reale.",
                 )
@@ -80,14 +86,24 @@ class BoardViewModel : ViewModel() {
             return
         }
         _state.update {
-            it.copy(station = station, query = station.name, picking = false, suggestions = emptyList())
+            it.copy(
+                station = station,
+                query = station.name,
+                suggestionsOpen = false,
+                suggestions = emptyList(),
+            )
         }
         viewModelScope.launch { runCatching { store.cache(station) } }
         load()
     }
 
-    fun changeStation() {
-        _state.update { it.copy(picking = true, query = "", suggestions = emptyList()) }
+    /** Svuota il campo per digitare un'altra stazione, senza perdere il tabellone. */
+    fun clearQuery() {
+        _state.update { it.copy(query = "", suggestions = emptyList(), suggestionsOpen = true) }
+    }
+
+    fun closeSuggestions() {
+        _state.update { it.copy(suggestionsOpen = false, suggestions = emptyList()) }
     }
 
     fun setMode(mode: BoardMode) {

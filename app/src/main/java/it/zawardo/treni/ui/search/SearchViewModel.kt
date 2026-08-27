@@ -33,6 +33,7 @@ data class SearchUiState(
     val dateTime: LocalDateTime = LocalDateTime.now(),
     val rememberLast: Boolean = true,
     val alreadySaved: Boolean = false,
+    val locating: Boolean = false,
     val error: String? = null,
 ) {
     /** Cercare una tratta verso se stessa non ha senso: il pulsante resta spento. */
@@ -87,6 +88,7 @@ class SearchViewModel : ViewModel() {
                 dateTime = LocalDateTime.now(),
             )
         }
+        ServiceLocator.currentDeparture.value = last.first
         refreshSavedFlag()
     }
 
@@ -142,10 +144,36 @@ class SearchViewModel : ViewModel() {
                 SearchField.TO -> it.copy(to = station, toQuery = station.name)
             }.copy(suggestions = emptyList(), activeField = null)
         }
+        if (field == SearchField.FROM) ServiceLocator.currentDeparture.value = station
         viewModelScope.launch {
             runCatching { store.cache(station) }
             refreshSavedFlag()
         }
+    }
+
+    /**
+     * Imposta come partenza la stazione piu' vicina.
+     * Si prende il primo risultato: l'endpoint restituisce gia' la piu' vicina.
+     */
+    fun useNearestAsDeparture(latitude: Double, longitude: Double) {
+        viewModelScope.launch {
+            _state.update { it.copy(locating = true, error = null) }
+            val nearest = runCatching { stations.closest(latitude, longitude) }.getOrNull()
+            if (nearest == null) {
+                _state.update { it.copy(locating = false, error = "Nessuna stazione trovata nei dintorni.") }
+            } else {
+                _state.update { it.copy(locating = false) }
+                select(SearchField.FROM, nearest)
+            }
+        }
+    }
+
+    fun setLocating(active: Boolean) {
+        _state.update { it.copy(locating = active) }
+    }
+
+    fun reportLocationProblem(message: String) {
+        _state.update { it.copy(locating = false, error = message) }
     }
 
     /** Inverti: pensato per il ritorno, quindi riporta anche l'orario ad adesso. */
@@ -161,6 +189,7 @@ class SearchViewModel : ViewModel() {
                 activeField = null,
             )
         }
+        ServiceLocator.currentDeparture.value = _state.value.from
         viewModelScope.launch { refreshSavedFlag() }
     }
 
@@ -214,6 +243,7 @@ class SearchViewModel : ViewModel() {
                 activeField = null,
             )
         }
+        ServiceLocator.currentDeparture.value = from
         viewModelScope.launch { refreshSavedFlag() }
     }
 
@@ -229,14 +259,19 @@ class SearchViewModel : ViewModel() {
         _state.update { it.copy(alreadySaved = isSaved) }
     }
 
-    /** Salva stazioni e orario impostato. La data no: domani sarebbe gia' vecchia. */
+    /**
+     * Salva **solo le stazioni**.
+     *
+     * Salvare anche l'orario rendeva la funzione scomoda: la stessa tratta si
+     * ripete a ore diverse, e riaprirla su un orario fisso costringeva a
+     * correggerlo ogni volta.
+     */
     fun saveCurrent() {
         val s = _state.value
         val from = s.from ?: return
         val to = s.to ?: return
-        val minutes = s.dateTime.toLocalTime().let { it.hour * 60 + it.minute }
         viewModelScope.launch {
-            store.save(from, to, timeMinutes = minutes)
+            store.save(from, to, timeMinutes = null)
             refreshSavedFlag()
         }
     }

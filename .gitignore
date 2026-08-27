@@ -7,3 +7,6 @@ local.properties
 *.jks
 keystore.properties
 .idea/
+
+# Piano di lavoro: appunti interni, non fanno parte del progetto
+PLAN.md

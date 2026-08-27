@@ -11,8 +11,8 @@ import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
-import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
 import java.time.Duration
 import java.time.Instant
@@ -113,6 +113,27 @@ private fun FermataDto.toStop() = Stop(
     },
 )
 
+/**
+ * Proietta il ritardo corrente sulle fermate non ancora effettuate.
+ *
+ * ViaggiaTreno lascia `ritardoArrivo` e `ritardoPartenza` a zero su tutte le
+ * fermate future, anche quando la corsa e' dichiarata in ritardo: verificato su
+ * un FR a +8 minuti con quattro fermate future tutte a zero. Senza questo
+ * ricalcolo l'app direbbe che il treno arriva in orario mentre e' in ritardo.
+ *
+ * E' una stima lineare: non sa nulla di recuperi di orario sulle tratte veloci
+ * ne' di soste comprimibili. Resta molto piu' vicina al vero dello zero.
+ */
+private fun Stop.projectedBy(delayMinutes: Int): Stop {
+    if (status != StopStatus.FUTURE || delayMinutes == 0) return this
+    return copy(
+        arrivalDelayMinutes = delayMinutes,
+        departureDelayMinutes = delayMinutes,
+        projectedArrival = scheduledArrival?.plusMinutes(delayMinutes.toLong()),
+        projectedDeparture = scheduledDeparture?.plusMinutes(delayMinutes.toLong()),
+    )
+}
+
 fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
     val detected = stazioneUltimoRilevamento?.takeIf { it.isNotBlank() && it != "--" }
     return TrainStatus(
@@ -129,7 +150,7 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
         notice = subTitle?.takeIf { it.isNotBlank() },
         // Le soppresse non sono in `fermate`: vanno riunite e riordinate.
         stops = (fermate + fermateSoppresse)
-            .map { it.toStop() }
+            .map { it.toStop().projectedBy(ritardo) }
             .sortedBy { it.index },
     )
 }

@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -28,7 +30,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.currentLocation
+import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.rememberLocationRequester
 import it.zawardo.treni.ui.common.stateColor
@@ -92,9 +94,6 @@ fun BoardScreen(
                 title = { Text(state.station?.name ?: "Tabellone") },
                 actions = {
                     if (state.station != null) {
-                        IconButton(onClick = vm::changeStation) {
-                            Icon(Icons.Filled.Search, contentDescription = "Cambia stazione")
-                        }
                         IconButton(onClick = vm::load) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Aggiorna")
                         }
@@ -110,26 +109,37 @@ fun BoardScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (state.picking || state.station == null) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = vm::onQueryChange,
-                    label = { Text("Stazione") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Filled.Search, null) },
-                    trailingIcon = {
+            // Il campo resta sempre in cima: si cambia stazione senza tornare indietro.
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = vm::onQueryChange,
+                label = { Text("Stazione") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, null) },
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (state.query.isNotEmpty()) {
+                            IconButton(onClick = vm::clearQuery) {
+                                Icon(Icons.Filled.Clear, contentDescription = "Cancella")
+                            }
+                        }
                         if (state.locatingNearest) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                Modifier.size(20.dp).padding(end = 8.dp),
+                                strokeWidth = 2.dp,
+                            )
                         } else {
                             IconButton(onClick = requestLocation) {
                                 Icon(Icons.Filled.MyLocation, contentDescription = "Stazione più vicina")
                             }
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-                LazyColumn {
+            if (state.suggestionsOpen && state.suggestions.isNotEmpty()) {
+                LazyColumn(Modifier.heightIn(max = 300.dp)) {
                     items(state.suggestions, key = { it.locationId }) { s ->
                         Column(
                             Modifier
@@ -153,6 +163,13 @@ fun BoardScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
+            } else if (state.station == null) {
+                Text(
+                    "Scegli una stazione o usa il mirino per quella più vicina.",
+                    Modifier.padding(vertical = 24.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             } else {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     SegmentedButton(
@@ -172,15 +189,12 @@ fun BoardScreen(
                         CircularProgressIndicator()
                     }
 
-                    state.message != null -> Column {
-                        Text(
-                            state.message!!,
-                            Modifier.padding(vertical = 24.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = vm::changeStation) { Text("Scegli un'altra stazione") }
-                    }
+                    state.message != null -> Text(
+                        state.message!!,
+                        Modifier.padding(vertical = 24.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
 
                     else -> LazyColumn {
                         items(state.entries, key = { it.trainRef.number + it.trainRef.departureDateMillis }) { e ->

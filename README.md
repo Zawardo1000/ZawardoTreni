@@ -30,7 +30,15 @@ in produzione. Possono cambiare o smettere di funzionare senza preavviso.
 **Il realtime esiste solo per la giornata corrente**: `andamentoTreno` risponde `204` per
 qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
 
-Dettagli completi degli endpoint e delle loro insidie: [`PLAN.md`](PLAN.md).
+Le insidie note di queste API sono documentate nei commenti del modulo `:data`,
+accanto al codice che le aggira. Le principali:
+
+- il BFF **pretende l'offset di fuso** nella `departure_time`: senza, ignora l'ora
+  e riparte da mezzanotte;
+- `andamentoTreno` **non proietta il ritardo** sulle fermate future, che restano a
+  zero anche su un treno a +8: il ricalcolo lo fa l'app;
+- gli endpoint di dettaglio del BFF rispondono `410` e non vanno usati;
+- il `searchId` scade dopo circa 10 minuti.
 
 ## Build
 

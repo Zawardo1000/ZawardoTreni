@@ -51,6 +51,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -59,7 +61,9 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
+import it.zawardo.treni.ui.common.delayNumber
 import it.zawardo.treni.ui.common.stateColor
 import it.zawardo.treni.ui.common.stateLabel
 import java.time.LocalDate
@@ -85,6 +89,10 @@ fun TrainDetailScreen(
     val context = LocalContext.current
     val followedNumber by TrainFollowService.followed.collectAsState()
     val isFollowing = followedNumber == trainNumber
+
+    // Tornando in primo piano, i dati in memoria possono avere ore: arrivando
+    // dalla notifica ci si aspetta il percorso aggiornato, non l'ultimo noto.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
     // Su Android 13+ senza questo permesso il servizio partirebbe muto:
     // notifica permanente invisibile e nessun avviso. Meglio chiederlo prima.
@@ -208,11 +216,19 @@ private fun Header(status: TrainStatus) {
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                stateLabel(status.state, status.delayMinutes),
+                stateLabel(status.state) ?: delayLabel(status.delayMinutes),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = stateColor(status.state, status.delayMinutes),
             )
+            if (status.stops.any { it.isEstimate } && status.delayMinutes != 0) {
+                // La proiezione e' nostra, non di ViaggiaTreno: meglio dichiararlo.
+                Text(
+                    "Gli orari delle fermate non ancora raggiunte sono ricalcolati su questo scarto.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
@@ -354,30 +370,35 @@ private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean) {
     val scheme = MaterialTheme.colorScheme
 
     // Al capolinea di partenza non esiste un arrivo, a quello finale non esiste una partenza.
-    val showArrival = !isFirst && (stop.scheduledArrival != null || stop.actualArrival != null)
-    val showDeparture = !isLast && (stop.scheduledDeparture != null || stop.actualDeparture != null)
+    val showArrival = !isFirst && stop.scheduledArrival != null
+    val showDeparture = !isLast && stop.scheduledDeparture != null
 
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         if (showArrival) {
             TimeCell(
                 prefix = "arr",
                 scheduled = stop.scheduledArrival.hhmm(),
-                actual = stop.actualArrival?.format(TIME),
+                effective = stop.effectiveArrival?.format(TIME),
                 delay = stop.arrivalDelayMinutes,
-                estimated = stop.isEstimate,
+                // In arrivo solo la cifra: la riga sarebbe troppo lunga con due testi.
+                withText = false,
             )
         }
         if (showDeparture) {
             TimeCell(
                 prefix = "par",
                 scheduled = stop.scheduledDeparture.hhmm(),
-                actual = stop.actualDeparture?.format(TIME),
+                effective = stop.effectiveDeparture?.format(TIME),
                 delay = stop.departureDelayMinutes,
-                estimated = stop.isEstimate,
+                withText = true,
             )
         }
         if (!showArrival && !showDeparture) {
-            Text("orario non disponibile", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            Text(
+                "orario non disponibile",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -386,31 +407,38 @@ private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean) {
 private fun TimeCell(
     prefix: String,
     scheduled: String,
-    actual: String?,
+    effective: String?,
     delay: Int,
-    estimated: Boolean,
+    withText: Boolean,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val color = when {
-        delay >= 15 -> scheme.error
-        delay >= 5 -> scheme.tertiary
-        delay < 0 -> scheme.primary
-        else -> scheme.onSurfaceVariant
-    }
+    val shifted = delay != 0 && effective != null
+
     Row {
         Text("$prefix ", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+
+        // L'orario di orario ufficiale resta sempre leggibile, barrato se superato.
         Text(
             scheduled,
             style = MaterialTheme.typography.bodyMedium,
-            textDecoration = if (actual != null && delay != 0) TextDecoration.LineThrough else null,
-            color = if (actual != null && delay != 0) scheme.onSurfaceVariant else scheme.onSurface,
+            textDecoration = if (shifted) TextDecoration.LineThrough else null,
+            color = if (shifted) scheme.onSurfaceVariant else scheme.onSurface,
         )
-        if (delay != 0) {
+
+        if (shifted) {
             Text(
-                "  " + (actual ?: "") + " " + delayLabel(delay).let { if (estimated) "($it prev.)" else it },
+                " $effective",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-                color = color,
+                color = delayColor(delay),
+            )
+        }
+        if (delay != 0) {
+            Text(
+                " " + if (withText) delayLabel(delay) else delayNumber(delay),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = delayColor(delay),
             )
         }
     }

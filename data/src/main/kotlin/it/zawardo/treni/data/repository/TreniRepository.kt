@@ -112,17 +112,24 @@ class TrainStatusRepository(
     }
 
     /**
+     * Sceglie la corsa giusta fra quelle che condividono lo stesso numero.
+     *
+     * Lo stesso numero puo' comparire piu' volte con origini diverse: si prende
+     * quella che parte nella data richiesta, e solo in mancanza la prima.
+     */
+    suspend fun resolveFor(trainNumber: String, date: LocalDate): TrainRef? {
+        val refs = resolve(trainNumber)
+        return refs.firstOrNull { ref ->
+            Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME).toLocalDate() == date
+        } ?: refs.firstOrNull()
+    }
+
+    /**
      * Stato di un treno di cui si conosce solo il numero e la data di partenza.
      * Utile per le tratte restituite dal BFF, che non espongono origine/millis.
      */
-    suspend fun statusByNumber(trainNumber: String, date: LocalDate): TrainStatus? {
-        val refs = resolve(trainNumber)
-        if (refs.isEmpty()) return null
-        val target = refs.firstOrNull { ref ->
-            Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME).toLocalDate() == date
-        } ?: refs.first()
-        return status(target)
-    }
+    suspend fun statusByNumber(trainNumber: String, date: LocalDate): TrainStatus? =
+        resolveFor(trainNumber, date)?.let { status(it) }
 
     suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
         withContext(Dispatchers.IO) {

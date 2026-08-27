@@ -1,5 +1,6 @@
 package it.zawardo.treni.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +15,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -31,9 +34,11 @@ import it.zawardo.treni.ui.about.AboutScreen
 import it.zawardo.treni.ui.board.BoardScreen
 import it.zawardo.treni.ui.results.ResultsScreen
 import it.zawardo.treni.ui.search.SearchScreen
+import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.ui.theme.ZawardoTreniTheme
 import it.zawardo.treni.ui.train.TrainDetailScreen
 import it.zawardo.treni.ui.train.TrainNumberScreen
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -81,16 +86,52 @@ private data class TabItem(
 )
 
 class MainActivity : ComponentActivity() {
+
+    /**
+     * Treno da aprire su richiesta esterna, oggi solo dalla notifica di
+     * "segui treno". Toccare quella notifica deve portare alla corsa seguita,
+     * non genericamente all'app.
+     */
+    private val pendingTrain = MutableStateFlow<TrainRoute?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { ZawardoTreniTheme { TreniApp() } }
+        consume(intent)
+        setContent { ZawardoTreniTheme { TreniApp(pendingTrain) } }
+    }
+
+    /** L'activity e' singleTop: ad app gia' aperta l'Intent arriva di qui. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consume(intent)
+    }
+
+    private fun consume(intent: Intent?) {
+        val number = intent?.getStringExtra(TrainFollowService.EXTRA_OPEN_TRAIN) ?: return
+        val day = intent.getLongExtra(
+            TrainFollowService.EXTRA_OPEN_DATE,
+            LocalDate.now().toEpochDay(),
+        )
+        // Consumato una volta sola: senza rimozione, ogni rotazione ripeterebbe
+        // la navigazione riportando l'utente sul treno mentre naviga altrove.
+        intent.removeExtra(TrainFollowService.EXTRA_OPEN_TRAIN)
+        pendingTrain.value = TrainRoute(number, day)
     }
 }
 
 @Composable
-private fun TreniApp() {
+private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateFlow(null)) {
     val nav = rememberNavController()
+
+    val requested by pendingTrain.collectAsState()
+    LaunchedEffect(requested) {
+        requested?.let {
+            nav.navigate(it) { launchSingleTop = true }
+            pendingTrain.value = null
+        }
+    }
 
     val tabs = listOf(
         TabItem(SearchRoute, SearchRoute::class, "Tratta", Icons.Filled.Search),

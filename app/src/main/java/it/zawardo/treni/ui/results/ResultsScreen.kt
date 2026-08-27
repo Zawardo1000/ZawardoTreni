@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -24,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -122,10 +125,31 @@ fun ResultsScreen(
                             )
                         }
                     }
+
+                    item {
+                        MoreButton(
+                            text = if (state.noMoreEarlier) "Nessuna corsa precedente" else "Corse precedenti",
+                            icon = Icons.Filled.KeyboardArrowUp,
+                            loading = state.loadingEarlier,
+                            enabled = !state.noMoreEarlier,
+                            onClick = vm::loadEarlier,
+                        )
+                    }
+
                     items(state.journeys, key = { it.key }) { row ->
                         JourneyCard(row) { number ->
                             onOpenTrain(number, row.journey.departure.toLocalDate())
                         }
+                    }
+
+                    item {
+                        MoreButton(
+                            text = if (state.noMoreLater) "Nessuna corsa successiva" else "Corse successive",
+                            icon = Icons.Filled.KeyboardArrowDown,
+                            loading = state.loadingLater,
+                            enabled = !state.noMoreLater,
+                            onClick = vm::loadLater,
+                        )
                     }
                 }
             }
@@ -190,23 +214,41 @@ private fun JourneyCard(row: JourneyRow, onOpenTrain: (String) -> Unit) {
                     )
                 }
 
-                row.state != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                row.state != null -> {
+                    // Una riga sola: o l'etichetta dello stato anomalo, o il ritardo.
+                    // Prima comparivano entrambe e il ritardo veniva detto due volte.
+                    val anomaly = stateLabel(row.state)
                     Text(
-                        stateLabel(row.state, row.delayMinutes),
+                        anomaly ?: delayLabel(row.delayMinutes ?: 0),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = stateColor(row.state, row.delayMinutes),
                     )
-                    if (row.state != TrainState.CANCELLED && row.delayMinutes != null && row.delayMinutes != 0) {
-                        Text(
-                            "  " + delayLabel(row.delayMinutes),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MoreButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    loading: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled && !loading,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        Text("  $text")
     }
 }
 

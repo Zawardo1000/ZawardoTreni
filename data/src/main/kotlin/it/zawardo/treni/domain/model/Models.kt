@@ -104,12 +104,24 @@ data class Stop(
     val scheduledPlatform: String?,
     val actualPlatform: String?,
     val status: StopStatus,
-) {
     /**
-     * Per le fermate gia' effettuate il ritardo e' misurato; per quelle future
-     * ViaggiaTreno propaga la stima. In entrambi i casi il campo e' lo stesso.
+     * Orari ricalcolati sul ritardo corrente della corsa, valorizzati solo per
+     * le fermate non ancora effettuate.
+     *
+     * Servono perche' ViaggiaTreno **non** proietta il ritardo in avanti: su un
+     * treno dichiarato a +8 tutte le fermate future arrivano con `ritardo = 0`.
+     * Fidarsi di quel dato significherebbe dire all'utente che arrivera' in
+     * orario mentre il treno accumula ritardo.
      */
+    val projectedArrival: LocalDateTime? = null,
+    val projectedDeparture: LocalDateTime? = null,
+) {
+    /** Se true, i minuti mostrati sono una proiezione e non una misura. */
     val isEstimate: Boolean get() = status == StopStatus.FUTURE
+
+    /** L'orario da mostrare: reale se c'e', altrimenti proiettato. */
+    val effectiveArrival: LocalDateTime? get() = actualArrival ?: projectedArrival
+    val effectiveDeparture: LocalDateTime? get() = actualDeparture ?: projectedDeparture
 
     val platformChanged: Boolean
         get() = actualPlatform != null && scheduledPlatform != null && actualPlatform != scheduledPlatform

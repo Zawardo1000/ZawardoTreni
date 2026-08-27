@@ -8,6 +8,8 @@ import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.SearchStore
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
+import it.zawardo.treni.domain.model.Station
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * DI manuale. Il grafo e' piccolo e stabile: Hilt aggiungerebbe un processore di
@@ -19,6 +21,14 @@ object ServiceLocator {
         private set
     lateinit var searchStore: SearchStore
         private set
+
+    /**
+     * Stazione di partenza scelta nella scheda Tratta, condivisa con il tabellone.
+     *
+     * Vive in memoria e non su disco: e' un ponte fra due schede aperte nella
+     * stessa sessione, non una preferenza da ricordare fra un avvio e l'altro.
+     */
+    val currentDeparture = MutableStateFlow<Station?>(null)
 
     val stationRepository: StationRepository by lazy { StationRepository(NetworkModule.lefrecceApi) }
     val journeyRepository: JourneyRepository by lazy { JourneyRepository(NetworkModule.lefrecceApi) }
