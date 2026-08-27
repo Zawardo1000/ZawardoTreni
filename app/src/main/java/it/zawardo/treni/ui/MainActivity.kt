@@ -88,10 +88,16 @@ data class ResultsRoute(
 )
 
 /**
- * [boardingRfi] e' la stazione da cui l'utente sale, quando la si conosce.
- * Serve a due cose: mostrare il ritardo **alla sua fermata** invece che quello
- * globale del treno, e sapere quando smettere di seguire.
- * E' null se si arriva dalla ricerca per numero, dove quel contesto non esiste.
+ * Come si e' arrivati a una corsa, che decide quanto c'e' da indovinare.
+ *
+ * Dal tabellone e dalla ricerca per numero la corsa e' gia' identificata:
+ * [originCode] e [departureMillis] la indicano senza margine, e si va dritti al
+ * dettaglio. Dalla ricerca per tratta invece si ha solo il numero, che due treni
+ * possono condividere: li' servono [boardingRfi] e [boardingEpochSec], cioe'
+ * dove e quando si sale, per capire di quale dei due si stia parlando.
+ *
+ * [boardingRfi] serve comunque anche a mostrare il ritardo **alla fermata
+ * dell'utente** invece di quello globale, e a sapere quando smettere di seguire.
  */
 @Serializable
 data class TrainRoute(
@@ -99,6 +105,9 @@ data class TrainRoute(
     val dateEpochDay: Long,
     val boardingRfi: String? = null,
     val boardingName: String? = null,
+    val originCode: String? = null,
+    val departureMillis: Long? = null,
+    val boardingEpochSec: Long? = null,
 )
 
 private data class TabItem(
@@ -215,18 +224,12 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                 TrainNumberScreen(
                     // Cercando per numero non esiste una stazione di salita:
                     // qui il monitoraggio ripiega sull'arrivo a destinazione.
-                    onOpenTrain = { number, date, _, _ ->
-                        nav.navigate(TrainRoute(number, date.toEpochDay()))
-                    },
+                    onOpenTrain = { nav.navigate(it) },
                 )
             }
 
             composable<BoardRoute> {
-                BoardScreen(
-                    onOpenTrain = { number, date, rfi, name ->
-                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
-                    },
-                )
+                BoardScreen(onOpenTrain = { nav.navigate(it) })
             }
 
             composable<StationBoardRoute> { entry ->
@@ -235,9 +238,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     initialRfi = r.rfiCode,
                     initialName = r.name,
                     onBack = { nav.popBackStack() },
-                    onOpenTrain = { number, date, rfi, name ->
-                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
-                    },
+                    onOpenTrain = { nav.navigate(it) },
                 )
             }
 
@@ -253,9 +254,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     departure = LocalDateTime.ofEpochSecond(r.whenEpochSec, 0, ZoneOffset.UTC),
                     directOnly = r.directOnly,
                     onBack = { nav.popBackStack() },
-                    onOpenTrain = { number, date, rfi, name ->
-                        nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))
-                    },
+                    onOpenTrain = { nav.navigate(it) },
                 )
             }
 
@@ -266,6 +265,11 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     date = LocalDate.ofEpochDay(r.dateEpochDay),
                     boardingRfi = r.boardingRfi,
                     boardingName = r.boardingName,
+                    originCode = r.originCode,
+                    departureMillis = r.departureMillis,
+                    boardingAt = r.boardingEpochSec?.let {
+                        LocalDateTime.ofEpochSecond(it, 0, ZoneOffset.UTC)
+                    },
                     onBack = { nav.popBackStack() },
                     onOpenStation = { rfi, name -> nav.navigate(StationBoardRoute(rfi, name)) },
                 )

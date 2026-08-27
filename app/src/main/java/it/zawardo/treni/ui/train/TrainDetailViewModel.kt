@@ -3,6 +3,7 @@ package it.zawardo.treni.ui.train
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import kotlinx.coroutines.Job
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 data class TrainDetailUiState(
     val loading: Boolean = true,
@@ -29,6 +31,25 @@ data class TrainDetailUiState(
 class TrainDetailViewModel(
     private val trainNumber: String,
     private val date: LocalDate,
+    /**
+     * Stazione da cui si sale, quando si arriva da una ricerca per tratta.
+     *
+     * Non e' un dettaglio: due treni diversi possono avere lo stesso numero
+     * nello stesso giorno, e questa e' l'unica cosa che dice quale dei due sia
+     * quello che si sta guardando.
+     */
+    private val boardingCode: String? = null,
+    /** Ora di salita: distingue due corse dello stesso numero in giorni diversi. */
+    private val boardingAt: LocalDateTime? = null,
+    /**
+     * Corsa gia' identificata da chi ci ha portati qui.
+     *
+     * Tabellone ed elenco corse sanno esattamente di quale treno si tratta:
+     * passarlo evita di ricercarlo per numero e, soprattutto, di sceglierne uno
+     * diverso fra quelli che quel numero lo condividono.
+     */
+    private val originCode: String? = null,
+    private val departureMillis: Long? = null,
 ) : ViewModel() {
 
     private val trains = ServiceLocator.trainStatusRepository
@@ -50,6 +71,12 @@ class TrainDetailViewModel(
     init {
         load(initial = true)
         startAutoRefresh()
+    }
+
+    private fun exactRef(): TrainRef? {
+        val origine = originCode?.takeIf { it.isNotBlank() } ?: return null
+        val millis = departureMillis?.takeIf { it > 0 } ?: return null
+        return TrainRef(trainNumber, origine, millis)
     }
 
     fun refresh() = load(initial = false)
@@ -75,7 +102,8 @@ class TrainDetailViewModel(
              * che quelle corse le conosce.
              */
             val status = runCatching {
-                trains.statusByNumber(trainNumber, date)
+                exactRef()?.let { trains.status(it) }
+                    ?: trains.statusByNumber(trainNumber, date, boardingCode, boardingAt)
                     ?: trenord.trainStatus(trainNumber)
             }
                 .getOrElse { e ->

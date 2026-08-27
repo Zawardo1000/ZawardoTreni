@@ -24,3 +24,21 @@ fun trainNumberOf(input: String): String? =
         .split(' ', '_', '-', '/')
         .lastOrNull { pezzo -> pezzo.any { it.isDigit() } }
         ?.let { it.substring(it.indexOfFirst { c -> c.isDigit() }) }
+
+/** La sigla che precede il numero, se e' stata scritta: "REG20" -> "REG". */
+fun trainCategoryOf(input: String): String? =
+    input.trimStart().takeWhile { it.isLetter() }.uppercase().takeIf { it.isNotEmpty() }
+
+/**
+ * Se una sigla scritta a mano indica questa corsa.
+ *
+ * Il confronto e' largo da entrambi i lati perche' le sigle si scrivono come
+ * capita: "RE" per un "REG", "RE8" preso da un'etichetta di linea per un treno
+ * che ViaggiaTreno chiama "RE". Serve a scegliere fra due corse omonime, non a
+ * escluderne: chi filtra deve ignorare il risultato quando resta vuoto.
+ */
+fun matchesCategory(label: String, category: String): Boolean {
+    val sigla = label.trim().substringBefore(' ').uppercase()
+    if (sigla.isEmpty()) return false
+    return sigla.startsWith(category) || category.startsWith(sigla)
+}

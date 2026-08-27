@@ -14,15 +14,18 @@ import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withContext
+import it.zawardo.treni.domain.model.matchesCategory
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 
 /** Ricerca stazioni. */
 class StationRepository(
@@ -200,24 +203,90 @@ class TrainStatusRepository(
     }
 
     /**
-     * Sceglie la corsa giusta fra quelle che condividono lo stesso numero.
+     * Le corse di un numero, ristrette dalla sigla quando e' stata scritta.
      *
-     * Lo stesso numero puo' comparire piu' volte con origini diverse: si prende
-     * quella che parte nella data richiesta, e solo in mancanza la prima.
+     * "20" oggi sono due treni diversi: l'EC Milano Centrale - Chiasso e il REG
+     * Cocquio Trevisago - Milano Cadorna. Chi scrive "REG20" ha gia' detto quale
+     * dei due vuole, e ignorarlo vorrebbe dire fargli scegliere due volte.
+     *
+     * La sigla non e' nell'elenco delle corse ma nel dettaglio, quindi costa una
+     * chiamata per candidato: si paga solo quando i candidati sono piu' di uno.
+     * Se non resta nulla la sigla viene ignorata - restringe la scelta, non
+     * nasconde treni.
      */
-    suspend fun resolveFor(trainNumber: String, date: LocalDate): TrainRef? {
+    suspend fun resolve(trainNumber: String, category: String?): List<TrainRef> {
         val refs = resolve(trainNumber)
-        return refs.firstOrNull { ref ->
-            Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME).toLocalDate() == date
-        } ?: refs.firstOrNull()
+        if (category.isNullOrBlank() || refs.size <= 1) return refs
+        val ristretti = refs.filter { ref ->
+            status(ref)?.label?.let { matchesCategory(it, category) } == true
+        }
+        return ristretti.ifEmpty { refs }
     }
 
     /**
-     * Stato di un treno di cui si conosce solo il numero e la data di partenza.
-     * Utile per le tratte restituite dal BFF, che non espongono origine/millis.
+     * Sceglie la corsa giusta fra quelle che condividono lo stesso numero.
+     *
+     * I doppioni nascono in due modi, e vogliono risposte diverse.
+     *
+     * Due treni diversi con lo stesso numero nello stesso giorno: il 20 e'
+     * insieme l'EC Milano Centrale - Chiasso e il REG Cocquio Trevisago - Milano
+     * Cadorna. Qui basta la stazione da cui si sale, perche' i percorsi non si
+     * somigliano.
+     *
+     * La stessa corsa in due giorni consecutivi, tutte e due in viaggio: un ICN
+     * per Siracusa parte la sera e arriva il pomeriggio dopo, quindi a meta'
+     * giornata ne circolano due. Qui la stazione non distingue niente, perche'
+     * il percorso e' lo stesso: distingue l'orario di passaggio.
+     *
+     * Senza contesto di salita resta il criterio della data, ed e' il caso della
+     * ricerca per numero, dove la scelta la fa l'utente su un elenco.
      */
-    suspend fun statusByNumber(trainNumber: String, date: LocalDate): TrainStatus? =
-        resolveFor(trainNumber, date)?.let { status(it) }
+    suspend fun resolveFor(
+        trainNumber: String,
+        date: LocalDate,
+        boardingCode: String? = null,
+        boardingAt: LocalDateTime? = null,
+    ): TrainRef? {
+        val refs = resolve(trainNumber)
+        if (refs.size <= 1) return refs.firstOrNull()
+
+        val delGiorno = refs.filter { it.departureDateInRome() == date }
+        val ripiego = delGiorno.firstOrNull() ?: refs.first()
+        if (boardingCode.isNullOrBlank()) return ripiego
+
+        // Si entra nelle corse solo qui, dove serve davvero sapere dove passano.
+        val passanti = refs.mapNotNull { ref ->
+            val fermata = status(ref)?.stops?.firstOrNull {
+                it.stationCode.equals(boardingCode, ignoreCase = true)
+            }
+            fermata?.let { ref to it }
+        }
+        if (passanti.isEmpty()) return ripiego
+        if (passanti.size == 1 || boardingAt == null) {
+            return passanti.firstOrNull { it.first in delGiorno }?.first ?: passanti.first().first
+        }
+
+        // Passano tutte di li': vince quella che ci passa all'ora giusta.
+        return passanti.minByOrNull { (_, fermata) ->
+            val quando = fermata.scheduledDeparture ?: fermata.scheduledArrival
+            if (quando == null) Long.MAX_VALUE
+            else abs(Duration.between(boardingAt, quando).toMinutes())
+        }!!.first
+    }
+
+    private fun TrainRef.departureDateInRome(): LocalDate =
+        Instant.ofEpochMilli(departureDateMillis).atZone(ROME).toLocalDate()
+
+    /**
+     * Stato di una corsa di cui si conosce numero e data. Stazione e orario di
+     * salita servono a non aprire il treno di qualcun altro: vedi [resolveFor].
+     */
+    suspend fun statusByNumber(
+        trainNumber: String,
+        date: LocalDate,
+        boardingCode: String? = null,
+        boardingAt: LocalDateTime? = null,
+    ): TrainStatus? = resolveFor(trainNumber, date, boardingCode, boardingAt)?.let { status(it) }
 
     suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
         withContext(Dispatchers.IO) {

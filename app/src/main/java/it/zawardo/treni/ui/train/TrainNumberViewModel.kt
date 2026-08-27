@@ -6,6 +6,7 @@ import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.FavoriteTrainEntity
 import it.zawardo.treni.data.repository.TrainSuggestion
 import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.trainCategoryOf
 import it.zawardo.treni.domain.model.trainNumberOf
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,19 +60,20 @@ class TrainNumberViewModel : ViewModel() {
 
     fun onQueryChange(text: String) {
         /*
-         * Nel campo restano solo cifre, perche' su ViaggiaTreno i numeri di
-         * treno sono interi: le lettere che si vedono in giro sono sigle di
-         * linea ("RE8", "S8") o bus sostitutivi, e nessuna delle due si cerca
-         * qui.
+         * Il campo accetta l'etichetta intera, perche' e' quella che si legge
+         * nei risultati e nei tabelloni: "RE 2874", "RE8 2828", "REG20".
          *
-         * Incollare l'etichetta intera continua pero' a funzionare, ed e' il
-         * motivo per cui si passa dall'estrazione invece di filtrare e basta:
-         * da "RE_8 2828" le sole cifre darebbero "82828", che e' un altro treno
-         * o nessuno.
+         * Il numero si estrae, non si filtra: da "RE_8 2828" le sole cifre
+         * darebbero "82828", che e' un altro treno o nessuno. E la sigla non si
+         * butta via, perche' due treni diversi possono avere lo stesso numero
+         * nello stesso giorno e la sigla dice quale.
          */
-        val numero = trainNumberOf(text)?.filter { it.isDigit() }.orEmpty().take(6)
-        _state.update { it.copy(query = numero, message = null, suggestionsOpen = true) }
-        digitato.value = numero
+        val cleaned = text
+            .filter { it.isLetterOrDigit() || it == ' ' || it == '_' || it == '-' || it == '/' }
+            .take(24)
+            .uppercase()
+        _state.update { it.copy(query = cleaned, message = null, suggestionsOpen = true) }
+        digitato.value = cleaned
     }
 
     /**
@@ -94,7 +96,7 @@ class TrainNumberViewModel : ViewModel() {
         }
         val trovati = runCatching { memory.suggest(numero, favorite.value) }.getOrDefault(emptyList())
         _state.update { it.copy(suggestions = trovati) }
-        if (numero.length >= MIN_LOOKUP) cerca(numero, esplicita = false)
+        if (numero.length >= MIN_LOOKUP) cerca(numero, trainCategoryOf(text), esplicita = false)
     }
 
     /** Un preferito o un suggerimento e' solo un numero gia' scritto. */
@@ -103,7 +105,7 @@ class TrainNumberViewModel : ViewModel() {
             it.copy(query = number, message = null, suggestionsOpen = false, suggestions = emptyList())
         }
         digitato.value = number
-        cerca(number, esplicita = true)
+        cerca(number, null, esplicita = true)
     }
 
     fun removeFavorite(number: String) {
@@ -129,17 +131,18 @@ class TrainNumberViewModel : ViewModel() {
     }
 
     fun resolve() {
-        val numero = trainNumberOf(_state.value.query) ?: return
+        val scritto = _state.value.query
+        val numero = trainNumberOf(scritto) ?: return
         _state.update { it.copy(suggestionsOpen = false) }
-        cerca(numero, esplicita = true)
+        cerca(numero, trainCategoryOf(scritto), esplicita = true)
     }
 
-    private fun cerca(numero: String, esplicita: Boolean) {
+    private fun cerca(numero: String, sigla: String?, esplicita: Boolean) {
         viewModelScope.launch {
             if (esplicita) {
                 _state.update { it.copy(loading = true, message = null, results = emptyList()) }
             }
-            val refs = runCatching { trains.resolve(numero) }.getOrDefault(emptyList())
+            val refs = runCatching { trains.resolve(numero, sigla) }.getOrDefault(emptyList())
 
             // Nel frattempo l'utente puo' aver scritto altro: una risposta in
             // ritardo non deve riportare a galla una ricerca abbandonata.

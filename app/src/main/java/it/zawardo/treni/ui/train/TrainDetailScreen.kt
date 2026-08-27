@@ -74,8 +74,10 @@ import it.zawardo.treni.ui.common.stateLabel
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private val TIME = DateTimeFormatter.ofPattern("HH:mm")
+private val GIORNO = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 
 private fun LocalDateTime?.hhmm(): String = this?.format(TIME) ?: "--:--"
 
@@ -86,11 +88,20 @@ fun TrainDetailScreen(
     date: LocalDate,
     boardingRfi: String? = null,
     boardingName: String? = null,
+    /** Corsa gia' identificata: presente quando si arriva da un elenco di corse. */
+    originCode: String? = null,
+    departureMillis: Long? = null,
+    /** Quando si sale: distingue due corse dello stesso numero in giorni diversi. */
+    boardingAt: LocalDateTime? = null,
     onBack: () -> Unit,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
     val vm: TrainDetailViewModel = viewModel(
-        factory = viewModelFactory { initializer { TrainDetailViewModel(trainNumber, date) } },
+        factory = viewModelFactory { initializer {
+            TrainDetailViewModel(
+                trainNumber, date, boardingRfi, boardingAt, originCode, departureMillis,
+            )
+        } },
     )
     val state by vm.state.collectAsState()
     val isFavorite by vm.isFavorite.collectAsState()
@@ -124,7 +135,22 @@ fun TrainDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.status?.label ?: "Treno $trainNumber") },
+                title = {
+                    Column {
+                        Text(state.status?.label ?: "Treno $trainNumber")
+                        // Un treno a lunga percorrenza parte la sera e arriva il
+                        // giorno dopo: a meta' giornata ne circolano due con lo
+                        // stesso numero, e senza la data non si sa quale si stia
+                        // guardando.
+                        if (date != LocalDate.now()) {
+                            Text(
+                                "partita il " + date.format(GIORNO),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro")

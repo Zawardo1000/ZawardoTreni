@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -47,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.FavoriteTrainEntity
 import it.zawardo.treni.data.repository.TrainSuggestion
 import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.ui.TrainRoute
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -58,10 +60,22 @@ private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 private fun TrainRef.dateInRome(): LocalDate =
     Instant.ofEpochMilli(departureDateMillis).atZone(ROME_ZONE).toLocalDate()
 
+/**
+ * Qui la corsa e' gia' identificata: origine e data di partenza vengono
+ * dall'elenco, quindi il dettaglio non deve indovinare quale treno sia fra
+ * quelli che condividono il numero.
+ */
+private fun TrainRef.toRoute() = TrainRoute(
+    number = number,
+    dateEpochDay = dateInRome().toEpochDay(),
+    originCode = originCode,
+    departureMillis = departureDateMillis,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrainNumberScreen(
-    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
+    onOpenTrain: (TrainRoute) -> Unit,
     vm: TrainNumberViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -76,7 +90,7 @@ fun TrainNumberScreen(
         vm.consumeOpen()
         keyboard?.hide()
         focus.clearFocus(force = true)
-        onOpenTrain(ref.number, ref.dateInRome(), null, null)
+        onOpenTrain(ref.toRoute())
     }
 
     Scaffold(
@@ -93,7 +107,7 @@ fun TrainNumberScreen(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Numero treno") },
-                placeholder = { Text("es. 2874, 24852") },
+                placeholder = { Text("es. 2874, RE 2874, REG20") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 trailingIcon = {
@@ -104,10 +118,11 @@ fun TrainNumberScreen(
                     }
                 },
                 keyboardOptions = KeyboardOptions(
-                    // Il numero e' sempre intero: tastierino numerico, che a
-                    // mano e' molto piu' rapido. L'etichetta incollata resta
-                    // gestita, perche' il numero lo si estrae dal testo.
-                    keyboardType = KeyboardType.Number,
+                    // Non Number: il numero e' intero, ma la sigla davanti va
+                    // scritta, sia perche' e' cosi' che l'etichetta si legge sia
+                    // perche' distingue due treni con lo stesso numero.
+                    keyboardType = KeyboardType.Text,
+                    capitalization = KeyboardCapitalization.Characters,
                     autoCorrectEnabled = false,
                     imeAction = ImeAction.Search,
                 ),
@@ -133,7 +148,7 @@ fun TrainNumberScreen(
             }
 
             Text(
-                "Puoi incollare l'etichetta intera: la sigla viene scartata. " +
+                "Puoi incollare l'etichetta intera, sigla compresa. " +
                     "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -185,12 +200,12 @@ fun TrainNumberScreen(
 }
 
 @Composable
-private fun RunCard(ref: TrainRef, onOpenTrain: (String, LocalDate, String?, String?) -> Unit) {
+private fun RunCard(ref: TrainRef, onOpenTrain: (TrainRoute) -> Unit) {
     val date = ref.dateInRome()
     Card(
         Modifier
             .fillMaxWidth()
-            .clickable { onOpenTrain(ref.number, date, null, null) },
+            .clickable { onOpenTrain(ref.toRoute()) },
     ) {
         Row(
             Modifier.padding(16.dp),

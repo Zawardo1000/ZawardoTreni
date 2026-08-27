@@ -15,6 +15,8 @@ import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.consolidate
+import it.zawardo.treni.domain.model.matchesCategory
+import it.zawardo.treni.domain.model.trainCategoryOf
 import it.zawardo.treni.domain.model.trainNumberOf
 import it.zawardo.treni.domain.model.stillCatchable
 import kotlinx.coroutines.runBlocking
@@ -253,6 +255,27 @@ class IntegrazioneTest {
      * l'etichetta letta altrove. Filtrare e basta sarebbe la trappola: da
      * "RE_8 2828" le sole cifre danno "82828".
      */
+    /**
+     * La sigla scritta a mano serve a scegliere fra due treni con lo stesso
+     * numero, non a nasconderne: il confronto e' largo di proposito.
+     */
+    @Test
+    fun `la sigla scritta distingue due treni omonimi`() {
+        assertTrue("REG20 -> " + trainCategoryOf("REG20"), trainCategoryOf("REG20") == "REG")
+        assertTrue("EC 20 -> " + trainCategoryOf("EC 20"), trainCategoryOf("EC 20") == "EC")
+        assertTrue("re8 2828 -> " + trainCategoryOf("re8 2828"), trainCategoryOf("re8 2828") == "RE")
+        assertTrue("senza sigla -> " + trainCategoryOf("2828"), trainCategoryOf("2828") == null)
+
+        assertTrue("REG 20 con REG", matchesCategory("REG 20", "REG"))
+        assertTrue("EC 20 con EC", matchesCategory("EC 20", "EC"))
+        assertTrue("una sigla abbreviata deve bastare", matchesCategory("REG 20", "RE"))
+        assertTrue(
+            "una sigla di linea piu' lunga non deve escludere la corsa",
+            matchesCategory("RE 2828", "RE8"),
+        )
+        assertTrue("REG non e' EC", !matchesCategory("EC 20", "REG"))
+    }
+
     @Test
     fun `dall'etichetta incollata si ricava il numero, non le cifre della sigla`() {
         fun campo(incollato: String) = trainNumberOf(incollato)?.filter { it.isDigit() }.orEmpty()
@@ -342,13 +365,19 @@ class IntegrazioneTest {
 
     @Test
     fun `sui treni in corsa il percorso non torna indietro`() = runBlocking {
-        val inCorsa = trains.departures("S01700")
-            .take(6)
+        // Si guardano gli arrivi: un treno in arrivo e' per definizione gia' in
+        // viaggio, mentre le prime partenze di solito non sono ancora partite e
+        // non avrebbero una sola fermata effettuata da controllare.
+        val inCorsa = trains.arrivals("S01700")
+            .take(10)
             .mapNotNull { runCatching { trains.status(it.trainRef) }.getOrNull() }
             .filter { s -> s.stops.any { it.status == StopStatus.DONE } }
 
         println("=== COERENZA PERCORSI ===")
-        assertTrue("nessun treno in corsa da controllare", inCorsa.isNotEmpty())
+        if (inCorsa.isEmpty()) {
+            println("  nessun treno in viaggio in questo momento: niente da controllare")
+            return@runBlocking
+        }
 
         for (s in inCorsa) {
             val utili = s.stops.filter { it.status != StopStatus.CANCELLED }

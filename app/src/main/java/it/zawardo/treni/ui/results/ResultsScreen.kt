@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
@@ -56,6 +57,7 @@ import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.stateColor
 import it.zawardo.treni.ui.common.stateLabel
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -72,7 +74,7 @@ fun ResultsScreen(
     departure: LocalDateTime,
     directOnly: Boolean = false,
     onBack: () -> Unit,
-    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
+    onOpenTrain: (TrainRoute) -> Unit,
 ) {
     val vm: ResultsViewModel = viewModel(
         factory = viewModelFactory {
@@ -242,10 +244,16 @@ fun ResultsScreen(
                     items(state.journeys, key = { it.key }) { row ->
                         JourneyCard(row, requestedDate = departure.toLocalDate()) { number, leg ->
                             onOpenTrain(
-                                number,
-                                row.journey.departure.toLocalDate(),
-                                leg.from.rfiCode,
-                                leg.from.name,
+                                TrainRoute(
+                                    number = number,
+                                    dateEpochDay = row.journey.departure.toLocalDate().toEpochDay(),
+                                    boardingRfi = leg.from.rfiCode,
+                                    boardingName = leg.from.name,
+                                    // Il BFF non da' la corsa, solo il numero:
+                                    // dove e quando si sale e' cio' che
+                                    // distingue due treni omonimi.
+                                    boardingEpochSec = leg.departure.toEpochSecond(ZoneOffset.UTC),
+                                ),
                             )
                         }
                     }

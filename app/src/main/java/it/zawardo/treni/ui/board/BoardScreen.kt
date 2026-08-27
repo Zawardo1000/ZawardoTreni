@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.currentLocation
@@ -65,12 +66,15 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.launch
 
+private fun BoardEntry.dateInRome(): LocalDate =
+    Instant.ofEpochMilli(trainRef.departureDateMillis).atZone(ROME_ZONE).toLocalDate()
+
 private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BoardScreen(
-    onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
+    onOpenTrain: (TrainRoute) -> Unit,
     initialRfi: String? = null,
     initialName: String? = null,
     onBack: (() -> Unit)? = null,
@@ -242,8 +246,19 @@ fun BoardScreen(
                             state.entries,
                             key = { it.trainRef.number + "|" + it.trainRef.departureDateMillis + "|" + it.scheduledTime },
                         ) { e ->
-                            BoardRow(e) { number, date ->
-                                onOpenTrain(number, date, state.station?.rfiCode, state.station?.name)
+                            BoardRow(e) { entry ->
+                                onOpenTrain(
+                                    TrainRoute(
+                                        number = entry.trainRef.number,
+                                        dateEpochDay = entry.dateInRome().toEpochDay(),
+                                        boardingRfi = state.station?.rfiCode,
+                                        boardingName = state.station?.name,
+                                        // Dal tabellone la corsa e' quella e non
+                                        // un'altra con lo stesso numero.
+                                        originCode = entry.trainRef.originCode,
+                                        departureMillis = entry.trainRef.departureDateMillis,
+                                    ),
+                                )
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                         }
@@ -272,15 +287,13 @@ fun BoardScreen(
 }
 
 @Composable
-private fun BoardRow(entry: BoardEntry, onOpenTrain: (String, LocalDate) -> Unit) {
-    val date = Instant.ofEpochMilli(entry.trainRef.departureDateMillis)
-        .atZone(ROME_ZONE).toLocalDate()
+private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
     val cancelled = entry.state == TrainState.CANCELLED
 
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onOpenTrain(entry.trainRef.number, date) }
+            .clickable { onOpenTrain(entry) }
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
