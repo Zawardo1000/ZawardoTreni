@@ -7,6 +7,7 @@ import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.SearchStore
 import it.zawardo.treni.data.repository.StationRepository
+import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.domain.model.Station
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +32,18 @@ object ServiceLocator {
     val currentDeparture = MutableStateFlow<Station?>(null)
 
     val stationRepository: StationRepository by lazy { StationRepository(NetworkModule.lefrecceApi) }
-    val journeyRepository: JourneyRepository by lazy { JourneyRepository(NetworkModule.lefrecceApi) }
+
+    /**
+     * Copre il servizio suburbano lombardo, che le altre due sorgenti ignorano,
+     * ed e' l'unica a fornire gli avvisi di lavori e sospensione.
+     */
+    val trenordRepository: TrenordRepository by lazy {
+        TrenordRepository(NetworkModule.trenordApi, NetworkModule.json)
+    }
+
+    val journeyRepository: JourneyRepository by lazy {
+        JourneyRepository(NetworkModule.lefrecceApi, trenordRepository)
+    }
     val trainStatusRepository: TrainStatusRepository by lazy {
         TrainStatusRepository(NetworkModule.viaggiaTrenoApi)
     }

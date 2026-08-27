@@ -10,10 +10,12 @@ import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
@@ -40,9 +42,24 @@ class StationRepository(
         }
 }
 
-/** Ricerca itinerari A→B sul BFF Le Frecce. */
+/** Risultato di una ricerca: le soluzioni piu' gli avvisi che le spiegano. */
+data class SearchOutcome(
+    val journeys: List<Journey> = emptyList(),
+    val alerts: List<ServiceAlert> = emptyList(),
+)
+
+/**
+ * Ricerca itinerari A→B interrogando **entrambe** le sorgenti.
+ *
+ * Nessuna delle due basta da sola: il BFF Le Frecce non instrada il servizio
+ * urbano e suburbano lombardo (una ricerca Milano Dateo → Lambrate tornava con
+ * due bus notturni), Trenord non conosce le lunghe percorrenze fuori regione.
+ * Insieme coprono entrambi i casi, e Trenord porta anche gli avvisi di lavori
+ * e sospensione che altrove non esistono.
+ */
 class JourneyRepository(
     private val lefrecce: LefrecceApi,
+    private val trenord: TrenordRepository? = null,
 ) {
     /**
      * L'offset di fuso e' OBBLIGATORIO.
@@ -58,6 +75,62 @@ class JourneyRepository(
      * Il `searchId` restituito dalla `/search` scade in circa 10 minuti, quindi
      * le due chiamate restano accoppiate qui dentro e non vengono mai separate.
      */
+    /**
+     * Interroga le due sorgenti **in parallelo** e ne fonde i risultati.
+     *
+     * In serie si sommerebbero i tempi di due backend lenti. Se una fallisce si
+     * tiene l'altra: meglio una lista parziale che una schermata vuota.
+     */
+    suspend fun searchAll(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        limit: Int = 10,
+    ): SearchOutcome = withContext(Dispatchers.IO) {
+        val lefrecceJob = async { runCatching { search(from, to, departure, limit) }.getOrDefault(emptyList()) }
+        val trenordJob = async {
+            if (trenord?.covers(from, to) == true) {
+                runCatching { trenord.search(from, to, departure) }.getOrNull()
+            } else {
+                null
+            }
+        }
+
+        val fromLefrecce = lefrecceJob.await()
+        val fromTrenord = trenordJob.await()
+
+        SearchOutcome(
+            journeys = merge(fromLefrecce, fromTrenord?.journeys.orEmpty(), departure, limit),
+            alerts = fromTrenord?.alerts.orEmpty(),
+        )
+    }
+
+    /**
+     * Unisce le due liste eliminando i doppioni.
+     *
+     * La stessa corsa puo' arrivare da entrambe: si riconosce dall'orario di
+     * partenza e dai numeri dei treni. A parita', vince Trenord, che espone
+     * ritardo e soppressione mentre il BFF no.
+     */
+    private fun merge(
+        lefrecce: List<Journey>,
+        trenord: List<Journey>,
+        departure: LocalDateTime,
+        limit: Int,
+    ): List<Journey> {
+        fun key(j: Journey) = j.departure.withSecond(0).withNano(0).toString() + "|" +
+            j.legs.mapNotNull { it.trainNumber }.sorted().joinToString(",")
+
+        val byKey = LinkedHashMap<String, Journey>()
+        trenord.forEach { byKey[key(it)] = it }
+        lefrecce.forEach { byKey.putIfAbsent(key(it), it) }
+
+        return byKey.values
+            .filter { !it.arrival.isBefore(departure.minusHours(1)) }
+            .sortedBy { it.departure }
+            .take(limit)
+    }
+
     suspend fun search(
         from: Station,
         to: Station,
@@ -70,9 +143,24 @@ class JourneyRepository(
             departureTime = departure.atZone(ROME).format(bffFormat),
         )
         if (session.searchId.isBlank()) return@withContext emptyList()
-        lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit)
+
+        /*
+         * Si chiede piu' del necessario e si tronca dopo il filtro.
+         *
+         * Alcune soluzioni non producono tratte utilizzabili e vengono scartate:
+         * chiedendone esattamente [limit] il risultato si assottigliava, e nei
+         * casi peggiori restava vuoto. Da fuori sembrava che la ricerca non
+         * trovasse nulla, e bastava spostare l'orario di un minuto perche'
+         * tornassero soluzioni diverse e "funzionasse".
+         */
+        lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit * OVERFETCH)
             .mapNotNull { it.toJourney() }
             .filter { it.legs.isNotEmpty() }
+            .take(limit)
+    }
+
+    private companion object {
+        const val OVERFETCH = 3
     }
 }
 

@@ -1,6 +1,7 @@
 package it.zawardo.treni.data.remote
 
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
+import it.zawardo.treni.data.remote.trenord.TrenordApi
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
@@ -86,6 +87,30 @@ object NetworkModule {
             .addConverterFactory(jsonConverter)
             .build()
             .create(ViaggiaTrenoApi::class.java)
+    }
+
+    /**
+     * Le risposte Trenord arrivano cifrate, quindi niente convertitore JSON:
+     * i metodi restituiscono il corpo grezzo e il repository lo decifra.
+     */
+    val trenordApi: TrenordApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(TrenordApi.BASE_URL)
+            .client(
+                baseClient()
+                    .addInterceptor { chain ->
+                        // Senza Referer il BFF dello store rifiuta la richiesta.
+                        chain.proceed(
+                            chain.request().newBuilder()
+                                .header("Referer", "https://www.trenord.it/store/")
+                                .build(),
+                        )
+                    }
+                    .build(),
+            )
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(TrenordApi::class.java)
     }
 
     val lefrecceApi: LefrecceApi by lazy {

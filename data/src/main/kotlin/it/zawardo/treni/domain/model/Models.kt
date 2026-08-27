@@ -21,12 +21,31 @@ data class Station(
     val trackable: Boolean get() = rfiCode != null
 }
 
+/**
+ * Da quale sorgente arriva una soluzione.
+ *
+ * Non e' un dettaglio interno: decide dove chiedere il tempo reale. ViaggiaTreno
+ * non copre il Passante milanese, Trenord non copre le lunghe percorrenze.
+ */
+enum class JourneySource { LEFRECCE, TRENORD }
+
+/** Avviso di servizio: lavori, sospensioni, servizi sostitutivi. */
+data class ServiceAlert(
+    val title: String?,
+    val message: String,
+    val severe: Boolean,
+)
+
 /** Una soluzione di viaggio: una o piu' tratte consecutive. */
 data class Journey(
     val departure: LocalDateTime,
     val arrival: LocalDateTime,
     val duration: Duration,
     val legs: List<Leg>,
+    val source: JourneySource = JourneySource.LEFRECCE,
+    /** Valorizzati quando la sorgente li espone: Trenord li fornisce, il BFF no. */
+    val cancelled: Boolean = false,
+    val delayMinutes: Int? = null,
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
     val isDirect: Boolean get() = legs.size <= 1

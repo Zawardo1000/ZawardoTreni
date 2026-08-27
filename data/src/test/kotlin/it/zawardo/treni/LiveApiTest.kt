@@ -2,13 +2,16 @@ package it.zawardo.treni
 
 import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.JourneyRepository
+import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
+import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.StopStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -22,7 +25,8 @@ import java.time.format.DateTimeFormatter
 class LiveApiTest {
 
     private val stations = StationRepository(NetworkModule.lefrecceApi)
-    private val journeys = JourneyRepository(NetworkModule.lefrecceApi)
+    private val trenord = TrenordRepository(NetworkModule.trenordApi, NetworkModule.json)
+    private val journeys = JourneyRepository(NetworkModule.lefrecceApi, trenord)
     private val trains = TrainStatusRepository(NetworkModule.viaggiaTrenoApi)
 
     private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
@@ -124,6 +128,88 @@ class LiveApiTest {
         assertTrue(
             "l'orario della soluzione non e' quello della stazione di partenza scelta",
             !journey.departure.toLocalTime().isBefore(requested.toLocalTime()),
+        )
+    }
+
+    /**
+     * Regressione: il BFF avvolge i viaggi regionali con cambio dentro un
+     * `ROUTE_SEGMENT` che tiene le tratte in `subSegments`. Leggendo solo i
+     * `SOLUTION_SEGMENT` di primo livello quelle soluzioni sparivano: restavano
+     * le sole Frecce, e chiedendone poche la lista poteva svuotarsi del tutto.
+     */
+    @Test
+    fun `i regionali con cambio non vengono persi`() = runBlocking {
+        val from = stations.search("bologna centrale").first { it.trackable }
+        val to = stations.search("firenze s. m").first { it.trackable }
+        val res = journeys.search(from, to, LocalDateTime.now().plusMinutes(5), limit = 8)
+
+        println("\n=== SOLUZIONI CON CAMBIO ===")
+        res.forEach { jr ->
+            println("  ${jr.departure.fmt()}->${jr.arrival.fmt()} cambi=${jr.changes} " +
+                jr.legs.joinToString(" + ") { it.label })
+        }
+
+        assertTrue("nessun itinerario", res.isNotEmpty())
+        assertTrue(
+            "ogni soluzione deve avere almeno una tratta: se e' vuota, il nodo " +
+                "non e' stato riconosciuto",
+            res.all { it.legs.isNotEmpty() },
+        )
+        assertTrue(
+            "nessuna soluzione con cambio: i ROUTE_SEGMENT vengono ancora persi",
+            res.any { it.changes > 0 },
+        )
+    }
+
+    /**
+     * Il Passante milanese non esiste ne' per ViaggiaTreno ne' per il BFF Le
+     * Frecce: Milano Dateo -> Lambrate tornava con due bus notturni. Trenord lo
+     * copre, e la ricerca combinata deve dimostrarlo.
+     */
+    @Test
+    fun `Trenord copre il Passante milanese`() = runBlocking {
+        val dateo = Station("S01650", 830001650, "Milano Dateo")
+        val lambrate = Station("S01701", 830001701, "Milano Lambrate")
+
+        // Il 31 agosto il Passante riapre dopo i lavori di manutenzione.
+        val quando = LocalDate.of(2026, 8, 31).atTime(14, 0)
+        val res = journeys.searchAll(dateo, lambrate, quando, limit = 6)
+
+        println("\n=== MILANO DATEO -> MILANO LAMBRATE, ${quando.toLocalDate()} ===")
+        res.journeys.forEach { j ->
+            println(
+                "  ${j.departure.fmt()}->${j.arrival.fmt()} ${j.duration.toMinutes()}min " +
+                    "cambi=${j.changes} [${j.source}] " + j.legs.joinToString(" + ") { it.label }
+            )
+        }
+
+        assertTrue("nessuna soluzione: il Passante resta scoperto", res.journeys.isNotEmpty())
+        assertTrue(
+            "nessuna soluzione con treni: solo bus, come prima della copertura Trenord",
+            res.journeys.any { j -> j.legs.any { it.isTrain } },
+        )
+    }
+
+    /**
+     * Trenord e' l'unica fonte che spieghi le situazioni eccezionali: chiusure
+     * di linea, lavori, servizi sostitutivi. Senza, l'app puo' solo mostrare
+     * l'assenza di treni senza dirne il motivo.
+     */
+    @Test
+    fun `gli avvisi di servizio arrivano da Trenord`() = runBlocking {
+        val dateo = Station("S01650", 830001650, "Milano Dateo")
+        val lambrate = Station("S01701", 830001701, "Milano Lambrate")
+        val res = journeys.searchAll(dateo, lambrate, LocalDateTime.now(), limit = 4)
+
+        println("\n=== AVVISI (${res.alerts.size}) ===")
+        res.alerts.forEach { a ->
+            println("  [${if (a.severe) "!" else " "}] ${a.title}: ${a.message.take(200)}")
+        }
+        // Gli avvisi dipendono dalla situazione del giorno: non se ne impone
+        // l'esistenza, si verifica che quando ci sono siano leggibili.
+        assertTrue(
+            "un avviso senza testo non serve a nulla",
+            res.alerts.all { it.message.isNotBlank() },
         )
     }
 

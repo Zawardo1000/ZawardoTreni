@@ -2,6 +2,7 @@ package it.zawardo.treni.data.mapper
 
 import it.zawardo.treni.data.remote.lefrecce.LocationDto
 import it.zawardo.treni.data.remote.lefrecce.SolutionDto
+import it.zawardo.treni.data.remote.lefrecce.SolutionNodeDto
 import it.zawardo.treni.data.remote.viaggiatreno.AndamentoTrenoDto
 import it.zawardo.treni.data.remote.viaggiatreno.FermataDto
 import it.zawardo.treni.data.remote.viaggiatreno.TabelloneVoceDto
@@ -44,17 +45,30 @@ fun LocationDto.toStation() = Station(
 )
 
 /**
- * Converte una soluzione del BFF in [Journey].
+ * Appiattisce l'albero dei nodi nelle sole tratte reali.
  *
- * Solo i nodi `SOLUTION_SEGMENT` sono tratte con un treno: gli altri
- * (`SOLUTION_LOCATION`) sono interscambi o fermate bus e vanno scartati.
+ * Il BFF avvolge i viaggi regionali con cambio dentro un `ROUTE_SEGMENT` che
+ * tiene le tratte in `subSegments`. Guardare solo i `SOLUTION_SEGMENT` di primo
+ * livello faceva sparire quelle soluzioni: la lista mostrava le sole Frecce, e
+ * su tratte servite solo da regionali poteva restare vuota.
  */
+private fun List<SolutionNodeDto>.flattenSegments(): List<SolutionNodeDto> =
+    flatMap { node ->
+        when (node.type) {
+            "SOLUTION_SEGMENT" -> listOf(node)
+            "ROUTE_SEGMENT" -> node.subSegments.flattenSegments()
+            // SOLUTION_LOCATION e simili: interscambi senza mezzo, niente da estrarre.
+            else -> emptyList()
+        }
+    }
+
+/** Converte una soluzione del BFF in [Journey]. */
 fun SolutionDto.toJourney(): Journey? {
     val dep = departureTime.parseIso() ?: return null
     val arr = arrivalTime.parseIso() ?: return null
 
     val legs = solutionNodes
-        .filter { it.type == "SOLUTION_SEGMENT" }
+        .flattenSegments()
         .mapNotNull { node ->
             val from = node.startLocation?.toStation() ?: return@mapNotNull null
             val to = node.endLocation?.toStation() ?: return@mapNotNull null

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import kotlinx.coroutines.async
@@ -54,6 +55,8 @@ data class ResultsUiState(
      * mostrate senza spiegazione, sembrano un guasto dell'app.
      */
     val noSameDayResults: Boolean = false,
+    /** Avvisi di servizio: lavori, sospensioni, bus sostitutivi. Solo da Trenord. */
+    val alerts: List<ServiceAlert> = emptyList(),
 )
 
 class ResultsViewModel(
@@ -87,7 +90,7 @@ class ResultsViewModel(
                 )
             }
 
-            val list = runCatching { journeys.search(from, to, departure, limit = PAGE) }
+            val outcome = runCatching { journeys.searchAll(from, to, departure, limit = PAGE) }
                 .getOrElse { e ->
                     _state.update {
                         it.copy(
@@ -97,6 +100,7 @@ class ResultsViewModel(
                     }
                     return@launch
                 }
+            val list = outcome.journeys
 
             val rows = list.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
             val requestedDay = departure.toLocalDate()
@@ -104,6 +108,7 @@ class ResultsViewModel(
                 it.copy(
                     loading = false,
                     journeys = rows,
+                    alerts = outcome.alerts,
                     noSameDayResults = rows.isNotEmpty() &&
                         rows.none { r -> r.journey.departure.toLocalDate() == requestedDay },
                 )
@@ -133,8 +138,10 @@ class ResultsViewModel(
                 val start = first.minusHours(hoursBack.toLong())
                 // Prima dell'inizio del giorno non c'e' niente da cercare.
                 val clamped = maxOf(start, first.toLocalDate().atStartOfDay())
-                val batch = runCatching { journeys.search(from, to, clamped, limit = WIDE_PAGE) }
-                    .getOrDefault(emptyList())
+                // searchAll e non search: anche andando indietro le corse Trenord
+                // devono comparire, altrimenti la lista cambia natura scorrendo.
+                val batch = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE) }
+                    .getOrNull()?.journeys.orEmpty()
                     .filter { it.departure.isBefore(first) }
                 if (batch.isNotEmpty()) {
                     found = batch.takeLast(PAGE)
@@ -169,8 +176,8 @@ class ResultsViewModel(
             _state.update { it.copy(loadingLater = true) }
 
             val batch = runCatching {
-                journeys.search(from, to, last.plusMinutes(1), limit = WIDE_PAGE)
-            }.getOrDefault(emptyList())
+                journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE)
+            }.getOrNull()?.journeys.orEmpty()
 
             val existing = current.journeys.map { it.key }.toSet()
             val rows = batch

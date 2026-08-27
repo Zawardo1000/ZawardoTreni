@@ -54,10 +54,13 @@ data class SolutionDto(
 data class SolutionIdDto(val travelSolutionId: Int = 0)
 
 /**
- * Un elemento di `solutionNodes`.
+ * Un elemento di `solutionNodes`. Il BFF ne usa **tre** tipi diversi:
  *
- * Solo quelli con `type == "SOLUTION_SEGMENT"` sono tratte vere; gli altri
- * (`SOLUTION_LOCATION`) sono punti di interscambio o fermate bus e non hanno treno.
+ *  - `SOLUTION_SEGMENT`: una tratta con il suo mezzo, il caso semplice;
+ *  - `ROUTE_SEGMENT`: un raggruppamento che tiene le tratte vere dentro
+ *    [subSegments]. E' la forma usata di norma per i viaggi regionali con
+ *    cambio: ignorarla significa perdere del tutto quelle soluzioni;
+ *  - `SOLUTION_LOCATION`: punto di interscambio o fermata bus, senza mezzo.
  */
 @Serializable
 data class SolutionNodeDto(
@@ -70,6 +73,8 @@ data class SolutionNodeDto(
     val offeredTransportMeanDeparture: TransportMeanDto? = null,
     /** Fermate intermedie note al BFF; spesso incompleto, il dettaglio vero e' su ViaggiaTreno. */
     val transitNodes: List<LocationDto> = emptyList(),
+    /** Valorizzato sui `ROUTE_SEGMENT`: contiene i veri `SOLUTION_SEGMENT`. */
+    val subSegments: List<SolutionNodeDto> = emptyList(),
 )
 
 @Serializable

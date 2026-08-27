@@ -30,6 +30,7 @@ class TrainDetailViewModel(
 ) : ViewModel() {
 
     private val trains = ServiceLocator.trainStatusRepository
+    private val trenord = ServiceLocator.trenordRepository
 
     private val _state = MutableStateFlow(TrainDetailUiState())
     val state: StateFlow<TrainDetailUiState> = _state.asStateFlow()
@@ -47,7 +48,15 @@ class TrainDetailViewModel(
         viewModelScope.launch {
             _state.update { it.copy(loading = initial, refreshing = !initial, error = null) }
 
-            val status = runCatching { trains.statusByNumber(trainNumber, date) }
+            /*
+             * ViaggiaTreno non copre tutto: sulle linee S del Passante milanese
+             * non ha alcun dato. Quando non risponde si ripiega su Trenord,
+             * che quelle corse le conosce.
+             */
+            val status = runCatching {
+                trains.statusByNumber(trainNumber, date)
+                    ?: trenord.trainStatus(trainNumber)
+            }
                 .getOrElse { e ->
                     _state.update {
                         it.copy(
