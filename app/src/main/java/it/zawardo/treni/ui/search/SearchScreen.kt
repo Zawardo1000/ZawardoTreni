@@ -25,9 +25,7 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -298,21 +296,6 @@ private fun SearchCard(
 
             Row(
                 Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
-                Column(Modifier.weight(1f)) {
-                    Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Nasconde le soluzioni con cambi",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -340,6 +323,23 @@ private fun SearchCard(
             }
 
             HorizontalDivider()
+
+            // I due interruttori condividono la stessa forma: sono entrambi
+            // preferenze che restano, non azioni della singola ricerca.
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Nasconde le soluzioni con cambi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
+            }
 
             Row(
                 Modifier.fillMaxWidth(),

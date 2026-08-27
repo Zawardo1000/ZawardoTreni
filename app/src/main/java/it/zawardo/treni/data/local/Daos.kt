@@ -93,3 +93,19 @@ interface StationDao {
     @Query("SELECT COUNT(*) FROM stations")
     suspend fun count(): Int
 }
+
+@Dao
+interface FavoriteTrainDao {
+    @Query("SELECT * FROM favorite_trains ORDER BY created_at DESC")
+    fun observe(): Flow<List<FavoriteTrainEntity>>
+
+    /** Flow e non suspend: la stellina deve cambiare da sola appena si tocca. */
+    @Query("SELECT EXISTS(SELECT 1 FROM favorite_trains WHERE number = :number)")
+    fun isFavorite(number: String): Flow<Boolean>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: FavoriteTrainEntity)
+
+    @Query("DELETE FROM favorite_trains WHERE number = :number")
+    suspend fun delete(number: String)
+}

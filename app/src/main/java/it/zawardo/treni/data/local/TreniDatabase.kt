@@ -9,14 +9,20 @@ import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
 @Database(
-    entities = [SearchHistoryEntity::class, SavedSearchEntity::class, StationEntity::class],
-    version = 2,
+    entities = [
+        SearchHistoryEntity::class,
+        SavedSearchEntity::class,
+        StationEntity::class,
+        FavoriteTrainEntity::class,
+    ],
+    version = 3,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
     abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun savedSearchDao(): SavedSearchDao
     abstract fun stationDao(): StationDao
+    abstract fun favoriteTrainDao(): FavoriteTrainDao
 
     companion object {
         /**
@@ -37,6 +43,28 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 aggiunge i treni preferiti.
+         *
+         * Il CREATE TABLE e' copiato dallo schema esportato da Room in
+         * `app/schemas/.../3.json`: scriverlo a mano porta a differenze
+         * invisibili (un NOT NULL, un DEFAULT) che fanno fallire la validazione
+         * all'avvio, non in compilazione.
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `favorite_trains` (" +
+                        "`number` TEXT NOT NULL, " +
+                        "`label` TEXT, " +
+                        "`origin_name` TEXT, " +
+                        "`destination_name` TEXT, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`number`))",
+                )
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -44,7 +72,7 @@ abstract class TreniDatabase : RoomDatabase() {
                 context.applicationContext,
                 TreniDatabase::class.java,
                 "treni.db",
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }

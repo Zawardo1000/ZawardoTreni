@@ -5,13 +5,20 @@ import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.data.repository.TrenordRepository
+import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.JourneySource
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TransportKind
+import it.zawardo.treni.domain.model.minutesFrom
+import it.zawardo.treni.domain.model.trainNumberOf
+import it.zawardo.treni.domain.model.stillCatchable
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -120,6 +127,116 @@ class IntegrazioneTest {
             "la fusione ha ${fuse.journeys.size} soluzioni ma la sorgente migliore ne aveva " +
                 "$migliore: si sta perdendo qualcosa",
             fuse.journeys.size >= minOf(migliore, 10),
+        )
+    }
+
+    /**
+     * Il caso che conta e' il treno in ritardo: ha l'orario di tabella nel
+     * passato ma parte ancora, e sparire sarebbe il danno peggiore che il
+     * tabellone possa fare.
+     */
+    /**
+     * Quello che si legge deve essere quello che si puo' cercare.
+     *
+     * L'utente copia l'etichetta dai risultati o dal tabellone e la incolla
+     * nella ricerca treno: se da "RE_8 2828" non si ricava "2828", quella corsa
+     * per lui non esiste.
+     */
+    @Test
+    fun `l'etichetta mostrata rientra nella ricerca treno`() = runBlocking {
+        val da = stations.search("milano centrale").first { it.trackable }
+        val a = stations.search("calolziocorte").first { it.trackable }
+        val tratte = journeys.searchAll(da, a, LocalDateTime.now(), limit = 10)
+            .journeys.flatMap { it.legs }.filter { it.isTrain }
+        val tabellone = trains.departures("S01700")
+
+        println("\n=== ETICHETTE -> NUMERO ===")
+        (tratte.map { it.label to it.trainNumber } + tabellone.map { it.label to it.trainRef.number })
+            .distinct()
+            .take(12)
+            .forEach { (etichetta, numero) ->
+                println(String.format("  %-18s -> %-8s (atteso %s)", etichetta, trainNumberOf(etichetta), numero))
+            }
+
+        assertTrue("nessuna tratta su cui verificare", tratte.isNotEmpty())
+        assertTrue("tabellone vuoto: non si puo' concludere nulla", tabellone.isNotEmpty())
+
+        val rotte = tratte.filter { trainNumberOf(it.label) != it.trainNumber }
+        assertTrue(
+            "da queste etichette non si ricava il numero: " +
+                rotte.joinToString { it.label + " -> " + trainNumberOf(it.label) },
+            rotte.isEmpty(),
+        )
+        val rotteTabellone = tabellone.filter { trainNumberOf(it.label) != it.trainRef.number }
+        assertTrue(
+            "etichette di tabellone non ricercabili: " +
+                rotteTabellone.joinToString { it.label + " -> " + trainNumberOf(it.label) },
+            rotteTabellone.isEmpty(),
+        )
+    }
+
+    @Test
+    fun `il filtro toglie i partiti e non i ritardatari`() {
+        fun riga(orario: String, ritardo: Int, stato: TrainState, inStazione: Boolean) =
+            BoardEntry(
+                trainRef = TrainRef("1", "S00001", 0L),
+                label = "REG 1",
+                category = "REG",
+                direction = "Chissa'",
+                scheduledTime = orario,
+                delayMinutes = ritardo,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                state = stato,
+                inStation = inStazione,
+            )
+
+        val ora = LocalTime.of(14, 0)
+        val partito = riga("13:50", 0, TrainState.REGULAR, false)
+        val fermoOltreOrario = riga("13:50", 0, TrainState.REGULAR, inStazione = true)
+        val ritardatario = riga("13:50", 20, TrainState.DELAYED, false)
+        val nonPartitoDaOrigine = riga("13:50", 0, TrainState.NOT_DEPARTED, false)
+        val futuro = riga("14:30", 0, TrainState.REGULAR, false)
+        val dopoMezzanotte = riga("00:10", 0, TrainState.REGULAR, false)
+
+        val tenuti = listOf(
+            partito, fermoOltreOrario, ritardatario, nonPartitoDaOrigine, futuro, dopoMezzanotte,
+        ).stillCatchable(ora)
+
+        assertTrue("un treno gia' partito resta nel tabellone", partito !in tenuti)
+        assertTrue(
+            "fermo in stazione ma oltre il proprio orario: ha chiuso le porte",
+            fermoOltreOrario !in tenuti,
+        )
+        assertTrue("un treno in ritardo di 20 minuti e' sparito", ritardatario in tenuti)
+        assertTrue("un treno non ancora partito dall'origine e' sparito", nonPartitoDaOrigine in tenuti)
+        assertTrue("un treno futuro e' sparito", futuro in tenuti)
+        assertTrue("le 00:10 lette alle 14:00 non sono un anticipo di 14 ore", dopoMezzanotte in tenuti)
+    }
+
+    @Test
+    fun `sul tabellone vero non restano corse gia' andate`() = runBlocking {
+        val ora = LocalTime.now()
+        val grezzo = trains.departures("S01700", ZonedDateTime.now())
+        val tenuti = grezzo.stillCatchable(ora)
+        val tolti = grezzo - tenuti.toSet()
+
+        println("\n=== FILTRO PARTENZE (Milano Centrale, ${ora.withNano(0)}) ===")
+        println("  ricevuti ${grezzo.size}, tenuti ${tenuti.size}, tolti ${tolti.size}")
+        tolti.take(5).forEach {
+            println("     - ${it.scheduledTime} ${it.delayMinutes.let { d -> if (d > 0) "+" + d else d }}" +
+                "  ${it.direction}  [${it.state}]")
+        }
+
+        assertTrue("il tabellone e' vuoto: non si puo' concludere nulla", grezzo.isNotEmpty())
+        assertTrue("il filtro ha svuotato il tabellone", tenuti.isNotEmpty())
+        val superstitiPassati = tenuti.filter {
+            it.state != TrainState.NOT_DEPARTED && it.minutesFrom(ora) < 0
+        }
+        assertTrue(
+            "sono rimaste ${superstitiPassati.size} corse gia' andate: " +
+                superstitiPassati.joinToString { it.scheduledTime.orEmpty() },
+            superstitiPassati.isEmpty(),
         )
     }
 

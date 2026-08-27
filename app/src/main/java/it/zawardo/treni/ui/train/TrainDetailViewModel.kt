@@ -8,8 +8,10 @@ import it.zawardo.treni.domain.model.TrainStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -31,9 +33,17 @@ class TrainDetailViewModel(
 
     private val trains = ServiceLocator.trainStatusRepository
     private val trenord = ServiceLocator.trenordRepository
+    private val favorites = ServiceLocator.trainFavorites
 
     private val _state = MutableStateFlow(TrainDetailUiState())
     val state: StateFlow<TrainDetailUiState> = _state.asStateFlow()
+
+    /**
+     * Preferito o no, letto dal database e non tenuto a parte: la stellina
+     * resta d'accordo con la lista anche se il treno viene tolto da li'.
+     */
+    val isFavorite: StateFlow<Boolean> = favorites.isFavorite(trainNumber)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var autoRefresh: Job? = null
 
@@ -43,6 +53,17 @@ class TrainDetailViewModel(
     }
 
     fun refresh() = load(initial = false)
+
+    /**
+     * Si salva il numero; nome e capolinea sono solo la descrizione con cui
+     * ritrovarlo nella lista, presi da com'e' adesso.
+     */
+    fun toggleFavorite() {
+        val wanted = !isFavorite.value
+        viewModelScope.launch {
+            favorites.toggle(trainNumber, wanted, _state.value.status, System.currentTimeMillis())
+        }
+    }
 
     private fun load(initial: Boolean) {
         viewModelScope.launch {

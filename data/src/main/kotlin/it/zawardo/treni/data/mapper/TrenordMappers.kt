@@ -104,7 +104,9 @@ private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): 
     return Leg(
         trainNumber = t.id?.takeIf { it.isNotBlank() },
         // Per le linee S l'etichetta utile e' la linea, non la sigla di categoria.
-        category = t.line?.takeIf { it.isNotBlank() } ?: t.category,
+        // L'underscore e' un separatore interno di HAFAS ("RE_8"): toglierlo
+        // rende l'etichetta uguale a come la si scrive e la si cerca.
+        category = t.line?.takeIf { it.isNotBlank() }?.replace("_", "") ?: t.category,
         from = from,
         to = to,
         departure = combine(date, first.scheduledDeparture) ?: fallback,

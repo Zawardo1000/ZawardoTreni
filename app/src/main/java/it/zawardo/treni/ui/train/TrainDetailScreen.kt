@@ -28,6 +28,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +93,7 @@ fun TrainDetailScreen(
         factory = viewModelFactory { initializer { TrainDetailViewModel(trainNumber, date) } },
     )
     val state by vm.state.collectAsState()
+    val isFavorite by vm.isFavorite.collectAsState()
 
     val context = LocalContext.current
     val followedNumber by TrainFollowService.followed.collectAsState()
@@ -128,6 +131,17 @@ fun TrainDetailScreen(
                     }
                 },
                 actions = {
+                    // Il preferito e' il numero, non la corsa di oggi: si puo'
+                    // aggiungere anche a treno arrivato o in un'altra data.
+                    IconButton(onClick = vm::toggleFavorite) {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            contentDescription = if (isFavorite) "Togli dai preferiti"
+                            else "Aggiungi ai preferiti",
+                            tint = if (isFavorite) MaterialTheme.colorScheme.tertiary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     // "Segui" ha senso solo su un treno che sta ancora circolando oggi.
                     val followable = state.status != null &&
                         state.status!!.state != TrainState.ARRIVED &&

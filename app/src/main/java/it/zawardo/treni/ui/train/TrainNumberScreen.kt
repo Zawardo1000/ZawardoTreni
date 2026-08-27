@@ -14,10 +14,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -37,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import it.zawardo.treni.data.local.FavoriteTrainEntity
 import it.zawardo.treni.domain.model.TrainRef
 import java.time.Instant
 import java.time.LocalDate
@@ -53,6 +57,7 @@ fun TrainNumberScreen(
     vm: TrainNumberViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
+    val favorites by vm.favorite.collectAsState()
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -70,7 +75,7 @@ fun TrainNumberScreen(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Numero treno") },
-                placeholder = { Text("es. 9505, 2618, 888A") },
+                placeholder = { Text("es. 9505, 888A, RE 2874") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 keyboardOptions = KeyboardOptions(
@@ -92,7 +97,8 @@ fun TrainNumberScreen(
             )
 
             Text(
-                "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
+                "Puoi incollare l'etichetta intera, sigla compresa. " +
+                    "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -108,9 +114,33 @@ fun TrainNumberScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(state.results, key = { it.originCode + it.departureDateMillis }) { ref ->
-                        RunCard(ref, onOpenTrain)
+                state.results.isNotEmpty() ->
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(state.results, key = { it.originCode + it.departureDateMillis }) { ref ->
+                            RunCard(ref, onOpenTrain)
+                        }
+                    }
+            }
+
+            // Spariscono appena c'e' un risultato: a quel punto hanno esaurito
+            // il loro scopo e ruberebbero spazio. `fill = false` li tiene alti
+            // quanto serve, cosi' non spingono via il resto.
+            if (favorites.isNotEmpty() && state.results.isEmpty() && !state.loading) {
+                Text("Preferiti", style = MaterialTheme.typography.titleSmall)
+                LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(favorites, key = { it.number }) { fav ->
+                        FavoriteCard(
+                            favorite = fav,
+                            onOpen = {
+                                keyboard?.hide()
+                                focus.clearFocus(force = true)
+                                vm.searchFavorite(fav.number)
+                            },
+                            onRemove = { vm.removeFavorite(fav.number) },
+                        )
                     }
                 }
             }
@@ -143,6 +173,53 @@ private fun RunCard(ref: TrainRef, onOpenTrain: (String, LocalDate, String?, Str
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
             )
+        }
+    }
+}
+
+/**
+ * Un preferito porta con se' la descrizione del giorno in cui e' stato salvato:
+ * "REG 2618 · Milano Centrale -> Lecco" dice all'utente qual e' il suo treno
+ * molto meglio di un numero nudo. Non e' un dato in tempo reale e non pretende
+ * di esserlo: quello arriva dopo, quando la corsa viene cercata.
+ */
+@Composable
+private fun FavoriteCard(
+    favorite: FavoriteTrainEntity,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    favorite.label ?: "Treno ${favorite.number}",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                val tratta = listOfNotNull(favorite.originName, favorite.destinationName)
+                if (tratta.isNotEmpty()) {
+                    Text(
+                        tratta.joinToString(" → "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            IconButton(onClick = onRemove) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = "Togli dai preferiti",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import it.zawardo.treni.domain.model.stillCatchable
 import java.time.ZonedDateTime
 
 enum class BoardMode { DEPARTURES, ARRIVALS }
@@ -30,6 +31,8 @@ data class BoardUiState(
     val locatingNearest: Boolean = false,
     val loadingMore: Boolean = false,
     val noMore: Boolean = false,
+    /** Serve a non paginare prima del primo caricamento. */
+    val loadedOnce: Boolean = false,
 )
 
 @OptIn(FlowPreview::class)
@@ -141,25 +144,48 @@ class BoardViewModel : ViewModel() {
         nextFrom = ZonedDateTime.now()
         viewModelScope.launch {
             _state.update { it.copy(loading = true, message = null, noMore = false) }
-            val entries = fetch(code, nextFrom)
+
+            /*
+             * Se la finestra contiene solo corse gia' andate si sposta avanti da
+             * sola. Succede a fine giornata e nelle stazioni piccole: lasciare
+             * una lista vuota bloccherebbe anche lo scorrimento infinito, che
+             * senza righe non ha nulla su cui scattare.
+             */
+            var grezzi = fetch(code, nextFrom)
+            var entries = grezzi.stillCatchable()
+            var tentativi = 0
+            while (entries.isEmpty() && grezzi.isNotEmpty() && tentativi < EXTRA_WINDOWS) {
+                tentativi++
+                nextFrom = nextFrom.plusMinutes(WINDOW_MINUTES)
+                grezzi = fetch(code, nextFrom)
+                entries = grezzi.stillCatchable()
+            }
+
+            val avanzato = grezzi.isNotEmpty()
             _state.update {
                 it.copy(
                     loading = false,
                     entries = entries,
+                    loadedOnce = true,
                     /*
-                     * Vuoto puo' voler dire due cose diverse e l'utente ha
-                     * diritto di distinguerle: nessun treno, oppure treni che
-                     * esistono ma di cui nessuna fonte pubblica ritardi.
+                     * Vuoto puo' voler dire tre cose diverse e l'utente ha
+                     * diritto di distinguerle: nessun treno, treni che esistono
+                     * ma di cui nessuna fonte pubblica ritardi, oppure una
+                     * giornata finita.
                      */
-                    message = if (entries.isEmpty()) {
-                        "Nessun treno tracciato in questa fascia oraria." +
-                            System.lineSeparator() + System.lineSeparator() +
-                            "Il tabellone mostra solo corse con ritardo e binario " +
-                            "rilevati. Se la stazione e' interessata da lavori o " +
-                            "sospensioni, la ricerca per tratta indica cosa circola " +
-                            "e da quando."
-                    } else {
-                        null
+                    message = when {
+                        entries.isNotEmpty() -> null
+                        avanzato ->
+                            "Da qui non parte piu' nulla per oggi." +
+                                System.lineSeparator() + System.lineSeparator() +
+                                "Le corse rimaste in questa fascia sono gia' passate."
+                        else ->
+                            "Nessun treno tracciato in questa fascia oraria." +
+                                System.lineSeparator() + System.lineSeparator() +
+                                "Il tabellone mostra solo corse con ritardo e binario " +
+                                "rilevati. Se la stazione e' interessata da lavori o " +
+                                "sospensioni, la ricerca per tratta indica cosa circola " +
+                                "e da quando."
                     },
                 )
             }
@@ -176,12 +202,12 @@ class BoardViewModel : ViewModel() {
     fun loadMore() {
         val s = _state.value
         val code = s.station?.rfiCode ?: return
-        if (s.loading || s.loadingMore || s.noMore || s.entries.isEmpty()) return
+        if (s.loading || s.loadingMore || s.noMore || !s.loadedOnce) return
 
         viewModelScope.launch {
             _state.update { it.copy(loadingMore = true) }
             nextFrom = nextFrom.plusMinutes(WINDOW_MINUTES)
-            val more = fetch(code, nextFrom)
+            val more = fetch(code, nextFrom).stillCatchable()
 
             val seen = _state.value.entries.map { key(it) }.toSet()
             val fresh = more.filter { key(it) !in seen }
@@ -219,6 +245,9 @@ class BoardViewModel : ViewModel() {
     private companion object {
         /** Ampiezza della finestra restituita da ViaggiaTreno, misurata. */
         const val WINDOW_MINUTES = 90L
+
+        /** Quante finestre saltare quando sono tutte di corse gia' andate. */
+        const val EXTRA_WINDOWS = 2
     }
 
     /** Chiamata dopo che il permesso e' stato concesso: la posizione arriva dalla UI. */

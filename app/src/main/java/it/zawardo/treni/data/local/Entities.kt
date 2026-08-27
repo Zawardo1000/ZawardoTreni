@@ -71,3 +71,24 @@ data class StationEntity(
     /** Ordinamento: le stazioni gia' usate salgono in cima ai suggerimenti. */
     @ColumnInfo(name = "use_count") val useCount: Int = 0,
 )
+
+/**
+ * Treno messo fra i preferiti.
+ *
+ * Si salva il **numero e basta**: origine e data di una corsa cambiano ogni
+ * giorno, quindi memorizzarle significherebbe avere un preferito scaduto entro
+ * mezzanotte. Il numero e' l'unica cosa che l'utente riconosce e che resta
+ * valida domani.
+ *
+ * Il resto e' una fotografia del momento del salvataggio, buona solo a
+ * distinguere "2618" da "2620" nella lista: non viene mai usata per cercare.
+ */
+@Entity(tableName = "favorite_trains")
+data class FavoriteTrainEntity(
+    @PrimaryKey val number: String,
+    /** Come si chiamava allora, es. "REG 2618". */
+    val label: String?,
+    @ColumnInfo(name = "origin_name") val originName: String?,
+    @ColumnInfo(name = "destination_name") val destinationName: String?,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)
