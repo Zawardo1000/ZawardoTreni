@@ -1,0 +1,88 @@
+package it.zawardo.treni.data.remote.lefrecce
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Stazione secondo il BFF Le Frecce.
+ *
+ * [bdoCode] e' il ponte verso ViaggiaTreno: e' esattamente il codice stazione
+ * usato da quell'API (es. "S01700"). Vale la relazione
+ * `locationId == 830000000 + bdoCode.drop(1).toLong()` per le stazioni RFI reali,
+ * ma NON per fermate bus, multistazione ("Tutte le stazioni") e operatori non FS,
+ * che hanno [bdoCode] null e vanno esclusi quando serve il realtime.
+ */
+@Serializable
+data class LocationDto(
+    val locationId: Long = 0,
+    val name: String = "",
+    val bdoCode: String? = null,
+    val bdo: Boolean = false,
+    val visible: Boolean = true,
+    val multistation: Boolean = false,
+    val bus: Boolean = false,
+    val geographicCoordinates: CoordinatesDto? = null,
+)
+
+@Serializable
+data class CoordinatesDto(
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+)
+
+/** Risposta di `/search`: apre una sessione di ricerca lato server. */
+@Serializable
+data class SearchResponseDto(
+    val searchId: String = "",
+    val totalSolutions: Int = 0,
+    /** Il searchId scade circa 10 minuti dopo: oltre, `/solutions` risponde 410. */
+    val expirationDate: String? = null,
+)
+
+@Serializable
+data class SolutionDto(
+    val id: SolutionIdDto? = null,
+    val departureTime: String? = null,
+    val arrivalTime: String? = null,
+    /** Durata totale in millisecondi. */
+    val totalDuration: Long = 0,
+    /** Sequenza delle categorie, una per tratta: es. ["RE","RE"] oppure ["FR"]. */
+    val classificationAcronymsSequence: List<String> = emptyList(),
+    val solutionNodes: List<SolutionNodeDto> = emptyList(),
+)
+
+@Serializable
+data class SolutionIdDto(val travelSolutionId: Int = 0)
+
+/**
+ * Un elemento di `solutionNodes`.
+ *
+ * Solo quelli con `type == "SOLUTION_SEGMENT"` sono tratte vere; gli altri
+ * (`SOLUTION_LOCATION`) sono punti di interscambio o fermate bus e non hanno treno.
+ */
+@Serializable
+data class SolutionNodeDto(
+    val type: String? = null,
+    val idXml: String? = null,
+    val departureTime: String? = null,
+    val arrivalTime: String? = null,
+    val startLocation: LocationDto? = null,
+    val endLocation: LocationDto? = null,
+    val offeredTransportMeanDeparture: TransportMeanDto? = null,
+    /** Fermate intermedie note al BFF; spesso incompleto, il dettaglio vero e' su ViaggiaTreno. */
+    val transitNodes: List<LocationDto> = emptyList(),
+)
+
+@Serializable
+data class TransportMeanDto(
+    /** Numero del treno, es. "9505". */
+    val name: String? = null,
+    val trainDescription: String? = null,
+    val classification: ClassificationDto? = null,
+)
+
+@Serializable
+data class ClassificationDto(
+    /** FR, FA, FB, IC, ICN, EC, REG, RE, RV, MET... */
+    val acronym: String? = null,
+    val name: String? = null,
+)

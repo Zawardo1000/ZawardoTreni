@@ -1,0 +1,99 @@
+package it.zawardo.treni.data.remote
+
+import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
+import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
+import kotlinx.serialization.json.Json
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Interceptor
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.util.concurrent.TimeUnit
+
+/**
+ * Costruzione dei client HTTP. DI manuale: l'app non ha abbastanza grafo
+ * da giustificare Hilt.
+ */
+object NetworkModule {
+
+    /**
+     * Le API di Trenitalia rifiutano o degradano le risposte con User-Agent anomali.
+     * Ne dichiariamo uno di browser mobile.
+     */
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/140.0.0.0 Mobile Safari/537.36"
+
+    val json: Json = Json {
+        // I payload del BFF contengono centinaia di campi commerciali che non ci servono.
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        explicitNulls = false
+    }
+
+    private val headerInterceptor = Interceptor { chain ->
+        val req = chain.request().newBuilder()
+            .header("User-Agent", USER_AGENT)
+            .header("Accept-Language", "it-IT,it;q=0.9")
+            .build()
+        chain.proceed(req)
+    }
+
+    /**
+     * CookieJar in memoria: il BFF Le Frecce lega il `searchId` alla `ASESSIONID`.
+     * Senza cookie persistenti tra la `/search` e la `/solutions` si ottiene 410.
+     */
+    private class SessionCookieJar : CookieJar {
+        private val store = mutableMapOf<String, MutableList<Cookie>>()
+
+        @Synchronized
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            val host = url.host
+            val jar = store.getOrPut(host) { mutableListOf() }
+            cookies.forEach { fresh ->
+                jar.removeAll { it.name == fresh.name && it.path == fresh.path }
+                jar.add(fresh)
+            }
+        }
+
+        @Synchronized
+        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            val now = System.currentTimeMillis()
+            val jar = store[url.host] ?: return emptyList()
+            jar.removeAll { it.expiresAt < now }
+            return jar.filter { it.matches(url) }
+        }
+    }
+
+    private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
+        .addInterceptor(headerInterceptor)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+
+    private val jsonConverter by lazy {
+        json.asConverterFactory("application/json".toMediaType())
+    }
+
+    val viaggiaTrenoApi: ViaggiaTrenoApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(ViaggiaTrenoApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(ViaggiaTrenoApi::class.java)
+    }
+
+    val lefrecceApi: LefrecceApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(LefrecceApi.BASE_URL)
+            .client(baseClient().cookieJar(SessionCookieJar()).build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(LefrecceApi::class.java)
+    }
+}

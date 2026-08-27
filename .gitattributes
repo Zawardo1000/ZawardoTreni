@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+# Gli script Windows richiedono CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# gradlew deve restare LF o non parte su Linux/macOS/CI
+gradlew text eol=lf
+
+# Binari: mai convertire
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.jar  binary
+*.keystore binary
+*.jks  binary

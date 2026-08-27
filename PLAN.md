@@ -67,7 +67,8 @@ Anche le soluzioni **con cambio** funzionano (es. `RE 17801` Bologna→Prato + `
 | Nome app | **ZawardoTreni** |
 | Package id | **`it.zawardo.treni`** (definitivo: su Play non è più modificabile dopo la prima pubblicazione) |
 | minSdk | **26** (Android 8.0) — copre >98% dei device, `java.time` nativo, niente desugaring |
-| compileSdk / targetSdk | **36** |
+| compileSdk | **37** — obbligatorio da Compose 1.12 (Compose BOM 2026.08.00) |
+| targetSdk | **36** |
 | Output | **debug APK** (iterazione) + **release firmato** (consegna finale) |
 | Toolchain | installazione **portabile** in `.tools/` — nessun admin, nessuna variabile globale |
 | Feature v1 extra | tutte e quattro: ricerca per numero treno · tabellone partenze/arrivi · stazione vicina GPS · notifica ritardo su treno seguito |
@@ -79,8 +80,9 @@ Anche le soluzioni **con cambio** funzionano (es. `RE 17801` Bologna→Prato + `
 | JDK | Temurin **17** (minimo e default per AGP 9.3) |
 | Gradle | **9.7.1** (AGP 9.3 richiede ≥ 9.5.0) |
 | AGP | **9.3.2** |
-| Kotlin | **2.4.10** |
+| Kotlin | **2.2.10** — non 2.4.10: AGP 9 ha il *built-in Kotlin* e impone la KGP che include. È la combinazione che Google testa e rilascia insieme. |
 | Compose BOM | **2026.08.00** |
+| KSP | **2.3.11** — versionamento indipendente. Le 2.0.x registrano i sorgenti generati via `kotlin.sourceSets`, che AGP 9 vieta. |
 | Room | **2.8.4** |
 | Retrofit | **3.0.0** |
 | OkHttp | **5.5.0** |
@@ -112,6 +114,25 @@ Unica via conforme → **Foreground Service** con notifica persistente.
 - Gradle wrapper 8.x / AGP 8.x / **JDK 17**
 
 Ogni dettaglio di rete sta dietro interfacce (`ItineraryDataSource`, `TrainStatusDataSource`) con base-URL in config: se un endpoint cambia si sostituisce l'implementazione senza toccare la UI.
+
+
+### Struttura a moduli
+| Modulo | Natura | Contenuto |
+|---|---|---|
+| `:data` | **Kotlin/JVM puro** | DTO, API Retrofit, mapper, modelli di dominio, repository |
+| `:app` | Android | UI Compose, Room, servizi, notifiche |
+
+L'isolamento di `:data` non e' estetico: OkHttp 5 in un unit test *Android* non riesce a
+caricare `PublicSuffixDatabase` e richiederebbe Robolectric. Su JVM puro i test di
+integrazione girano in ~20 s senza impalcature, e il compilatore impedisce che una
+dipendenza Android si infiltri nel layer dati.
+
+### Migrazione ad AGP 9 (scoperte durante il setup)
+1. **`org.jetbrains.kotlin.android` non va più applicato**: da AGP 9.0 il supporto Kotlin è integrato. Applicarlo fa fallire la configurazione.
+2. **Il blocco `kotlin {}` sta dentro `android {}`**, non più a livello di progetto: `android { kotlin { jvmToolchain(17) } }`.
+3. **La versione Kotlin la decide AGP**: la 9.3.2 porta KGP 2.2.10. Si può alzare via `buildscript` classpath, ma si esce dalla combinazione testata — scelto di non farlo.
+4. **KSP 2.0.x è incompatibile**: usa `kotlin.sourceSets` per i sorgenti generati, vietato dal built-in Kotlin. Serve la linea 2.3.x.
+5. I plugin `compose` e `serialization` restano da applicare a parte, allineati alla versione Kotlin in uso.
 
 ## 5. Schermate
 1. **Ricerca** — partenza/arrivo con autocompletamento (debounce 250 ms: prima Room offline, poi remoto), pulsante scambio, "vicino a me" (GPS opzionale), DatePicker + TimePicker **preimpostati su adesso**, `Cerca` + `Salva ricerca`.

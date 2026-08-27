@@ -11,22 +11,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+// Palette derivata dall'icona: blu notte primario, rosso locomotiva come accento.
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF1B5E20),
+    primary = Color(0xFF002171),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFA5D6A7),
-    onPrimaryContainer = Color(0xFF002106),
-    secondary = Color(0xFF52634F),
-    tertiary = Color(0xFF00600F),
+    primaryContainer = Color(0xFFD8E2FF),
+    onPrimaryContainer = Color(0xFF001945),
+    secondary = Color(0xFF565E71),
+    tertiary = Color(0xFFC62828),
+    onTertiary = Color.White,
+    error = Color(0xFFBA1A1A),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF8AD98F),
-    onPrimary = Color(0xFF00390B),
-    primaryContainer = Color(0xFF005313),
-    onPrimaryContainer = Color(0xFFA5D6A7),
-    secondary = Color(0xFFB9CCB4),
-    tertiary = Color(0xFF6FDB7C),
+    primary = Color(0xFFAEC6FF),
+    onPrimary = Color(0xFF002E69),
+    primaryContainer = Color(0xFF00429B),
+    onPrimaryContainer = Color(0xFFD8E2FF),
+    secondary = Color(0xFFBEC6DC),
+    tertiary = Color(0xFFFF5252),
+    onTertiary = Color(0xFF690005),
+    error = Color(0xFFFFB4AB),
 )
 
 @Composable

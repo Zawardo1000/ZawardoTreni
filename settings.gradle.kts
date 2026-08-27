@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "ZawardoTreni"
 include(":app")
+include(":data")
