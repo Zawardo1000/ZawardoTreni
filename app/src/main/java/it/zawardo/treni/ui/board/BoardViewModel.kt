@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.ZonedDateTime
 
 enum class BoardMode { DEPARTURES, ARRIVALS }
 
@@ -27,6 +28,8 @@ data class BoardUiState(
     val entries: List<BoardEntry> = emptyList(),
     val message: String? = null,
     val locatingNearest: Boolean = false,
+    val loadingMore: Boolean = false,
+    val noMore: Boolean = false,
 )
 
 @OptIn(FlowPreview::class)
@@ -40,6 +43,15 @@ class BoardViewModel : ViewModel() {
     val state: StateFlow<BoardUiState> = _state.asStateFlow()
 
     private val queries = MutableStateFlow("")
+
+    /**
+     * Da che ora chiedere il prossimo blocco.
+     *
+     * ViaggiaTreno non pagina: `/partenze` restituisce una finestra di circa due
+     * ore attorno all'orario richiesto. Per vedere piu' avanti si rifa' la
+     * chiamata spostando l'orario, e si concatenano i blocchi.
+     */
+    private var nextFrom: ZonedDateTime = ZonedDateTime.now()
 
     init {
         viewModelScope.launch {
@@ -126,12 +138,10 @@ class BoardViewModel : ViewModel() {
         val station = _state.value.station ?: return
         val code = station.rfiCode ?: return
 
+        nextFrom = ZonedDateTime.now()
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, message = null) }
-            val entries = when (_state.value.mode) {
-                BoardMode.DEPARTURES -> trains.departures(code)
-                BoardMode.ARRIVALS -> trains.arrivals(code)
-            }
+            _state.update { it.copy(loading = true, message = null, noMore = false) }
+            val entries = fetch(code, nextFrom)
             _state.update {
                 it.copy(
                     loading = false,
@@ -155,6 +165,51 @@ class BoardViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    /**
+     * Blocco successivo: si sposta la finestra in avanti e si concatena.
+     *
+     * Le finestre si sovrappongono di qualche minuto, quindi i doppioni vanno
+     * tolti: senza, lo stesso treno comparirebbe due volte a cavallo fra un
+     * blocco e l'altro.
+     */
+    fun loadMore() {
+        val s = _state.value
+        val code = s.station?.rfiCode ?: return
+        if (s.loading || s.loadingMore || s.noMore || s.entries.isEmpty()) return
+
+        viewModelScope.launch {
+            _state.update { it.copy(loadingMore = true) }
+            nextFrom = nextFrom.plusMinutes(WINDOW_MINUTES)
+            val more = fetch(code, nextFrom)
+
+            val seen = _state.value.entries.map { key(it) }.toSet()
+            val fresh = more.filter { key(it) !in seen }
+
+            _state.update {
+                it.copy(
+                    loadingMore = false,
+                    entries = it.entries + fresh,
+                    // Due finestre di fila senza nulla di nuovo: la giornata e' finita.
+                    noMore = fresh.isEmpty(),
+                )
+            }
+        }
+    }
+
+    private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> =
+        when (_state.value.mode) {
+            BoardMode.DEPARTURES -> trains.departures(code, at)
+            BoardMode.ARRIVALS -> trains.arrivals(code, at)
+        }
+
+    private fun key(e: BoardEntry) =
+        e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime
+
+    private companion object {
+        /** Ampiezza della finestra restituita da ViaggiaTreno, misurata. */
+        const val WINDOW_MINUTES = 90L
     }
 
     /** Chiamata dopo che il permesso e' stato concesso: la posizione arriva dalla UI. */

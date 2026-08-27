@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -31,9 +32,12 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,6 +88,20 @@ fun BoardScreen(
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // Stesso scorrimento automatico dei risultati di ricerca: arrivando in
+    // fondo si chiede la finestra oraria successiva.
+    val listState = rememberLazyListState()
+    val atEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+            info.totalItemsCount > 0 && last >= info.totalItemsCount - 2
+        }
+    }
+    LaunchedEffect(atEnd, state.entries.size) {
+        if (atEnd) vm.loadMore()
+    }
 
     val requestLocation = rememberLocationRequester { granted ->
         if (!granted) {
@@ -219,12 +237,32 @@ fun BoardScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
-                    else -> LazyColumn {
-                        items(state.entries, key = { it.trainRef.number + it.trainRef.departureDateMillis }) { e ->
+                    else -> LazyColumn(state = listState) {
+                        items(
+                            state.entries,
+                            key = { it.trainRef.number + "|" + it.trainRef.departureDateMillis + "|" + it.scheduledTime },
+                        ) { e ->
                             BoardRow(e) { number, date ->
                                 onOpenTrain(number, date, state.station?.rfiCode, state.station?.name)
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        }
+                        item {
+                            Box(
+                                Modifier.fillMaxWidth().padding(vertical = 18.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                when {
+                                    state.loadingMore ->
+                                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    state.noMore -> Text(
+                                        "Fine dell'elenco",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    else -> TextButton(onClick = vm::loadMore) { Text("Mostra altri treni") }
+                                }
+                            }
                         }
                     }
                 }
