@@ -37,7 +37,6 @@ class BoardViewModel : ViewModel() {
 
     private val stationsRepo = ServiceLocator.stationRepository
     private val trains = ServiceLocator.trainStatusRepository
-    private val trenord = ServiceLocator.trenordRepository
     private val store = ServiceLocator.searchStore
 
     private val _state = MutableStateFlow(BoardUiState())
@@ -53,9 +52,6 @@ class BoardViewModel : ViewModel() {
      * chiamata spostando l'orario, e si concatenano i blocchi.
      */
     private var nextFrom: ZonedDateTime = ZonedDateTime.now()
-
-    /** Il tabellone Trenord non accetta un orario: si chiede solo al primo giro. */
-    private var firstWindow: Boolean = true
 
     init {
         viewModelScope.launch {
@@ -143,7 +139,6 @@ class BoardViewModel : ViewModel() {
         val code = station.rfiCode ?: return
 
         nextFrom = ZonedDateTime.now()
-        firstWindow = true
         viewModelScope.launch {
             _state.update { it.copy(loading = true, message = null, noMore = false) }
             val entries = fetch(code, nextFrom)
@@ -160,9 +155,9 @@ class BoardViewModel : ViewModel() {
                         "Nessun treno tracciato in questa fascia oraria." +
                             System.lineSeparator() + System.lineSeparator() +
                             "Il tabellone mostra solo corse con ritardo e binario " +
-                            "rilevati. Alcune fermate, fra cui quelle sotterranee " +
-                            "del Passante milanese, non hanno tracciamento: per " +
-                            "quelle usa la ricerca per tratta."
+                            "rilevati. Se la stazione e' interessata da lavori o " +
+                            "sospensioni, la ricerca per tratta indica cosa circola " +
+                            "e da quando."
                     } else {
                         null
                     },
@@ -186,7 +181,6 @@ class BoardViewModel : ViewModel() {
         viewModelScope.launch {
             _state.update { it.copy(loadingMore = true) }
             nextFrom = nextFrom.plusMinutes(WINDOW_MINUTES)
-            firstWindow = false
             val more = fetch(code, nextFrom)
 
             val seen = _state.value.entries.map { key(it) }.toSet()
@@ -204,59 +198,20 @@ class BoardViewModel : ViewModel() {
     }
 
     /**
-     * Un tabellone, due sorgenti.
+     * Il tabellone ha una sola sorgente: ViaggiaTreno.
      *
-     * ViaggiaTreno copre la rete RFI e include gia' i treni Trenord dove li
-     * pubblica — Milano Cadorna, capolinea puramente Trenord, ha le sue
-     * partenze. Ma sulle fermate sotterranee del Passante milanese non pubblica
-     * nulla, e li' l'unica fonte e' il tabellone Trenord.
-     *
-     * Si interrogano entrambe in parallelo e si fondono. ViaggiaTreno vince sui
-     * doppioni perche' porta ritardo e binario, che l'altro non ha.
+     * Copre l'intera rete RFI, comprese le stazioni del Passante milanese, che
+     * popola appena la linea circola. Una seconda sorgente era stata aggiunta
+     * durante i lavori credendo a una lacuna permanente, e si e' rivelata
+     * ridondante.
      */
-    private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> {
-        val arrivals = _state.value.mode == BoardMode.ARRIVALS
-        val rfi = if (arrivals) trains.arrivals(code, at) else trains.departures(code, at)
+    private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> =
+        if (_state.value.mode == BoardMode.ARRIVALS) {
+            trains.arrivals(code, at)
+        } else {
+            trains.departures(code, at)
+        }
 
-        /*
-         * Trenord si interroga solo quando ViaggiaTreno tace.
-         *
-         * Dove RFI pubblica, i treni Trenord ci sono gia' e la fusione li
-         * scarterebbe come doppioni: chiedere il tabellone Trenord costerebbe
-         * una dozzina di chiamate per non aggiungere una riga. Resta utile solo
-         * sulle fermate scoperte, dove e' l'unica fonte.
-         *
-         * Il suo tabellone e' inoltre sempre "adesso": non accetta un orario,
-         * quindi partecipa solo alla prima finestra.
-         */
-        if (rfi.isNotEmpty() || !firstWindow) return merge(rfi, emptyList())
-
-        val tn = runCatching { trenord.board(code, arrivals) }.getOrDefault(emptyList())
-        return merge(rfi, tn)
-    }
-
-    /**
-     * Fonde le due liste. La chiave e' numero treno + orario: lo stesso treno
-     * visto dalle due sorgenti va mostrato una volta sola.
-     */
-    private fun merge(fromRfi: List<BoardEntry>, fromTrenord: List<BoardEntry>): List<BoardEntry> {
-        val seen = fromRfi.map { it.trainRef.number + "|" + it.scheduledTime }.toSet()
-        val extra = fromTrenord.filter { it.trainRef.number + "|" + it.scheduledTime !in seen }
-        return (fromRfi + extra)
-            /*
-             * Solo corse tracciate.
-             *
-             * Il tabellone Trenord e' orario teorico e per due terzi delle corse
-             * resta tale anche dopo aver interrogato il dettaglio. Una riga senza
-             * ritardo ne' binario non aggiunge nulla a un orario cartaceo, e
-             * mescolata alle altre fa sembrare misurato cio' che non lo e'.
-             *
-             * Il prezzo e' che le fermate senza copertura restano vuote: e'
-             * preferibile al rumore.
-             */
-            .filter { it.hasRealtime }
-            .sortedBy { it.scheduledTime ?: "" }
-    }
 
     private fun key(e: BoardEntry) =
         e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime

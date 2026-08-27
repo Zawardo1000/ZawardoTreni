@@ -111,18 +111,4 @@ interface TrenordApi {
         @Query("date") date: String? = null,
     ): ResponseBody
 
-    /**
-     * Tabellone di stazione.
-     *
-     * Sta fuori dal BFF e risponde in JSON **non cifrato**, ma con dentro
-     * frammenti di HTML gia' renderizzati. E' l'unica fonte per le fermate del
-     * Passante milanese.
-     */
-    @GET("https://www.trenord.it/rest/render/station-details")
-    suspend fun stationDetails(
-        @Query("mirCode") mirCode: String,
-        @Query("L") language: String = "it",
-        @Query("mxp") mxp: Boolean = false,
-        @Query("map_zoom") mapZoom: Int = 14,
-    ): TrenordStationDetailsDto
 }

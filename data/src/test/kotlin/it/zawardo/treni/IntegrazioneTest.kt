@@ -16,12 +16,12 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * Verifica d'insieme delle tre sorgenti.
+ * Verifica d'insieme, non dei singoli contratti.
  *
- * I test in [LiveApiTest] controllano un contratto per volta; qui si controlla
- * che stiano insieme: che i tabelloni coprano sia la rete RFI sia Trenord, che
- * le righe non si duplichino, che la paginazione a finestre avanzi davvero, e
- * che la ricerca fonda le due sorgenti invece di perderne una.
+ * [LiveApiTest] controlla una risposta per volta; qui si controlla che i pezzi
+ * stiano insieme: che i tabelloni rispondano senza doppioni, che la paginazione
+ * a finestre avanzi davvero, che la ricerca fonda Le Frecce e Trenord senza
+ * perdere soluzioni, e che i servizi sostitutivi restino distinti dai treni.
  *
  * Dipendono dal servizio reale del momento: quando una tratta e' ferma il test
  * lo dichiara invece di fallire, perche' un treno che non circola non e' un
@@ -36,7 +36,7 @@ class IntegrazioneTest {
 
     private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
-    /** Stazioni scelte per coprire i tre casi: solo RFI, solo Trenord, entrambe. */
+    /** Stazioni scelte per coprire capolinea, nodi e fermate del Passante. */
     private val campione = listOf(
         "S01700" to "Milano Centrale",
         "S01066" to "Milano Cadorna",
@@ -46,50 +46,22 @@ class IntegrazioneTest {
     )
 
     @Test
-    fun `i tabelloni coprono sia RFI sia Trenord, senza doppioni`() = runBlocking {
-        println("\n=== TABELLONI: copertura, doppioni, tempo reale ===")
-        println(String.format("%-24s %6s %8s %7s %9s %9s", "stazione", "RFI", "Trenord", "fusi", "mostrati", "scartati"))
-
-        var almenoUnaSoloTrenord = false
+    fun `i tabelloni rispondono e non hanno doppioni`() = runBlocking {
+        println("\n=== TABELLONI: copertura e doppioni ===")
+        println(String.format("%-30s %8s %12s", "stazione", "treni", "con ritardo"))
 
         for ((code, nome) in campione) {
             val rfi = runCatching { trains.departures(code) }.getOrDefault(emptyList())
-            val tn = runCatching { trenord.board(code) }.getOrDefault(emptyList())
+            val conRitardo = rfi.count { it.delayMinutes != 0 }
+            println(String.format("%-30s %8d %12d", nome, rfi.size, conRitardo))
 
-            // Stessa fusione della schermata: chiave numero + orario.
-            val visti = rfi.map { it.trainRef.number + "|" + it.scheduledTime }.toSet()
-            val extra = tn.filter { it.trainRef.number + "|" + it.scheduledTime !in visti }
-            val fusi = rfi + extra
-
-            // Stessa politica della schermata: si mostrano solo corse tracciate.
-            val mostrati = fusi.filter { it.hasRealtime }
-            val scartati = fusi.size - mostrati.size
-            println(String.format("%-24s %6d %8d %7d %9d %9d", nome, rfi.size, tn.size, fusi.size, mostrati.size, scartati))
-
-            if (tn.any { it.hasRealtime } && rfi.isEmpty()) almenoUnaSoloTrenord = true
-
-            // Nessun doppione dopo la fusione.
-            val chiavi = fusi.map { it.trainRef.number + "|" + it.scheduledTime }
+            // Nessun doppione nella finestra restituita.
+            val chiavi = rfi.map { it.trainRef.number + "|" + it.scheduledTime }
             assertTrue(
-                "$nome: ${chiavi.size - chiavi.toSet().size} righe duplicate dopo la fusione",
+                "$nome: ${chiavi.size - chiavi.toSet().size} righe duplicate nel tabellone",
                 chiavi.size == chiavi.toSet().size,
             )
         }
-
-        /*
-         * Non si pretende che Trenord copra da solo qualche stazione: dopo il
-         * filtro sui dati tracciati puo' non restare nulla, ed e' una scelta
-         * voluta. Si verifica invece che il contributo Trenord, quando c'e',
-         * non introduca doppioni: gia' controllato sopra stazione per stazione.
-         */
-        println(
-            if (almenoUnaSoloTrenord) {
-                "  Trenord copre da solo almeno una stazione con dati tracciati"
-            } else {
-                "  nessuna stazione coperta dal solo Trenord con dati tracciati " +
-                    "(atteso quando il Passante non e' monitorato)"
-            },
-        )
     }
 
     @Test
