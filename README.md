@@ -2,7 +2,8 @@
 
 App Android per orari e stato in tempo reale dei treni italiani.
 
-> **App non ufficiale**, non affiliata né approvata da Trenitalia S.p.A. o Ferrovie dello Stato Italiane.
+> **App non ufficiale**, non affiliata né approvata da Trenitalia S.p.A., Ferrovie dello
+> Stato Italiane, Trenord S.r.l. o Italo – Nuovo Trasporto Viaggiatori S.p.A.
 > Nessuna vendita di biglietti.
 
 ## Cosa fa
