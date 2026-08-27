@@ -59,6 +59,24 @@ class BoardViewModel : ViewModel() {
      */
     private var nextFrom: ZonedDateTime = ZonedDateTime.now()
 
+    /*
+     * Queste due devono restare sopra `init`.
+     *
+     * Il blocco `init` arriva a chiamare `load()`, e le proprieta' si
+     * inizializzano in ordine di dichiarazione: una dichiarata piu' in basso, a
+     * quel punto, e' ancora null. Il compilatore non lo segnala e il guasto e'
+     * un crash all'apertura del tabellone.
+     */
+
+    /** Corse gia' interrogate: una volta a testa, anche scorrendo avanti e indietro. */
+    private val verificate = mutableSetOf<String>()
+
+    /**
+     * Poche richieste per volta. Una schermata mostra una decina di righe e
+     * lanciarle tutte insieme vorrebbe dire dieci connessioni per uno sguardo.
+     */
+    private val limite = Semaphore(3)
+
     init {
         viewModelScope.launch {
             queries.debounce(250).distinctUntilChanged().collect { suggest(it) }
@@ -280,15 +298,6 @@ class BoardViewModel : ViewModel() {
 
     private fun key(e: BoardEntry) =
         e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime
-
-    /** Corse gia' interrogate: una volta a testa, anche scorrendo avanti e indietro. */
-    private val verificate = mutableSetOf<String>()
-
-    /**
-     * Poche richieste per volta. Una schermata mostra una decina di righe e
-     * lanciarle tutte insieme vorrebbe dire dieci connessioni per uno sguardo.
-     */
-    private val limite = Semaphore(3)
 
     private companion object {
         /** Ampiezza della finestra restituita da ViaggiaTreno, misurata. */

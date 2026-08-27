@@ -40,6 +40,7 @@
 -keep class it.zawardo.treni.ui.AboutRoute { *; }
 -keep class it.zawardo.treni.ui.ResultsRoute { *; }
 -keep class it.zawardo.treni.ui.TrainRoute { *; }
+-keep class it.zawardo.treni.ui.StationBoardRoute { *; }
 
 # =====================================================================
 # Retrofit
