@@ -171,6 +171,13 @@ class JourneyRepository(
 /** Stato realtime delle corse, da ViaggiaTreno. */
 class TrainStatusRepository(
     private val viaggiaTreno: ViaggiaTrenoApi,
+    /**
+     * Serve per i soppressi, che ViaggiaTreno non conosce affatto: di una corsa
+     * cancellata non ha il record, quindi cercarla per numero non da' nulla.
+     */
+    private val trenord: TrenordRepository? = null,
+    /** E per Italo, che ViaggiaTreno non pubblica proprio: nessuna corsa, mai. */
+    private val italo: ItaloRepository? = null,
 ) {
     /**
      * Formato data accettato dai tabelloni: stile `Date.toString()` di JavaScript,
@@ -216,7 +223,18 @@ class TrainStatusRepository(
      * regionale, "EC20" l'eurocity. Se non lascia nulla viene ignorata, perche'
      * deve restringere, mai nascondere.
      */
-    suspend fun findRuns(trainNumber: String, category: String? = null): List<TrainRun> =
+    suspend fun findRuns(
+        trainNumber: String,
+        category: String? = null,
+        /**
+         * Se ViaggiaTreno non trova nulla, chiedere anche a Trenord.
+         *
+         * Vale la pena solo per una ricerca chiesta davvero: quella che parte da
+         * sola mentre si digita passerebbe da qui a ogni cifra, e per numeri
+         * ancora a meta' che non esistono.
+         */
+        askTrenord: Boolean = true,
+    ): List<TrainRun> =
         withContext(Dispatchers.IO) {
             val refs = resolve(trainNumber)
             val corse = refs
@@ -230,8 +248,43 @@ class TrainStatusRepository(
                         destination = stato?.destination,
                     )
                 }
-            if (category.isNullOrBlank() || corse.size <= 1) return@withContext corse
-            corse.filter { matchesCategory(it.label, category) }.ifEmpty { corse }
+            if (corse.isNotEmpty()) {
+                return@withContext if (category.isNullOrBlank() || corse.size <= 1) corse
+                else corse.filter { matchesCategory(it.label, category) }.ifEmpty { corse }
+            }
+
+            /*
+             * Niente da ViaggiaTreno: puo' essere un numero che non esiste, ma
+             * puo' anche essere una corsa soppressa, che li' viene tolta di
+             * mezzo del tutto. Chiederlo a Trenord distingue i due casi, e nel
+             * secondo la corsa si apre e si legge "Soppresso" invece di "nessun
+             * treno con questo numero".
+             */
+            if (!askTrenord) return@withContext emptyList()
+
+            /*
+             * Le altre due sorgenti, in ordine di probabilita'. Trenord per il
+             * regionale lombardo e per i soppressi, Italo per le sue corse, che
+             * qui non arriverebbero mai: ViaggiaTreno non le pubblica.
+             */
+            val altrove = trenord?.let { runCatching { it.trainStatus(trainNumber) }.getOrNull() }
+                ?: italo?.let { runCatching { it.trainStatus(trainNumber) }.getOrNull() }
+                ?: return@withContext emptyList()
+
+            listOf(
+                TrainRun(
+                    // Senza codice origine: il dettaglio risolve per numero e data.
+                    ref = TrainRef(
+                        number = trainNumber,
+                        originCode = "",
+                        departureDateMillis = LocalDate.now(ROME)
+                            .atStartOfDay(ROME).toInstant().toEpochMilli(),
+                    ),
+                    label = altrove.label.ifBlank { "Treno " + trainNumber },
+                    origin = altrove.origin,
+                    destination = altrove.destination,
+                ),
+            )
         }
 
     /**
@@ -251,6 +304,9 @@ class TrainStatusRepository(
      *
      * Senza contesto di salita resta il criterio della data, ed e' il caso della
      * ricerca per numero, dove la scelta la fa l'utente su un elenco.
+     *
+     * Per una data futura non restituisce nulla: ViaggiaTreno conosce solo la
+     * giornata in corso, e l'orario di domani non e' la corsa di oggi.
      */
     suspend fun resolveFor(
         trainNumber: String,
@@ -259,9 +315,25 @@ class TrainStatusRepository(
         boardingAt: LocalDateTime? = null,
     ): TrainRef? {
         val refs = resolve(trainNumber)
-        if (refs.size <= 1) return refs.firstOrNull()
+        if (refs.isEmpty()) return null
 
         val delGiorno = refs.filter { it.departureDateInRome() == date }
+
+        /*
+         * Per una data futura non c'e' corsa da restituire.
+         *
+         * `cercaNumeroTreno` elenca soltanto le corse in circolazione adesso:
+         * prenderne una per il giorno chiesto significa raccontare la giornata
+         * sbagliata. Il REG 11813 di domani mattina risultava "arrivato" perche'
+         * quello di oggi lo era davvero, alle 6:28.
+         *
+         * All'indietro il ripiego resta valido, e serve: una corsa notturna
+         * parte ieri e riguarda chi sale stamattina.
+         */
+        if (delGiorno.isEmpty() && date.isAfter(LocalDate.now(ROME))) return null
+
+        if (refs.size == 1) return refs.first()
+
         val ripiego = delGiorno.firstOrNull() ?: refs.first()
         if (boardingCode.isNullOrBlank()) return ripiego
 

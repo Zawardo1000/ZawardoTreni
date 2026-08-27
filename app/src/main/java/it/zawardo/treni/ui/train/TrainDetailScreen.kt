@@ -36,12 +36,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,6 +63,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.service.TrainFollowService
+import it.zawardo.treni.ui.common.TreniTopBar
+import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
@@ -100,7 +102,7 @@ fun TrainDetailScreen(
     val vm: TrainDetailViewModel = viewModel(
         factory = viewModelFactory { initializer {
             TrainDetailViewModel(
-                trainNumber, date, boardingRfi, boardingAt, originCode, departureMillis,
+                trainNumber, date, boardingRfi, boardingAt, boardingName, originCode, departureMillis,
             )
         } },
     )
@@ -135,28 +137,19 @@ fun TrainDetailScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(state.status?.label ?: "Treno $trainNumber")
-                        // Un treno a lunga percorrenza parte la sera e arriva il
-                        // giorno dopo: a meta' giornata ne circolano due con lo
-                        // stesso numero, e senza la data non si sa quale si stia
-                        // guardando.
-                        if (date != LocalDate.now()) {
-                            Text(
-                                "partita il " + date.format(GIORNO),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+            TreniTopBar(
+                title = state.status?.label ?: "Treno $trainNumber",
+                /*
+                 * Un treno a lunga percorrenza parte la sera e arriva il giorno
+                 * dopo: a meta' giornata ne circolano due con lo stesso numero, e
+                 * senza la data non si sa quale si stia guardando.
+                 */
+                subtitle = if (date != LocalDate.now()) {
+                    "partita il " + date.format(GIORNO)
+                } else {
+                    null
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro")
-                    }
-                },
+                onBack = onBack,
                 actions = {
                     // Il preferito e' il numero, non la corsa di oggi: si puo'
                     // aggiungere anche a treno arrivato o in un'altra data.
@@ -165,8 +158,8 @@ fun TrainDetailScreen(
                             if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
                             contentDescription = if (isFavorite) "Togli dai preferiti"
                             else "Aggiungi ai preferiti",
-                            tint = if (isFavorite) MaterialTheme.colorScheme.tertiary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            // Ambra quando e' acceso, bianco della barra quando no.
+                            tint = if (isFavorite) TreniBrand.star else LocalContentColor.current,
                         )
                     }
                     // "Segui" ha senso solo su un treno che sta ancora circolando oggi.
@@ -187,13 +180,16 @@ fun TrainDetailScreen(
                                 if (isFollowing) Icons.Filled.NotificationsActive
                                 else Icons.Filled.NotificationsNone,
                                 contentDescription = if (isFollowing) "Smetti di seguire" else "Segui questo treno",
-                                tint = if (isFollowing) MaterialTheme.colorScheme.tertiary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (isFollowing) TreniBrand.star else LocalContentColor.current,
                             )
                         }
                     }
                     if (state.refreshing) {
-                        CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp).padding(end = 4.dp),
+                            strokeWidth = 2.dp,
+                            color = TreniBrand.onTopBar,
+                        )
                     } else {
                         IconButton(onClick = vm::refresh) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Aggiorna")
@@ -240,6 +236,9 @@ fun TrainDetailScreen(
                             stop = stop,
                             isFirst = i == 0,
                             isLast = i == status.stops.lastIndex,
+                            // Corsa soppressa per intero: barrata tutta, non solo
+                            // le fermate che ViaggiaTreno elenca come soppresse.
+                            trainCancelled = status.state == TrainState.CANCELLED,
                             onOpenStation = onOpenStation,
                             // La fermata da cui sali e' quella che stai cercando
                             // nell'elenco: va trovata senza doverla leggere.
@@ -329,6 +328,7 @@ private fun StopRow(
     isFirst: Boolean,
     isLast: Boolean,
     isBoarding: Boolean = false,
+    trainCancelled: Boolean = false,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
     // Senza codice RFI non esiste un tabellone da aprire: la riga resta inerte
@@ -336,7 +336,8 @@ private fun StopRow(
     val code = stop.stationCode?.takeIf { it.isNotBlank() }
     val done = stop.status == StopStatus.DONE
     val current = stop.status == StopStatus.CURRENT
-    val cancelled = stop.status == StopStatus.CANCELLED
+    val stopCancelled = stop.status == StopStatus.CANCELLED
+    val cancelled = stopCancelled || trainCancelled
 
     val scheme = MaterialTheme.colorScheme
     val markerColor = when {
@@ -441,14 +442,14 @@ private fun StopRow(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            if (cancelled) {
+            if (stopCancelled) {
                 Text(
                     "Fermata soppressa",
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.error,
                 )
             } else {
-                TimeLine(stop, isFirst, isLast)
+                TimeLine(stop, isFirst, isLast, cancelled = trainCancelled)
                 PlatformLine(stop)
                 if (!stop.detected) {
                     Text(
@@ -467,7 +468,7 @@ private fun StopRow(
 }
 
 @Composable
-private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean) {
+private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean, cancelled: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
 
     // Al capolinea di partenza non esiste un arrivo, a quello finale non esiste una partenza.
@@ -483,6 +484,7 @@ private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean) {
                 delay = stop.arrivalDelayMinutes,
                 // In arrivo solo la cifra: la riga sarebbe troppo lunga con due testi.
                 withText = false,
+                cancelled = cancelled,
             )
         }
         if (showDeparture) {
@@ -492,6 +494,7 @@ private fun TimeLine(stop: Stop, isFirst: Boolean, isLast: Boolean) {
                 effective = stop.effectiveDeparture?.format(TIME),
                 delay = stop.departureDelayMinutes,
                 withText = true,
+                cancelled = cancelled,
             )
         }
         if (!showArrival && !showDeparture) {
@@ -511,6 +514,8 @@ private fun TimeCell(
     effective: String?,
     delay: Int,
     withText: Boolean,
+    /** Corsa soppressa: l'orario resta scritto, ma non lo fa nessuno. */
+    cancelled: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val shifted = delay != 0 && effective != null
@@ -522,7 +527,7 @@ private fun TimeCell(
         Text(
             scheduled,
             style = MaterialTheme.typography.bodyMedium,
-            textDecoration = if (shifted) TextDecoration.LineThrough else null,
+            textDecoration = if (shifted || cancelled) TextDecoration.LineThrough else null,
             color = if (shifted) scheme.onSurfaceVariant else scheme.onSurface,
         )
 

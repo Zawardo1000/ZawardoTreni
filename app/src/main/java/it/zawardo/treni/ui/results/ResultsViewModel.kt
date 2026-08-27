@@ -7,6 +7,8 @@ import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.declaredState
+import it.zawardo.treni.domain.model.soppressione
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -35,6 +37,19 @@ data class JourneyRow(
      * Lasciare "stato in aggiornamento" all'infinito sarebbe una bugia.
      */
     val realtimePossible: Boolean get() = journey.hasTrain
+
+    /**
+     * Il tempo reale vale per il giorno della **soluzione**, non per quello
+     * cercato.
+     *
+     * Non sono la stessa cosa: una ricerca fatta stasera puo' tornare corse di
+     * domani mattina, e chiedere per quelle lo stato di oggi risponde con la
+     * corsa sbagliata, quasi sempre gia' arrivata.
+     */
+    val isRealtimeDay: Boolean get() = journey.departure.toLocalDate() == LocalDate.now()
+
+    /** Interrogabile davvero: un treno, e nella giornata in cui il dato esiste. */
+    val realtimeNow: Boolean get() = realtimePossible && isRealtimeDay
 }
 
 data class ResultsUiState(
@@ -73,7 +88,12 @@ class ResultsViewModel(
     private val _state = MutableStateFlow(ResultsUiState())
     val state: StateFlow<ResultsUiState> = _state.asStateFlow()
 
-    /** Il realtime esiste solo per oggi: su altre date non ha senso nemmeno provarci. */
+    /**
+     * Solo per il cartello in cima alla lista: la data cercata non e' oggi.
+     *
+     * Quale riga sia interrogabile lo decide la riga stessa, dalla propria data
+     * di partenza: vedi [JourneyRow.isRealtimeDay].
+     */
     private val isToday: Boolean = departure.toLocalDate() == LocalDate.now()
 
     init {
@@ -110,7 +130,7 @@ class ResultsViewModel(
              */
             val list = outcome.journeys.applyDirectFilter()
 
-            val rows = list.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
+            val rows = list.map { it.toRow() }
             val requestedDay = departure.toLocalDate()
             _state.update {
                 it.copy(
@@ -165,7 +185,7 @@ class ResultsViewModel(
             }
 
             val existing = current.journeys.map { it.key }.toSet()
-            val rows = found.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
+            val rows = found.map { it.toRow() }
                 .filter { it.key !in existing }
 
             _state.update { s ->
@@ -191,7 +211,7 @@ class ResultsViewModel(
             val existing = current.journeys.map { it.key }.toSet()
             val rows = batch
                 .filter { it.departure.isAfter(last) }
-                .map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
+                .map { it.toRow() }
                 .filter { it.key !in existing }
                 .take(PAGE)
 
@@ -203,35 +223,64 @@ class ResultsViewModel(
     }
 
     /**
+     * Riga pronta da mostrare, gia' con quel che la sorgente dichiara.
+     *
+     * Trenord manda soppressione e ritardo insieme alla soluzione, e per le
+     * linee S sono l'unico dato che esistera' mai: ViaggiaTreno quelle corse non
+     * le conosce. Partire da li' vuol dire che un treno soppresso si vede subito,
+     * anche quando l'interrogazione successiva non trovera' nulla.
+     */
+    private fun Journey.toRow(): JourneyRow {
+        val row = JourneyRow(this, state = declaredState, delayMinutes = delayMinutes)
+        return row.copy(loadingStatus = row.realtimeNow)
+    }
+
+    /**
      * Arricchisce le righe indicate con lo stato del loro primo treno.
      *
      * Le chiamate partono in parallelo: in serie sarebbero una dozzina di
      * round-trip verso ViaggiaTreno e la lista resterebbe grigia per secondi.
      */
     private fun enrich(rows: List<JourneyRow>) {
-        if (!isToday || rows.isEmpty()) {
-            if (rows.isNotEmpty()) {
-                _state.update { s ->
-                    s.copy(journeys = s.journeys.map { it.copy(loadingStatus = false) })
-                }
-            }
-            return
-        }
-        val date = departure.toLocalDate()
+        // Ogni riga vale per il proprio giorno: quelle di domani non si chiedono.
+        val interrogabili = rows.filter { it.realtimeNow }
+        if (interrogabili.isEmpty()) return
 
         viewModelScope.launch {
             val enriched = coroutineScope {
-                rows.map { row ->
+                interrogabili.map { row ->
                     async {
                         // Solo i treni: interrogare ViaggiaTreno col "890A" di un bus
                         // sostitutivo e' una chiamata sprecata che fallisce sempre.
-                        val number = row.journey.legs.firstOrNull { it.isTrain }?.trainNumber
+                        val leg = row.journey.legs.firstOrNull { it.isTrain }
                             ?: return@async row.copy(loadingStatus = false)
-                        val status = runCatching { trains.statusByNumber(number, date) }.getOrNull()
+                        val number = leg.trainNumber
+                            ?: return@async row.copy(loadingStatus = false)
+                        val status = runCatching {
+                            /*
+                             * Data e stazione di salita sono della tratta, non
+                             * della ricerca: lo stesso numero torna ogni giorno e
+                             * puo' appartenere a due treni diversi. Senza, la
+                             * soluzione delle 01:31 di domani ereditava la corsa
+                             * di stamattina, gia' arrivata.
+                             */
+                            trains.statusByNumber(
+                                trainNumber = number,
+                                date = row.journey.departure.toLocalDate(),
+                                boardingCode = leg.from.rfiCode,
+                                boardingAt = leg.departure,
+                            )
+                        }.getOrNull()
                         row.copy(
                             loadingStatus = false,
-                            state = status?.state,
-                            delayMinutes = status?.delayMinutes,
+                            /*
+                             * La soppressione dichiarata dalla sorgente resta:
+                             * di un treno soppresso ViaggiaTreno non ha nemmeno
+                             * il record, e il suo silenzio non e' una smentita.
+                             */
+                            state = row.journey.declaredState?.takeIf { it.soppressione }
+                                ?: status?.state ?: row.state,
+                            delayMinutes = status?.delayMinutes ?: row.delayMinutes,
                         )
                     }
                 }.awaitAll()

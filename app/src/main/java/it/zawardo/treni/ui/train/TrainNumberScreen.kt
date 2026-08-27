@@ -29,7 +29,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import it.zawardo.treni.ui.common.SectionHeader
+import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -95,7 +96,7 @@ fun TrainNumberScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Cerca treno") }) },
+        topBar = { TreniTopBar(title = "Cerca treno") },
     ) { inner ->
         Column(
             Modifier
@@ -152,18 +153,11 @@ fun TrainNumberScreen(
             // che si puo' fare senza digitare, quindi deve essere la prima che
             // si vede. `fill = false` la tiene alta quanto serve.
             if (favorites.isNotEmpty() && state.results.isEmpty() && !state.loading) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Star,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.tertiary,
-                    )
-                    Text(
-                        "  Preferiti",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                }
+                SectionHeader(
+                    icon = Icons.Filled.Star,
+                    title = "Preferiti",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
                 LazyColumn(
                     modifier = Modifier.weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(8.dp),

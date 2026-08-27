@@ -1,6 +1,7 @@
 package it.zawardo.treni
 
 import it.zawardo.treni.data.remote.NetworkModule
+import it.zawardo.treni.data.repository.ItaloRepository
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.data.repository.StationRepository
@@ -26,6 +27,7 @@ class LiveApiTest {
 
     private val stations = StationRepository(NetworkModule.lefrecceApi)
     private val trenord = TrenordRepository(NetworkModule.trenordApi, NetworkModule.json)
+    private val italo = ItaloRepository(NetworkModule.italoApi)
     private val journeys = JourneyRepository(NetworkModule.lefrecceApi, trenord)
     private val trains = TrainStatusRepository(NetworkModule.viaggiaTrenoApi)
 
@@ -155,9 +157,25 @@ class LiveApiTest {
                 "non e' stato riconosciuto",
             res.all { it.legs.isNotEmpty() },
         )
+
+        /*
+         * Che nel campione ci sia un cambio dipende dall'orario del giorno, non
+         * dal codice: di sera fra Bologna e Firenze corrono solo diretti, e
+         * pretenderlo faceva fallire un test che non aveva scoperto niente.
+         *
+         * La regressione vera - i `ROUTE_SEGMENT` letti come soluzioni vuote -
+         * la controlla `le soluzioni con cambio non si perdono` in
+         * [IntegrazioneTest], su una risposta costruita apposta. Qui si guarda
+         * il servizio reale, e quando un cambio c'e' lo si verifica.
+         */
+        val conCambio = res.filter { it.changes > 0 }
+        if (conCambio.isEmpty()) {
+            println("  (nel campione non ci sono cambi: solo diretti a quest'ora)")
+            return@runBlocking
+        }
         assertTrue(
-            "nessuna soluzione con cambio: i ROUTE_SEGMENT vengono ancora persi",
-            res.any { it.changes > 0 },
+            "una soluzione con cambio deve avere una tratta per ogni pezzo di viaggio",
+            conCambio.all { it.legs.size == it.changes + 1 },
         )
     }
 
@@ -306,5 +324,151 @@ class LiveApiTest {
                 res == null,
             )
         }
+    }
+
+    /**
+     * L'orario di stazione Trenord e' l'unico elenco che contenga anche le corse
+     * soppresse: ViaggiaTreno un treno cancellato lo toglie del tutto, tabellone
+     * e ricerca per numero compresi.
+     *
+     * Le righe si estraggono da HTML con delle espressioni regolari. Se il
+     * markup cambia il parser smette di trovarle **in silenzio**, e i soppressi
+     * tornano invisibili senza che nulla si rompa: questo test e' li' per
+     * accorgersene.
+     */
+    @Test
+    fun `l'orario di stazione Trenord elenca le corse programmate`() = runBlocking {
+        val righe = trenord.timetable("S01701")
+
+        println("\n=== ORARIO TRENORD (Milano Lambrate) ===")
+        println("  righe: ${righe.size}")
+        righe.take(5).forEach { println("     ${it.scheduledTime}  ${it.label} -> ${it.direction}") }
+
+        assertTrue(
+            "nessuna riga: o il markup di Trenord e' cambiato, o l'endpoint non risponde",
+            righe.isNotEmpty(),
+        )
+        assertTrue(
+            "ogni riga deve avere numero e orario, o non e' confrontabile col tabellone",
+            righe.all { it.trainRef.number.isNotBlank() && !it.scheduledTime.isNullOrBlank() },
+        )
+
+        // Fuori dall'area Trenord la risposta e' vuota: la chiamata non fa danno.
+        val fuoriArea = trenord.timetable("S08409")
+        println("  Roma Termini: ${fuoriArea.size} righe")
+        assertTrue("fuori dalla Lombardia l'elenco deve restare vuoto", fuoriArea.isEmpty())
+    }
+
+    /**
+     * Italo esiste solo qui.
+     *
+     * Non e' una fonte in piu' sulle stesse corse: e' l'unica che le abbia. Se
+     * un giorno ViaggiaTreno cominciasse a pubblicarle, questo test lo direbbe
+     * fallendo sull'ultima riga, ed e' il momento in cui la sorgente si potrebbe
+     * togliere.
+     */
+    @Test
+    fun `il tabellone Italo elenca corse che ViaggiaTreno non ha`() = runBlocking {
+        val partenze = italo.board("S08409")
+        val arrivi = italo.board("S08409", arrivals = true)
+
+        println("\n=== ITALO A ROMA TERMINI ===")
+        println("  partenze: ${partenze.size}, arrivi: ${arrivi.size}")
+        partenze.take(4).forEach {
+            println("     ${it.scheduledTime}  ${it.label} -> ${it.direction}  bin ${it.actualPlatform ?: "-"}")
+        }
+
+        if (partenze.isEmpty() && arrivi.isEmpty()) {
+            println("  (nessun Italo in questa fascia: verifica non conclusiva)")
+            return@runBlocking
+        }
+
+        val righe = partenze + arrivi
+        assertTrue(
+            "ogni corsa Italo deve avere numero e orario, o non entra in tabellone",
+            righe.all { it.trainRef.number.isNotBlank() && !it.scheduledTime.isNullOrBlank() },
+        )
+
+        val daViaggiaTreno = (trains.departures("S08409") + trains.arrivals("S08409"))
+            .map { it.trainRef.number }
+            .toSet()
+        println("  corse ViaggiaTreno nella stessa stazione: ${daViaggiaTreno.size}")
+        assertTrue(
+            "ViaggiaTreno pubblica le corse Italo: questa sorgente non serve piu'",
+            righe.none { it.trainRef.number in daViaggiaTreno },
+        )
+
+        /*
+         * E toccando quella riga si deve vedere qualcosa.
+         *
+         * Il loro dettaglio per numero tace quasi sempre, quindi la corsa si
+         * ricostruisce dal tabellone della stazione da cui si sale: e' poco, ma
+         * e' vero, ed e' quello che serve a chi aspetta in banchina.
+         */
+        val prima = righe.first()
+        val corsa = italo.trainStatus(
+            trainNumber = prima.trainRef.number,
+            boardingRfi = "S08409",
+            boardingName = "Roma Termini",
+        )
+        println("  dettaglio ricostruito: ${corsa?.label} ${corsa?.delayMinutes} min, ${corsa?.stops?.size} fermata/e")
+        assertTrue("toccare una riga Italo non deve portare a una schermata vuota", corsa != null)
+        assertTrue("la corsa deve dire da dove la si prende", corsa?.stops?.isNotEmpty() == true)
+        assertTrue(
+            "e deve dichiarare che di piu' Italo non pubblica",
+            corsa?.notice?.contains("tabelloni") == true || corsa?.notice?.contains("aggiornati") == true,
+        )
+    }
+
+    /** Fuori dalle 59 stazioni di Italo non si spende una chiamata. */
+    @Test
+    fun `dove Italo non ferma non si chiede niente`() = runBlocking {
+        assertTrue("Milano Centrale e' servita da Italo", italo.covers("S01700"))
+        assertTrue("Roma Termini e' servita da Italo", italo.covers("S08409"))
+        // Porta Garibaldi invece si': Italo la serve, ed e' nel loro catalogo.
+        assertTrue("Milano Porta Garibaldi e' servita da Italo", italo.covers("S01645"))
+        assertTrue("Milano Lambrate non lo e'", !italo.covers("S01701"))
+        assertTrue("una stazione fuori rete torna vuota", italo.board("S01701").isEmpty())
+    }
+
+    /**
+     * Il percorso di una corsa Italo esiste solo qui.
+     *
+     * `RicercaTrenoService` tace quasi sempre; `RicercaTrattaService` invece
+     * restituisce, per due stazioni, tutte le corse che il loro servizio sta
+     * seguendo, con le fermate una per una. E' anche il punto da cui partiranno
+     * i viaggi misti.
+     */
+    @Test
+    fun `la tratta Italo restituisce corse con tutte le fermate`() = runBlocking {
+        val corse = italo.route("S01700", "S08409") // Milano Centrale -> Roma Termini
+
+        println("\n=== TRATTA ITALO Milano Centrale -> Roma Termini ===")
+        println("  corse seguite: ${corse.size}")
+        corse.take(4).forEach { c ->
+            println("     ${c.label}  ${c.origin} -> ${c.destination}  ${c.delayMinutes} min, ${c.stops.size} fermate")
+        }
+
+        if (corse.isEmpty()) {
+            println("  (il servizio Italo non sta seguendo nulla su questa tratta)")
+            return@runBlocking
+        }
+
+        assertTrue("ogni corsa deve avere il suo percorso", corse.all { it.stops.size >= 2 })
+        assertTrue(
+            "le fermate devono essere agganciate ai codici RFI, o non si aprono",
+            corse.any { c -> c.stops.any { it.stationCode != null } },
+        )
+        assertTrue("le corse sono Italo, e vanno etichettate come tali", corse.all { it.label.startsWith("Italo") })
+        assertTrue(
+            "l'ora della fotografia va sempre dichiarata",
+            corse.all { it.notice?.contains("aggiornati") == true },
+        )
+    }
+
+    /** Fuori dalla rete Italo la tratta non si chiede nemmeno. */
+    @Test
+    fun `una tratta che Italo non serve non costa una chiamata`() = runBlocking {
+        assertTrue(italo.route("S01701", "S08409").isEmpty()) // Lambrate non e' servita da Italo
     }
 }

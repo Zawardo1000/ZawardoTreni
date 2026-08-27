@@ -23,8 +23,10 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,10 +41,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.LeadingIconTab
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -62,6 +64,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
 import it.zawardo.treni.ui.common.currentLocation
@@ -114,11 +117,11 @@ fun SearchScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("ZawardoTreni") },
+            TreniTopBar(
+                title = "ZawardoTreni",
                 actions = {
                     IconButton(onClick = onOpenAbout) {
-                        Icon(Icons.Outlined.HelpOutline, contentDescription = "Info")
+                        Icon(Icons.AutoMirrored.Outlined.HelpOutline, contentDescription = "Info")
                     }
                 },
             )
@@ -462,9 +465,21 @@ private fun HistoryAndSaved(
     onDeleteSaved: (Long) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { onTabChange(0) }, text = { Text("Cronologia") })
-            Tab(selected = tab == 1, onClick = { onTabChange(1) }, text = { Text("Salvate") })
+        PrimaryTabRow(selectedTabIndex = tab) {
+            // Icona di fianco al testo, non sopra: la scheda resta bassa e le due
+            // voci si distinguono anche con la coda dell'occhio.
+            LeadingIconTab(
+                selected = tab == 0,
+                onClick = { onTabChange(0) },
+                text = { Text("Cronologia") },
+                icon = { Icon(Icons.Outlined.History, contentDescription = null) },
+            )
+            LeadingIconTab(
+                selected = tab == 1,
+                onClick = { onTabChange(1) },
+                text = { Text("Salvate") },
+                icon = { Icon(Icons.Outlined.Save, contentDescription = null) },
+            )
         }
 
         if (tab == 0) {

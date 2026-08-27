@@ -27,7 +27,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.MoneyOff
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,10 +42,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import it.zawardo.treni.BuildConfig
+import it.zawardo.treni.ui.common.SectionHeader
+import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.R
 
 private const val SOURCE_URL = "https://github.com/Zawardo1000/ZawardoTreni"
+private const val LICENSE_URL = "$SOURCE_URL/blob/main/LICENSE"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,14 +58,7 @@ fun AboutScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Info") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro")
-                    }
-                },
-            )
+            TreniTopBar(title = "Info", onBack = onBack)
         },
     ) { inner ->
         Column(
@@ -117,6 +118,7 @@ fun AboutScreen(onBack: () -> Unit) {
             HorizontalDivider()
 
             Section(
+                icon = Icons.Outlined.Lock,
                 title = "I tuoi dati restano tuoi",
                 body = "Questa app non raccoglie niente di te. Nessun account, nessun " +
                     "profilo, nessun identificativo.\n\n" +
@@ -124,8 +126,14 @@ fun AboutScreen(onBack: () -> Unit) {
                     "che cerchi, l'orario che hai scelto, il numero del treno. Nient'altro: " +
                     "nessun identificativo, niente che dica chi sei. E comunque niente che " +
                     "torni a me, perché server miei non ne esistono. Cronologia, ricerche " +
-                    "salvate e treni preferiti restano sul telefono e non escono da lì; " +
-                    "disinstallando l'app spariscono con lei.\n\n" +
+                    "salvate e treni preferiti restano sul telefono: non li mando da " +
+                    "nessuna parte, e disinstallando l'app spariscono con lei.\n\n" +
+                    "Un'eccezione, che preferisco dirti invece di lasciartela scoprire: " +
+                    "se hai attivo il backup di Android, è il sistema operativo a " +
+                    "copiarli sul tuo Google Drive, come fa con le altre app. Non " +
+                    "passano da me e restano roba tua, ma «non escono mai dal telefono» " +
+                    "sarebbe falso. Si spegne dalle impostazioni di backup del " +
+                    "telefono.\n\n" +
                     "La posizione, se la concedi, serve solo a trovare la stazione più " +
                     "vicina. Per saperlo le coordinate vengono mandate a Trenitalia, che è " +
                     "chi ha l'elenco delle stazioni: da solo non saprei rispondere. Non le " +
@@ -136,6 +144,7 @@ fun AboutScreen(onBack: () -> Unit) {
             )
 
             Section(
+                icon = Icons.Outlined.MoneyOff,
                 title = "Niente monetizzazione",
                 body = "Nessuna pubblicità. Nessun tracciamento, nessuna analitica, " +
                     "nessun SDK di terze parti che guarda cosa fai.\n\n" +
@@ -146,8 +155,9 @@ fun AboutScreen(onBack: () -> Unit) {
             )
 
             Section(
+                icon = Icons.Outlined.Hub,
                 title = "Da dove arrivano i dati",
-                body = "Tre sorgenti, perché nessuna da sola basta.\n\n" +
+                body = "Quattro sorgenti, perché nessuna da sola basta.\n\n" +
                     "• Le Frecce — orari e itinerari sulla rete nazionale.\n\n" +
                     "• ViaggiaTreno (RFI) — ritardi, fermate, binari e posizione " +
                     "dei treni in tempo reale.\n\n" +
@@ -155,6 +165,9 @@ fun AboutScreen(onBack: () -> Unit) {
                     "comprese le linee S del Passante milanese, che le altre due " +
                     "non conoscono. È anche l'unica che segnala lavori, " +
                     "sospensioni di linea e servizi sostitutivi.\n\n" +
+                    "• Italo — le corse NTV, che nessuna delle altre tre pubblica: " +
+                    "su ViaggiaTreno un treno Italo non compare affatto. Dal loro " +
+                    "tabellone arrivano ritardo e binario.\n\n" +
                     "Sono servizi pubblici ma non documentati: possono cambiare " +
                     "senza preavviso.",
             )
@@ -162,6 +175,12 @@ fun AboutScreen(onBack: () -> Unit) {
             SourceLink(
                 onClick = {
                     context.startActivity(Intent(Intent.ACTION_VIEW, SOURCE_URL.toUri()))
+                },
+            )
+
+            LicenseLink(
+                onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, LICENSE_URL.toUri()))
                 },
             )
 
@@ -190,7 +209,7 @@ private fun SourceLink(onClick: () -> Unit) {
             .clickable(onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("Codice sorgente", style = MaterialTheme.typography.titleMedium)
+        SectionHeader(icon = Icons.Outlined.Code, title = "Codice sorgente")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 SOURCE_URL,
@@ -217,10 +236,55 @@ private fun SourceLink(onClick: () -> Unit) {
     }
 }
 
+/**
+ * La licenza sta anche qui, non solo nel repository.
+ *
+ * La GPL chiede che chi riceve il programma sappia con quali diritti lo sta
+ * usando: nascondere la cosa in un file di testo che nessuno apre sarebbe
+ * rispettarla solo a parole.
+ */
 @Composable
-private fun Section(title: String, body: String) {
+private fun LicenseLink(onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        SectionHeader(icon = Icons.Outlined.Gavel, title = "Licenza")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "GNU GPL v3 o successive",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline,
+                fontWeight = FontWeight.Medium,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = null,
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            "Copyright © 2026 Zawardo.\n\n" +
+                "Puoi usarla, studiarla, modificarla e ridistribuirla. A due condizioni: " +
+                "che quello che ne ricavi resti aperto con questa stessa licenza — niente " +
+                "versioni chiuse — e che continui a dire da dove viene, citando " +
+                "ZawardoTreni e il suo autore.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun Section(icon: ImageVector, title: String, body: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        SectionHeader(icon = icon, title = title)
         Text(
             body,
             style = MaterialTheme.typography.bodyMedium,

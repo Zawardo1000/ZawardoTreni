@@ -45,6 +45,11 @@ data class Journey(
     val source: JourneySource = JourneySource.LEFRECCE,
     /** Valorizzati quando la sorgente li espone: Trenord li fornisce, il BFF no. */
     val cancelled: Boolean = false,
+    /**
+     * Soppressa solo in parte: la corsa si fa, ma salta delle fermate che non
+     * sono ne' quella da cui sali ne' quella a cui scendi.
+     */
+    val partiallyCancelled: Boolean = false,
     val delayMinutes: Int? = null,
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
@@ -125,6 +130,27 @@ enum class TrainState {
     NOT_DEPARTED,
     ARRIVED,
 }
+
+/**
+ * Lo stato che la soluzione dichiara da se', prima di qualsiasi interrogazione.
+ *
+ * Trenord pubblica soppressione e ritardo insieme alla soluzione; il BFF Le
+ * Frecce no. Dove c'e', spesso e' l'unico dato esistente: sulle linee S del
+ * Passante ViaggiaTreno non risponde, quindi ignorarlo significava mostrare un
+ * treno soppresso come se partisse regolarmente.
+ */
+val Journey.declaredState: TrainState?
+    get() = when {
+        cancelled -> TrainState.CANCELLED
+        partiallyCancelled -> TrainState.PARTIALLY_CANCELLED
+        delayMinutes == null -> null
+        delayMinutes > 0 -> TrainState.DELAYED
+        else -> TrainState.REGULAR
+    }
+
+/** Vero per gli stati che dicono "questa corsa, tutta o in parte, non si fa". */
+val TrainState.soppressione: Boolean
+    get() = this == TrainState.CANCELLED || this == TrainState.PARTIALLY_CANCELLED
 
 enum class StopStatus { FUTURE, DONE, CURRENT, CANCELLED }
 

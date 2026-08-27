@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
@@ -127,7 +128,15 @@ class MainActivity : ComponentActivity() {
     private val pendingTrain = MutableStateFlow<TrainRoute?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        /*
+         * Icone di sistema chiare, sempre.
+         *
+         * La barra in cima e' blu notte in tutti e due i temi, e di serie
+         * Android sceglie il colore delle icone dal tema: in chiaro le metteva
+         * nere, cioe' invisibili sul blu. Qui il fondo lo conosciamo, e lo
+         * dichiariamo scuro una volta per tutte.
+         */
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         consume(intent)
         setContent { ZawardoTreniTheme { TreniApp(pendingTrain) } }
@@ -168,7 +177,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
     val tabs = listOf(
         TabItem(SearchRoute, SearchRoute::class, "Tratta", Icons.Filled.Search),
         TabItem(TrainSearchRoute, TrainSearchRoute::class, "Treno", Icons.Outlined.Train),
-        TabItem(BoardRoute, BoardRoute::class, "Stazione", Icons.Outlined.DepartureBoard),
+        TabItem(BoardRoute, BoardRoute::class, "Tabellone", Icons.Outlined.DepartureBoard),
     )
 
     val backStack by nav.currentBackStackEntryAsState()

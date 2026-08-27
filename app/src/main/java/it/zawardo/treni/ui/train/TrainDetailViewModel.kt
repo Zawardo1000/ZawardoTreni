@@ -49,6 +49,8 @@ class TrainDetailViewModel(
     private val boardingCode: String? = null,
     /** Ora di salita: distingue due corse dello stesso numero in giorni diversi. */
     private val boardingAt: LocalDateTime? = null,
+    /** Nome della stazione di salita: serve a Italo, che di suo non lo dice. */
+    private val boardingName: String? = null,
     /**
      * Corsa gia' identificata da chi ci ha portati qui.
      *
@@ -62,6 +64,7 @@ class TrainDetailViewModel(
 
     private val trains = ServiceLocator.trainStatusRepository
     private val trenord = ServiceLocator.trenordRepository
+    private val italo = ServiceLocator.italoRepository
     private val memory = ServiceLocator.trainMemory
 
     private val _state = MutableStateFlow(TrainDetailUiState())
@@ -119,7 +122,11 @@ class TrainDetailViewModel(
             val status = runCatching {
                 exactRef()?.let { trains.status(it) }
                     ?: trains.statusByNumber(trainNumber, date, boardingCode, boardingAt)
-                    ?: trenord.trainStatus(trainNumber)
+                    // Con la data: senza, per una corsa di domani Trenord
+                    // risponderebbe con quella di oggi.
+                    ?: trenord.trainStatus(trainNumber, date)
+                    // Ultima: le corse Italo, che nelle altre fonti non esistono.
+                    ?: italo.trainStatus(trainNumber, date, boardingCode, boardingName)
             }
                 .getOrElse { e ->
                     _state.update {

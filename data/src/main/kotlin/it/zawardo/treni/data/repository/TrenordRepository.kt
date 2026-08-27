@@ -1,12 +1,16 @@
 package it.zawardo.treni.data.repository
 
+import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.mapper.toJourney
 import it.zawardo.treni.data.mapper.toServiceAlert
 import it.zawardo.treni.data.mapper.toTrainStatus
 import it.zawardo.treni.data.remote.trenord.TrenordApi
+import it.zawardo.treni.data.remote.trenord.TrenordBoardParser
 import it.zawardo.treni.data.remote.trenord.TrenordCrypto
 import it.zawardo.treni.data.remote.trenord.TrenordSearchDto
 import it.zawardo.treni.data.remote.trenord.TrenordSolutionDto
+import it.zawardo.treni.data.remote.trenord.TrenordStationDetailsDto
+import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
@@ -36,6 +40,9 @@ class TrenordRepository(
     private val api: TrenordApi,
     private val json: Json,
 ) {
+    /** Orari di stazione gia' scaricati, con il momento in cui sono arrivati. */
+    private val orari = mutableMapOf<String, Pair<Long, TrenordStationDetailsDto>>()
+
     private val dateFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
     private val isoDate: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val hourFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -86,10 +93,53 @@ class TrenordRepository(
         }.getOrNull()
     }
 
+    /**
+     * L'orario di stazione secondo Trenord: le corse **programmate**, comprese
+     * quelle che oggi non si fanno.
+     *
+     * E' l'unico elenco che le contenga. Un treno soppresso ViaggiaTreno lo
+     * toglie dall'esistenza: non e' in tabellone, `andamentoTreno` risponde 204 e
+     * `cercaNumeroTreno` non lo trova. Confrontando questo elenco con il suo si
+     * scopre chi manca, e poi lo si chiede alla corsa.
+     *
+     * Fuori dall'area Trenord la risposta e' vuota: Roma Termini torna con zero
+     * righe, quindi chiamarlo non fa danno anche dove non serve.
+     */
+    suspend fun timetable(rfiCode: String, arrivals: Boolean = false): List<BoardEntry> =
+        withContext(Dispatchers.IO) {
+            val details = stationDetails(rfiCode) ?: return@withContext emptyList()
+            val mezzanotte = LocalDate.now(ROME).atStartOfDay(ROME).toInstant().toEpochMilli()
+            TrenordBoardParser.parse(
+                if (arrivals) details.arrivo else details.partenza,
+                mezzanotte,
+            )
+        }
 
+    /**
+     * La risposta contiene partenze e arrivi insieme, pesa 750 KB (17 KB
+     * compressi) ed e' orario di tabella: non cambia da un minuto all'altro.
+     * Tenerla qualche minuto evita di riscaricarla girando fra le due schede o
+     * riaprendo lo stesso tabellone.
+     */
+    private suspend fun stationDetails(rfiCode: String): TrenordStationDetailsDto? {
+        val chiave = rfiCode.uppercase()
+        val adesso = System.currentTimeMillis()
+        synchronized(orari) {
+            val avuto = orari[chiave]
+            if (avuto != null && adesso - avuto.first < ORARI_TTL_MS) return avuto.second
+        }
+        val fresco = runCatching { api.stationDetails(mirCode = chiave) }.getOrNull() ?: return null
+        synchronized(orari) { orari[chiave] = adesso to fresco }
+        return fresco
+    }
 
     private inline fun <reified T> decode(bytes: ByteArray): T? {
         val plain = TrenordCrypto.decrypt(bytes) ?: return null
         return runCatching { json.decodeFromString<T>(plain) }.getOrNull()
+    }
+
+    private companion object {
+        /** Quanto vale un orario di stazione gia' scaricato. */
+        const val ORARI_TTL_MS = 5 * 60 * 1000L
     }
 }

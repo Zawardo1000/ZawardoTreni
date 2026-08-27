@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -37,7 +38,6 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -60,6 +60,10 @@ import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.ui.common.SectionHeader
+import it.zawardo.treni.ui.common.TreniTopBar
+import it.zawardo.treni.ui.theme.TreniBrand
+import it.zawardo.treni.domain.model.soppressione
 import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
@@ -136,18 +140,9 @@ fun BoardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(state.station?.name ?: initialName ?: "Tabellone") },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Indietro",
-                            )
-                        }
-                    }
-                },
+            TreniTopBar(
+                title = state.station?.name ?: initialName ?: "Tabellone stazione",
+                onBack = onBack,
                 actions = {
                     // Solo dove un tabellone esiste: una fermata senza codice RFI
                     // non e' consultabile, e preferirla non vorrebbe dire nulla.
@@ -157,8 +152,9 @@ fun BoardScreen(
                                 if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
                                 contentDescription = if (isFavorite) "Togli dalle preferite"
                                 else "Aggiungi alle preferite",
-                                tint = if (isFavorite) MaterialTheme.colorScheme.tertiary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                // Ambra quando e' salvata; altrimenti eredita il
+                                // bianco della barra.
+                                tint = if (isFavorite) TreniBrand.star else LocalContentColor.current,
                             )
                         }
                     }
@@ -239,15 +235,11 @@ fun BoardScreen(
                  * l'unica cosa che si puo' fare senza digitare.
                  */
                 if (favorites.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.Star,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.tertiary,
-                        )
-                        Text("  Preferite", style = MaterialTheme.typography.titleMedium)
-                    }
+                    SectionHeader(
+                        icon = Icons.Filled.Star,
+                        title = "Preferite",
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
                     LazyColumn(
                         modifier = Modifier.weight(1f, fill = false),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -356,7 +348,9 @@ fun BoardScreen(
 
 @Composable
 private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
-    val cancelled = entry.state == TrainState.CANCELLED
+    // Barrato in entrambi i casi: la corsa e' soppressa, oppure circola ma qui
+    // non ferma. Da questa banchina, la differenza non cambia cosa puoi prendere.
+    val cancelled = entry.state.soppressione
 
     Row(
         Modifier
@@ -401,7 +395,8 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
                 }
                 if (cancelled) {
                     Text(
-                        "  Soppresso",
+                        if (entry.state == TrainState.CANCELLED) "  Soppresso"
+                        else "  Non ferma qui",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.error,

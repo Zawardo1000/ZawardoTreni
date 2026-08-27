@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.remote
 
+import it.zawardo.treni.data.remote.italo.ItaloApi
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
 import it.zawardo.treni.data.remote.trenord.TrenordApi
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
@@ -111,6 +112,32 @@ object NetworkModule {
             .addConverterFactory(jsonConverter)
             .build()
             .create(TrenordApi::class.java)
+    }
+
+    /**
+     * Italo risponde JSON in chiaro: niente cifratura, niente sessione.
+     *
+     * Il Referer c'e' per prudenza, come per Trenord: il loro sito sta dietro a
+     * un filtro anti-bot, e una richiesta che sembri arrivare dalla pagina ha
+     * meno probabilita' di essere presa per quello che non e'.
+     */
+    val italoApi: ItaloApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(ItaloApi.BASE_URL)
+            .client(
+                baseClient()
+                    .addInterceptor { chain ->
+                        chain.proceed(
+                            chain.request().newBuilder()
+                                .header("Referer", "https://italoinviaggio.italotreno.com/")
+                                .build(),
+                        )
+                    }
+                    .build(),
+            )
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(ItaloApi::class.java)
     }
 
     val lefrecceApi: LefrecceApi by lazy {

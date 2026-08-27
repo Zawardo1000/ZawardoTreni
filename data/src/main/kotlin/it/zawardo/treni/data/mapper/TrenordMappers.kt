@@ -95,10 +95,33 @@ private fun String.stripHtml(): String =
         .joinToString("\n") { it.trim() }
         .trim()
 
+/**
+ * La parte di corsa che percorri davvero.
+ *
+ * `pass_list` e' la corsa intera, non la tua tratta: l'S5 per Varese parte da
+ * Pioltello Limito alle 19:40 anche se sali a Porta Garibaldi alle 20:02, e le
+ * prime tre fermate dell'elenco sono gia' andate quando la soluzione comincia.
+ * A dirlo sono i marcatori: `start` dove sali, `end` dove scendi.
+ *
+ * Prendere la prima e l'ultima fermata dell'elenco significava scrivere che la
+ * tratta parte da Pioltello alle 19:40 — la corsa giusta, il viaggio di un
+ * altro.
+ *
+ * Senza marcatori si tiene tutto: una tratta piu' lunga del vero e' meglio di
+ * nessuna tratta.
+ */
+private fun TrenordJourneyDto.ridden(): List<TrenordStopDto> {
+    val salita = stops.indexOfFirst { it.type.equals("start", ignoreCase = true) }
+    val discesa = stops.indexOfLast { it.type.equals("end", ignoreCase = true) }
+    if (salita < 0 || discesa < salita) return stops
+    return stops.subList(salita, discesa + 1)
+}
+
 private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): Leg? {
     val t = train ?: return null
-    val first = stops.firstOrNull()
-    val last = stops.lastOrNull()
+    val tratta = ridden()
+    val first = tratta.firstOrNull()
+    val last = tratta.lastOrNull()
     val from = first?.station?.toStation() ?: return null
     val to = last?.station?.toStation() ?: return null
     return Leg(
@@ -116,6 +139,44 @@ private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): 
     )
 }
 
+/**
+ * Quanto pesa la soppressione su una tratta.
+ *
+ * HAFAS la dichiara **sulle fermate**, non sulla soluzione: il `cancelled` di
+ * primo livello resta falso anche su una corsa cancellata per intero. L'S5 11862
+ * del 27 agosto 2026 arrivava con `cancelled = false` e tutte e diciannove le
+ * fermate soppresse, e nella lista dei risultati compariva come una corsa
+ * qualunque. ViaggiaTreno non lo smentisce: di un treno soppresso non ha
+ * nemmeno il record, `cercaNumeroTreno` non lo trova e `andamentoTreno`
+ * risponde 204. Quel flag sulle fermate e' l'unica cosa che lo dice.
+ */
+private enum class Soppressione { NESSUNA, PARZIALE, TOTALE }
+
+private fun TrenordJourneyDto.soppressione(): Soppressione {
+    /*
+     * Si guarda solo la tratta che percorri.
+     *
+     * Un treno limitato — che oggi parte dopo la sua origine o si ferma prima
+     * del capolinea — ha le fermate soppresse a un capo della corsa. Se cadono
+     * fuori dal tuo pezzo di viaggio non ti riguardano, e dichiararle
+     * soppressione vorrebbe dire barrare una corsa che ti porta benissimo.
+     */
+    val tratta = ridden()
+    return when {
+        tratta.isEmpty() -> Soppressione.NESSUNA
+        tratta.all { it.cancelled } -> Soppressione.TOTALE
+        /*
+         * Salta la fermata da cui sali o quella a cui scendi: e' il treno
+         * limitato che non arriva piu' fin li'. La corsa esiste ancora, ma per
+         * te vale quanto una soppressione, ed e' meglio dirlo che lasciartela
+         * prendere.
+         */
+        tratta.first().cancelled || tratta.last().cancelled -> Soppressione.TOTALE
+        tratta.any { it.cancelled } -> Soppressione.PARZIALE
+        else -> Soppressione.NESSUNA
+    }
+}
+
 fun TrenordSolutionDto.toJourney(): Journey? {
     val date = parseDate(date)
     val dep = combine(date, departureTime, departureDayOffset) ?: return null
@@ -123,13 +184,16 @@ fun TrenordSolutionDto.toJourney(): Journey? {
     val legs = journeys.mapNotNull { it.toLeg(date, dep) }
     if (legs.isEmpty()) return null
 
+    val soppressioni = journeys.map { it.soppressione() }
+
     return Journey(
         departure = dep,
         arrival = arr,
         duration = parseDuration(duration) ?: Duration.between(dep, arr),
         legs = legs,
         source = JourneySource.TRENORD,
-        cancelled = cancelled,
+        cancelled = cancelled || soppressioni.any { it == Soppressione.TOTALE },
+        partiallyCancelled = soppressioni.any { it == Soppressione.PARZIALE },
         // `delay` e' attendibile solo quando il flag lo dichiara: altrimenti e'
         // assenza di dato, non assenza di ritardo.
         delayMinutes = delay?.takeIf { delayDefined },

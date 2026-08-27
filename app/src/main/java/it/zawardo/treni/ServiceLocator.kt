@@ -4,6 +4,7 @@ import android.content.Context
 import it.zawardo.treni.data.local.SettingsStore
 import it.zawardo.treni.data.local.TreniDatabase
 import it.zawardo.treni.data.remote.NetworkModule
+import it.zawardo.treni.data.repository.ItaloRepository
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.SearchStore
 import it.zawardo.treni.data.repository.StationFavoritesStore
@@ -47,11 +48,13 @@ object ServiceLocator {
         TrenordRepository(NetworkModule.trenordApi, NetworkModule.json)
     }
 
+    val italoRepository: ItaloRepository by lazy { ItaloRepository(NetworkModule.italoApi) }
+
     val journeyRepository: JourneyRepository by lazy {
         JourneyRepository(NetworkModule.lefrecceApi, trenordRepository)
     }
     val trainStatusRepository: TrainStatusRepository by lazy {
-        TrainStatusRepository(NetworkModule.viaggiaTrenoApi)
+        TrainStatusRepository(NetworkModule.viaggiaTrenoApi, trenordRepository, italoRepository)
     }
 
     fun init(context: Context) {

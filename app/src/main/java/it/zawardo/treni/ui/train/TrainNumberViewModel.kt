@@ -143,7 +143,9 @@ class TrainNumberViewModel : ViewModel() {
             if (esplicita) {
                 _state.update { it.copy(loading = true, message = null, results = emptyList()) }
             }
-            val corse = runCatching { trains.findRuns(numero, sigla) }.getOrDefault(emptyList())
+            val corse = runCatching {
+                trains.findRuns(numero, sigla, askTrenord = esplicita)
+            }.getOrDefault(emptyList())
 
             // Nel frattempo l'utente puo' aver scritto altro: una risposta in
             // ritardo non deve riportare a galla una ricerca abbandonata.

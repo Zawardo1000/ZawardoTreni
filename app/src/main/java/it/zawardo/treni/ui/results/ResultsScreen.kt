@@ -32,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -53,6 +53,7 @@ import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.stateColor
 import it.zawardo.treni.ui.common.stateLabel
@@ -106,26 +107,10 @@ fun ResultsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            "${from.name} → ${to.name}",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            departure.format(DATE) + ", dalle " + departure.format(TIME),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro")
-                    }
-                },
+            TreniTopBar(
+                title = "${from.name} → ${to.name}",
+                subtitle = departure.format(DATE) + ", dalle " + departure.format(TIME),
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = vm::reload) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Aggiorna")
@@ -281,6 +266,8 @@ private fun JourneyCard(
 ) {
     val j: Journey = row.journey
     val otherDay = j.departure.toLocalDate() != requestedDate
+    // Barrato come su un tabellone: la corsa c'e' in orario, ma non si fa.
+    val cancelled = row.state == TrainState.CANCELLED
 
     Card(
         Modifier
@@ -314,12 +301,14 @@ private fun JourneyCard(
                     j.departure.format(TIME),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
+                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                 )
                 Text("  →  ", style = MaterialTheme.typography.titleMedium)
                 Text(
                     j.arrival.format(TIME),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
+                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                 )
                 Box(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
@@ -386,6 +375,18 @@ private fun JourneyCard(
                         color = stateColor(row.state, row.delayMinutes),
                     )
                 }
+
+                /*
+                 * Corsa di un altro giorno: lo stato non c'e' e non arrivera'.
+                 * Succede anche cercando per oggi, quando la tratta e' ferma e
+                 * le sole soluzioni sono di domani. Il vuoto, li', si legge
+                 * come "in orario".
+                 */
+                !row.isRealtimeDay -> Text(
+                    "Orario previsto: il tempo reale esiste solo per la giornata in corso",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

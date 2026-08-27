@@ -111,4 +111,23 @@ interface TrenordApi {
         @Query("date") date: String? = null,
     ): ResponseBody
 
+    /**
+     * Tabellone di stazione: l'elenco delle corse **programmate**.
+     *
+     * Sta fuori dal BFF e non e' cifrato — risponde JSON con dentro l'HTML gia'
+     * renderizzato del sito — quindi l'URL e' assoluto e la risposta si
+     * deserializza normalmente.
+     *
+     * E' l'unica fonte che elenchi anche le corse soppresse: ViaggiaTreno le
+     * toglie del tutto, e senza questo confronto un treno cancellato non sparisce
+     * dal tabellone perche' e' cancellato, sparisce e basta.
+     */
+    @GET("https://www.trenord.it/rest/render/station-details")
+    suspend fun stationDetails(
+        @Query("mirCode") mirCode: String,
+        @Query("L") language: String = "it",
+        @Query("mxp") mxp: Boolean = false,
+        @Query("map_zoom") mapZoom: Int = 14,
+    ): TrenordStationDetailsDto
+
 }

@@ -82,7 +82,12 @@ data class TrenordStopDto(
     val station: TrenordStationDto? = null,
     @SerialName("arr_time") val scheduledArrival: String? = null,
     @SerialName("dep_time") val scheduledDeparture: String? = null,
-    /** `start`, `stop`, `end`. */
+    /**
+     * Dove cade questa fermata rispetto al TUO viaggio, non rispetto alla corsa.
+     *
+     * `O` origine della corsa, `F` fermata prima della salita o dopo la discesa,
+     * `start` dove sali, `pass` fermate che percorri, `end` dove scendi.
+     */
     val type: String? = null,
     val cancelled: Boolean = false,
     @SerialName("actual_data") val actual: TrenordActualDto? = null,

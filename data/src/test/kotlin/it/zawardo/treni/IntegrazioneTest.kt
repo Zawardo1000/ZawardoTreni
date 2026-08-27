@@ -1,11 +1,31 @@
 package it.zawardo.treni
 
+import it.zawardo.treni.data.mapper.ROME
+import it.zawardo.treni.data.remote.lefrecce.ClassificationDto
+import it.zawardo.treni.data.remote.lefrecce.LocationDto
+import it.zawardo.treni.data.remote.lefrecce.SolutionDto
+import it.zawardo.treni.data.remote.lefrecce.SolutionNodeDto
+import it.zawardo.treni.data.remote.lefrecce.TransportMeanDto
+import it.zawardo.treni.data.mapper.toBoardEntry
+import it.zawardo.treni.data.mapper.toTrainStatus
 import it.zawardo.treni.data.remote.NetworkModule
+import it.zawardo.treni.data.remote.italo.ItaloBoardTrainDto
+import it.zawardo.treni.data.remote.italo.ItaloDisruptionDto
+import it.zawardo.treni.data.remote.italo.ItaloScheduleDto
+import it.zawardo.treni.data.remote.italo.ItaloStopDto
+import it.zawardo.treni.data.remote.italo.ItaloTrainDto
+import it.zawardo.treni.data.mapper.toJourney
+import it.zawardo.treni.data.remote.trenord.TrenordJourneyDto
+import it.zawardo.treni.data.remote.trenord.TrenordSolutionDto
+import it.zawardo.treni.data.remote.trenord.TrenordStationDto
+import it.zawardo.treni.data.remote.trenord.TrenordStopDto
+import it.zawardo.treni.data.remote.trenord.TrenordTrainDto
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.JourneySource
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
@@ -15,6 +35,7 @@ import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.consolidate
+import it.zawardo.treni.domain.model.declaredState
 import it.zawardo.treni.domain.model.matchesCategory
 import it.zawardo.treni.domain.model.trainCategoryOf
 import it.zawardo.treni.domain.model.trainNumberOf
@@ -23,6 +44,9 @@ import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZonedDateTime
@@ -508,6 +532,332 @@ class IntegrazioneTest {
         assertTrue(
             "i bus devono essere etichettati come tali",
             bus.all { it.label.contains("Bus", ignoreCase = true) },
+        )
+    }
+
+    @Test
+    fun `una soluzione soppressa lo dichiara da sola`() {
+        fun soluzione(soppressa: Boolean, ritardo: Int?) = Journey(
+            departure = LocalDateTime.now(),
+            arrival = LocalDateTime.now().plusMinutes(20),
+            duration = Duration.ofMinutes(20),
+            legs = emptyList(),
+            source = JourneySource.TRENORD,
+            cancelled = soppressa,
+            delayMinutes = ritardo,
+        )
+
+        assertTrue(
+            "una corsa soppressa deve dirlo da se': sulle linee S ViaggiaTreno non " +
+                "risponde, e quel dato non arriverebbe da nessun'altra parte",
+            soluzione(soppressa = true, ritardo = null).declaredState == TrainState.CANCELLED,
+        )
+        assertTrue(
+            "il ritardo dichiarato dalla sorgente vale come stato",
+            soluzione(soppressa = false, ritardo = 7).declaredState == TrainState.DELAYED,
+        )
+        assertTrue(
+            "zero minuti dichiarati sono un'informazione: la corsa e' in orario",
+            soluzione(soppressa = false, ritardo = 0).declaredState == TrainState.REGULAR,
+        )
+        assertTrue(
+            "senza ritardo dichiarato non si inventa uno stato",
+            soluzione(soppressa = false, ritardo = null).declaredState == null,
+        )
+    }
+
+    @Test
+    fun `la corsa di domani non eredita quella di oggi`() = runBlocking {
+        val domani = LocalDate.now().plusDays(1)
+        val numero = trains.departures("S01700", ZonedDateTime.now())
+            .firstOrNull()?.trainRef?.number
+
+        if (numero == null) {
+            println("\n=== DATA FUTURA: Milano Centrale non ha partenze, niente da verificare ===")
+            return@runBlocking
+        }
+
+        val oggi = trains.resolveFor(numero, LocalDate.now())
+        val futura = trains.resolveFor(numero, domani)
+
+        println("\n=== DATA FUTURA (treno $numero) ===")
+        println("  oggi:   " + (oggi?.let { giornoDi(it) }?.toString() ?: "nessuna corsa"))
+        println("  domani: " + (futura?.let { giornoDi(it) }?.toString() ?: "nessuna corsa"))
+
+        assertTrue(
+            "per una data futura ViaggiaTreno non ha nulla da dire: restituire la " +
+                "corsa di oggi la dava per arrivata mentre quella di domani deve " +
+                "ancora partire",
+            futura == null || giornoDi(futura) == domani,
+        )
+    }
+
+    /** Il giorno in cui una corsa parte, letto nel fuso in cui circola. */
+    private fun giornoDi(ref: TrainRef): LocalDate =
+        Instant.ofEpochMilli(ref.departureDateMillis).atZone(ROME).toLocalDate()
+
+    @Test
+    fun `la soppressione dichiarata sulle fermate non si perde`() {
+        fun fermata(nome: String, soppressa: Boolean) = TrenordStopDto(
+            station = TrenordStationDto(stationId = "S0170$nome", name = "Stazione $nome"),
+            scheduledArrival = "08:00:00",
+            scheduledDeparture = "08:01:00",
+            cancelled = soppressa,
+        )
+
+        /*
+         * Il flag di primo livello resta FALSO: e' il caso reale dell'S5 11862
+         * del 27 agosto 2026, soppresso da Pioltello a Varese e restituito da
+         * HAFAS con `cancelled = false` e tutte e diciannove le fermate
+         * cancellate.
+         */
+        fun soluzione(fermate: List<TrenordStopDto>) = TrenordSolutionDto(
+            date = "20260827",
+            departureTime = "08:00:00",
+            arrivalTime = "09:00:00",
+            cancelled = false,
+            journeys = listOf(
+                TrenordJourneyDto(
+                    train = TrenordTrainDto(id = "11862", category = "S5", line = "S5"),
+                    stops = fermate,
+                ),
+            ),
+        )
+
+        val tutte = soluzione(listOf(fermata("1", true), fermata("2", true), fermata("3", true)))
+        val salita = soluzione(listOf(fermata("1", true), fermata("2", false), fermata("3", false)))
+        val mezzo = soluzione(listOf(fermata("1", false), fermata("2", true), fermata("3", false)))
+        val nessuna = soluzione(listOf(fermata("1", false), fermata("2", false), fermata("3", false)))
+
+        assertTrue(
+            "con tutte le fermate soppresse la corsa e' soppressa, per quanto il " +
+                "flag della soluzione dica di no",
+            tutte.toJourney()?.declaredState == TrainState.CANCELLED,
+        )
+        assertTrue(
+            "se salta la fermata da cui sali, quella soluzione non ti porta",
+            salita.toJourney()?.declaredState == TrainState.CANCELLED,
+        )
+        assertTrue(
+            "una fermata intermedia soppressa e' una soppressione parziale",
+            mezzo.toJourney()?.declaredState == TrainState.PARTIALLY_CANCELLED,
+        )
+        assertTrue(
+            "senza fermate soppresse non si dichiara niente",
+            nessuna.toJourney()?.declaredState == null,
+        )
+    }
+
+    /**
+     * Regressione: la tratta che percorri non e' la corsa intera.
+     *
+     * L'S5 per Varese parte da Pioltello alle 19:40 anche se sali a Porta
+     * Garibaldi alle 20:02. Leggendo la prima e l'ultima fermata dell'elenco la
+     * soluzione diceva di partire da Pioltello, e un treno limitato che oggi
+     * nasce dopo la sua origine risultava soppresso anche per chi sale piu'
+     * avanti e lo prende senza accorgersi di niente.
+     */
+    @Test
+    fun `di una corsa conta solo il pezzo che percorri`() {
+        fun fermata(nome: String, tipo: String, ora: String, soppressa: Boolean = false) =
+            TrenordStopDto(
+                station = TrenordStationDto(stationId = "S0$nome", name = nome),
+                scheduledArrival = ora,
+                scheduledDeparture = ora,
+                type = tipo,
+                cancelled = soppressa,
+            )
+
+        fun corsa(fermate: List<TrenordStopDto>) = TrenordSolutionDto(
+            date = "20260827",
+            departureTime = "20:02:00",
+            arrivalTime = "21:18:00",
+            journeys = listOf(
+                TrenordJourneyDto(
+                    train = TrenordTrainDto(id = "11868", category = "S5", line = "S5"),
+                    stops = fermate,
+                ),
+            ),
+        )
+
+        // Il treno oggi nasce dopo la sua origine: le fermate soppresse cadono
+        // prima di dove sali, e a te non cambiano niente.
+        val limitatoPrima = corsa(
+            listOf(
+                fermata("1703", "O", "19:40:00", soppressa = true),
+                fermata("1701", "F", "19:50:00", soppressa = true),
+                fermata("1645", "start", "20:02:00"),
+                fermata("1039", "pass", "20:19:00"),
+                fermata("1205", "end", "21:18:00"),
+            ),
+        )
+        // Stesse soppressioni, ma stavolta comprendono la stazione da cui sali.
+        val limitatoOltre = corsa(
+            listOf(
+                fermata("1703", "O", "19:40:00"),
+                fermata("1701", "F", "19:50:00"),
+                fermata("1645", "start", "20:02:00", soppressa = true),
+                fermata("1039", "pass", "20:19:00", soppressa = true),
+                fermata("1205", "end", "21:18:00", soppressa = true),
+            ),
+        )
+        // Salta una fermata in mezzo al tuo pezzo di viaggio.
+        val saltaInMezzo = corsa(
+            listOf(
+                fermata("1703", "O", "19:40:00"),
+                fermata("1645", "start", "20:02:00"),
+                fermata("1039", "pass", "20:19:00", soppressa = true),
+                fermata("1205", "end", "21:18:00"),
+            ),
+        )
+
+        val tratta = limitatoPrima.toJourney()?.legs?.firstOrNull()
+        assertTrue(
+            "la tratta deve cominciare dove sali, non dove nasce la corsa",
+            tratta?.from?.rfiCode == "S01645" && tratta.departure.toLocalTime() == LocalTime.of(20, 2),
+        )
+        assertTrue(
+            "le fermate soppresse prima della salita non riguardano questo viaggio",
+            limitatoPrima.toJourney()?.declaredState == null,
+        )
+        assertTrue(
+            "se la soppressione arriva fino alla tua fermata, quella corsa non ti porta",
+            limitatoOltre.toJourney()?.declaredState == TrainState.CANCELLED,
+        )
+        assertTrue(
+            "una fermata saltata dentro il tuo percorso e' una soppressione parziale",
+            saltaInMezzo.toJourney()?.declaredState == TrainState.PARTIALLY_CANCELLED,
+        )
+    }
+
+    /**
+     * Regressione, senza dipendere dal servizio del giorno: il BFF Le Frecce
+     * avvolge i viaggi con cambio dentro un `ROUTE_SEGMENT` e mette le tratte
+     * vere in `subSegments`. Leggendo solo i `SOLUTION_SEGMENT` di primo livello
+     * quelle soluzioni uscivano **senza tratte**, e venivano scartate: la lista
+     * mostrava le sole Frecce, e su una tratta servita da soli regionali poteva
+     * restare vuota.
+     */
+    @Test
+    fun `le soluzioni con cambio non si perdono`() {
+        fun luogo(nome: String, code: String) = LocationDto(locationId = 1, name = nome, bdoCode = code)
+        fun tratta(numero: String, da: String, a: String, dalle: String, alle: String) = SolutionNodeDto(
+            type = "SOLUTION_SEGMENT",
+            departureTime = dalle,
+            arrivalTime = alle,
+            startLocation = luogo(da, "S01700"),
+            endLocation = luogo(a, "S01701"),
+            offeredTransportMeanDeparture = TransportMeanDto(
+                name = numero,
+                classification = ClassificationDto(acronym = "REG", type = "TRAIN"),
+            ),
+        )
+
+        val conCambio = SolutionDto(
+            departureTime = "2026-08-27T08:00:00.000+02:00",
+            arrivalTime = "2026-08-27T10:00:00.000+02:00",
+            solutionNodes = listOf(
+                SolutionNodeDto(
+                    type = "ROUTE_SEGMENT",
+                    subSegments = listOf(
+                        tratta("2001", "Bologna", "Prato", "2026-08-27T08:00:00.000+02:00", "2026-08-27T09:00:00.000+02:00"),
+                        tratta("2002", "Prato", "Firenze", "2026-08-27T09:20:00.000+02:00", "2026-08-27T10:00:00.000+02:00"),
+                    ),
+                ),
+            ),
+        )
+
+        val viaggio = conCambio.toJourney()
+        assertTrue("la soluzione con cambio non deve sparire", viaggio != null)
+        assertTrue(
+            "le due tratte stanno nei subSegments: senza, la soluzione esce vuota e viene scartata",
+            viaggio?.legs?.size == 2,
+        )
+        assertTrue("due tratte sono un cambio", viaggio?.changes == 1)
+    }
+
+    @Test
+    fun `una riga del tabellone Italo diventa una corsa del nostro`() {
+        val riga = ItaloBoardTrainDto(
+            direction = "NAPOLI CENTRALE",
+            number = "9951",
+            delay = 5,
+            scheduledTime = "21:01",
+            actualTime = "21:06",
+            platform = "4",
+        )
+        val voce = riga.toBoardEntry(LocalDate.of(2026, 8, 27))
+
+        assertTrue("la riga deve diventare una voce di tabellone", voce != null)
+        assertTrue("l'etichetta e' quella con cui la gente li chiama", voce?.label == "Italo 9951")
+        assertTrue("il ritardo passa cosi' com'e'", voce?.delayMinutes == 5)
+        assertTrue("cinque minuti di ritardo sono un ritardo", voce?.state == TrainState.DELAYED)
+        assertTrue("il binario che pubblicano e' quello vero, non quello di tabella",
+            voce?.actualPlatform == "4" && voce.scheduledPlatform == null)
+        assertTrue("senza orario la riga non serve a niente",
+            riga.copy(scheduledTime = null).toBoardEntry() == null)
+    }
+
+    /**
+     * Italo manda solo `HH:mm`: la data la mettiamo noi, e su una corsa che
+     * passa la mezzanotte il solo orario tornerebbe indietro nel tempo.
+     */
+    @Test
+    fun `la corsa Italo che passa la mezzanotte non torna indietro`() {
+        fun fermata(codice: String, nome: String, n: Int, arr: String?, part: String?) =
+            ItaloStopDto(
+                code = codice, name = nome, index = n,
+                scheduledArrival = arr, actualArrival = arr,
+                scheduledDeparture = part, actualDeparture = part,
+            )
+
+        val corsa = ItaloTrainDto(
+            empty = false,
+            lastUpdate = "23:30",
+            schedule = ItaloScheduleDto(
+                number = "9999",
+                origin = "Milano Centrale",
+                destination = "Roma Termini",
+                disruption = ItaloDisruptionDto(delayMinutes = 3),
+                originStop = fermata("MC_", "Milano Centrale", 0, "01:00", "23:10"),
+                doneStops = listOf(fermata("BO2", "Bologna centrale", 1, "00:15", "00:17")),
+                futureStops = listOf(fermata("RMT", "Roma Termini", 2, "02:40", "01:00")),
+            ),
+        )
+
+        val stato = corsa.toTrainStatus(LocalDate.of(2026, 8, 27))
+        assertTrue("la corsa deve esserci", stato != null)
+        val fermate = stato!!.stops
+
+        assertTrue("tre fermate, in ordine di progressivo", fermate.size == 3)
+        assertTrue(
+            "Bologna passa dopo mezzanotte: e' il giorno dopo, non dodici ore prima",
+            fermate[1].scheduledArrival == LocalDateTime.of(2026, 8, 28, 0, 15),
+        )
+        assertTrue(
+            "al capolinea di partenza non esiste un arrivo: il loro 01:00 e' un segnaposto",
+            fermate[0].scheduledArrival == null,
+        )
+        assertTrue(
+            "all'ultima fermata non esiste una partenza",
+            fermate.last().scheduledDeparture == null,
+        )
+        assertTrue(
+            "le fermate gia' fatte portano orari misurati",
+            fermate[1].status == StopStatus.DONE && fermate[1].actualArrival != null,
+        )
+        assertTrue(
+            "quelle da fare portano stime, non misure",
+            fermate[2].status == StopStatus.FUTURE &&
+                fermate[2].actualArrival == null && fermate[2].projectedArrival != null,
+        )
+        assertTrue(
+            "le sigle Italo diventano codici RFI, o la fermata non si puo' aprire",
+            fermate[2].stationCode == "S08409" && fermate[1].stationCode == "S05043",
+        )
+        assertTrue(
+            "l'ora della fotografia va dichiarata: quei dati possono avere ore",
+            stato.notice?.contains("23:30") == true,
         )
     }
 }
