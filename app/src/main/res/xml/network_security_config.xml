@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Tutto il resto resta obbligatoriamente HTTPS -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- viaggiatreno.it non espone HTTPS: l'endpoint 301-redirige su HTTP -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">viaggiatreno.it</domain>
+    </domain-config>
+</network-security-config>
