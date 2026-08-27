@@ -70,6 +70,8 @@ data class ResultsRoute(
     val toRfi: String?,
     val toName: String,
     val whenEpochSec: Long,
+    /** Filtro "solo diretti": viaggia nella rotta perche' fa parte della ricerca. */
+    val directOnly: Boolean = false,
 )
 
 /**
@@ -178,7 +180,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
         ) {
             composable<SearchRoute> {
                 SearchScreen(
-                    onSearch = { from, to, dateTime ->
+                    onSearch = { from, to, dateTime, directOnly ->
                         nav.navigate(
                             ResultsRoute(
                                 fromId = from.locationId,
@@ -188,6 +190,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                                 toRfi = to.rfiCode,
                                 toName = to.name,
                                 whenEpochSec = dateTime.toEpochSecond(ZoneOffset.UTC),
+                                directOnly = directOnly,
                             )
                         )
                     },
@@ -223,6 +226,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     from = Station(r.fromRfi, r.fromId, r.fromName),
                     to = Station(r.toRfi, r.toId, r.toName),
                     departure = LocalDateTime.ofEpochSecond(r.whenEpochSec, 0, ZoneOffset.UTC),
+                    directOnly = r.directOnly,
                     onBack = { nav.popBackStack() },
                     onOpenTrain = { number, date, rfi, name ->
                         nav.navigate(TrainRoute(number, date.toEpochDay(), rfi, name))

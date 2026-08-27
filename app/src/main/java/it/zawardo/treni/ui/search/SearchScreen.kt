@@ -25,7 +25,9 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,7 +81,7 @@ private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
-    onSearch: (Station, Station, LocalDateTime) -> Unit,
+    onSearch: (Station, Station, LocalDateTime, Boolean) -> Unit,
     onOpenAbout: () -> Unit,
     vm: SearchViewModel = viewModel(),
 ) {
@@ -151,6 +153,7 @@ fun SearchScreen(
                 },
                 onNow = vm::setNow,
                 onToggleRemember = vm::setRememberLast,
+                onToggleDirectOnly = vm::setDirectOnly,
                 onSave = vm::saveCurrent,
                 onUseLocation = {
                     keyboard?.hide()
@@ -164,7 +167,7 @@ fun SearchScreen(
                         keyboard?.hide()
                         focus.clearFocus(force = true)
                         vm.recordSearch()
-                        onSearch(f, t, state.dateTime)
+                        onSearch(f, t, state.dateTime, state.directOnly)
                     }
                 },
             )
@@ -223,6 +226,7 @@ private fun SearchCard(
     onPickTime: () -> Unit,
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
+    onToggleDirectOnly: (Boolean) -> Unit,
     onSave: () -> Unit,
     onUseLocation: () -> Unit,
     onSearch: () -> Unit,
@@ -290,6 +294,21 @@ private fun SearchCard(
                     Text("  " + state.dateTime.format(TIME_FMT))
                 }
                 TextButton(onClick = onNow) { Text("Adesso") }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
+                Column(Modifier.weight(1f)) {
+                    Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Nasconde le soluzioni con cambi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Row(

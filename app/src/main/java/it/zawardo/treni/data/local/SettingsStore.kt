@@ -25,7 +25,22 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[KEY_REMEMBER_LAST] = enabled }
     }
 
+    /**
+     * "Solo diretti": scarta le soluzioni con cambi.
+     *
+     * Spento di default, perche' su molte tratte i diretti non esistono e una
+     * lista vuota sarebbe peggio di una lista con cambi. Ma se acceso resta
+     * acceso: chi non vuole cambiare treno non lo vuole una volta sola.
+     */
+    val directOnly: Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_DIRECT_ONLY] ?: false }
+
+    suspend fun setDirectOnly(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_DIRECT_ONLY] = enabled }
+    }
+
     private companion object {
         val KEY_REMEMBER_LAST = booleanPreferencesKey("remember_last_search")
+        val KEY_DIRECT_ONLY = booleanPreferencesKey("direct_only")
     }
 }

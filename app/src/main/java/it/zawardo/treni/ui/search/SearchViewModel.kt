@@ -32,6 +32,7 @@ data class SearchUiState(
     val loadingSuggestions: Boolean = false,
     val dateTime: LocalDateTime = LocalDateTime.now(),
     val rememberLast: Boolean = true,
+    val directOnly: Boolean = false,
     val alreadySaved: Boolean = false,
     val locating: Boolean = false,
     val error: String? = null,
@@ -69,6 +70,9 @@ class SearchViewModel : ViewModel() {
             }
         }
         viewModelScope.launch {
+            settings.directOnly.collect { only -> _state.update { it.copy(directOnly = only) } }
+        }
+        viewModelScope.launch {
             queries.debounce(250).distinctUntilChanged().collect { runSuggest(it) }
         }
     }
@@ -90,6 +94,10 @@ class SearchViewModel : ViewModel() {
         }
         ServiceLocator.currentDeparture.value = last.first
         refreshSavedFlag()
+    }
+
+    fun setDirectOnly(enabled: Boolean) {
+        viewModelScope.launch { settings.setDirectOnly(enabled) }
     }
 
     fun setRememberLast(enabled: Boolean) {

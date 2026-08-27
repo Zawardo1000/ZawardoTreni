@@ -57,12 +57,14 @@ data class ResultsUiState(
     val noSameDayResults: Boolean = false,
     /** Avvisi di servizio: lavori, sospensioni, bus sostitutivi. Solo da Trenord. */
     val alerts: List<ServiceAlert> = emptyList(),
+    val directOnly: Boolean = false,
 )
 
 class ResultsViewModel(
     private val from: Station,
     private val to: Station,
     private val departure: LocalDateTime,
+    private val directOnly: Boolean = false,
 ) : ViewModel() {
 
     private val journeys = ServiceLocator.journeyRepository
@@ -84,6 +86,7 @@ class ResultsViewModel(
                 it.copy(
                     loading = true,
                     error = null,
+                    directOnly = directOnly,
                     realtimeAvailable = isToday,
                     noMoreEarlier = false,
                     noMoreLater = false,
@@ -100,7 +103,12 @@ class ResultsViewModel(
                     }
                     return@launch
                 }
-            val list = outcome.journeys
+            /*
+             * Il filtro si applica dopo, non prima: le sorgenti non sanno
+             * filtrare i cambi, e chiedere meno risultati per poi scartarne una
+             * parte svuoterebbe la lista. Per questo si chiede piu' del dovuto.
+             */
+            val list = outcome.journeys.applyDirectFilter()
 
             val rows = list.map { JourneyRow(it, loadingStatus = isToday && it.hasTrain) }
             val requestedDay = departure.toLocalDate()
@@ -142,6 +150,7 @@ class ResultsViewModel(
                 // devono comparire, altrimenti la lista cambia natura scorrendo.
                 val batch = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE) }
                     .getOrNull()?.journeys.orEmpty()
+                    .applyDirectFilter()
                     .filter { it.departure.isBefore(first) }
                 if (batch.isNotEmpty()) {
                     found = batch.takeLast(PAGE)
@@ -177,7 +186,7 @@ class ResultsViewModel(
 
             val batch = runCatching {
                 journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE)
-            }.getOrNull()?.journeys.orEmpty()
+            }.getOrNull()?.journeys.orEmpty().applyDirectFilter()
 
             val existing = current.journeys.map { it.key }.toSet()
             val rows = batch
@@ -234,9 +243,17 @@ class ResultsViewModel(
         }
     }
 
+    private fun List<Journey>.applyDirectFilter(): List<Journey> =
+        if (directOnly) filter { it.isDirect } else this
+
     private companion object {
-        /** Quante corse per volta, avanti o indietro. */
-        const val PAGE = 5
+        /**
+         * Quante corse per volta, avanti o indietro.
+         *
+         * Cinque risultavano pochi: la lista sembrava un tabellone troncato e
+         * costringeva a chiedere subito le successive.
+         */
+        const val PAGE = 8
 
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15

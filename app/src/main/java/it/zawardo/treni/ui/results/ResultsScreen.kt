@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DirectionsBus
@@ -65,12 +66,13 @@ fun ResultsScreen(
     from: Station,
     to: Station,
     departure: LocalDateTime,
+    directOnly: Boolean = false,
     onBack: () -> Unit,
     onOpenTrain: (String, LocalDate, String?, String?) -> Unit,
 ) {
     val vm: ResultsViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { ResultsViewModel(from, to, departure) }
+            initializer { ResultsViewModel(from, to, departure, directOnly) }
         },
     )
     val state by vm.state.collectAsState()
@@ -129,8 +131,18 @@ fun ResultsScreen(
                         "Nessun collegamento trovato",
                         style = MaterialTheme.typography.titleMedium,
                     )
+                    if (state.directOnly) {
+                        // Un filtro attivo che svuota la lista va detto, altrimenti
+                        // sembra che la tratta non esista.
+                        Text(
+                            "Il filtro «Solo diretti» è attivo: su questa tratta " +
+                                "potrebbero esserci soluzioni con cambi.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                     state.alerts.forEach { AlertCard(it) }
-                    if (state.alerts.isEmpty()) {
+                    if (state.alerts.isEmpty() && !state.directOnly) {
                         Text(
                             "Per questa tratta e questo orario non risultano corse. " +
                                 "Prova a cambiare data o orario.",
@@ -145,7 +157,7 @@ fun ResultsScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(state.alerts, key = { it.message.take(60) }) { AlertCard(it) }
+                    itemsIndexed(state.alerts) { _, alert -> AlertCard(alert) }
 
                     if (state.noSameDayResults) {
                         item {
