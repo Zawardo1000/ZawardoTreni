@@ -6,6 +6,7 @@ import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.FavoriteTrainEntity
 import it.zawardo.treni.data.repository.TrainSuggestion
 import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.trainCategoryOf
 import it.zawardo.treni.domain.model.trainNumberOf
 import kotlinx.coroutines.FlowPreview
@@ -22,7 +23,7 @@ import kotlinx.coroutines.launch
 data class TrainNumberUiState(
     val query: String = "",
     val loading: Boolean = false,
-    val results: List<TrainRef> = emptyList(),
+    val results: List<TrainRun> = emptyList(),
     val suggestions: List<TrainSuggestion> = emptyList(),
     val suggestionsOpen: Boolean = false,
     val message: String? = null,
@@ -142,7 +143,7 @@ class TrainNumberViewModel : ViewModel() {
             if (esplicita) {
                 _state.update { it.copy(loading = true, message = null, results = emptyList()) }
             }
-            val refs = runCatching { trains.resolve(numero, sigla) }.getOrDefault(emptyList())
+            val corse = runCatching { trains.findRuns(numero, sigla) }.getOrDefault(emptyList())
 
             // Nel frattempo l'utente puo' aver scritto altro: una risposta in
             // ritardo non deve riportare a galla una ricerca abbandonata.
@@ -151,11 +152,11 @@ class TrainNumberViewModel : ViewModel() {
             _state.update {
                 it.copy(
                     loading = false,
-                    results = refs,
-                    openDirectly = refs.singleOrNull()?.takeIf { _ -> esplicita },
-                    suggestionsOpen = it.suggestionsOpen && refs.isEmpty(),
+                    results = corse,
+                    openDirectly = corse.singleOrNull()?.ref?.takeIf { _ -> esplicita },
+                    suggestionsOpen = it.suggestionsOpen && corse.isEmpty(),
                     message = when {
-                        refs.isNotEmpty() -> null
+                        corse.isNotEmpty() -> null
                         esplicita -> "Nessun treno $numero in circolazione oggi."
                         else -> it.message
                     },

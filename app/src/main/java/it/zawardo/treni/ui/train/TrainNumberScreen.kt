@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.FavoriteTrainEntity
 import it.zawardo.treni.data.repository.TrainSuggestion
 import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.ui.TrainRoute
 import java.time.Instant
 import java.time.LocalDate
@@ -147,37 +148,22 @@ fun TrainNumberScreen(
                 )
             }
 
-            Text(
-                "Puoi incollare l'etichetta intera, sigla compresa. " +
-                    "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            when {
-                state.loading -> Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-
-                state.message != null -> Text(
-                    state.message!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                state.results.isNotEmpty() ->
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(state.results, key = { it.originCode + it.departureDateMillis }) { ref ->
-                            RunCard(ref, onOpenTrain)
-                        }
-                    }
-            }
-
-            // Spariscono appena c'e' un risultato: a quel punto hanno esaurito
-            // il loro scopo e ruberebbero spazio. `fill = false` li tiene alti
-            // quanto serve, cosi' non spingono via il resto.
+            // In cima, non in fondo: aprendo la scheda questa e' la sola cosa
+            // che si puo' fare senza digitare, quindi deve essere la prima che
+            // si vede. `fill = false` la tiene alta quanto serve.
             if (favorites.isNotEmpty() && state.results.isEmpty() && !state.loading) {
-                Text("Preferiti", style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
+                    Text(
+                        "  Preferiti",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
                 LazyColumn(
                     modifier = Modifier.weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -195,26 +181,68 @@ fun TrainNumberScreen(
                     }
                 }
             }
+
+            Text(
+                "Puoi incollare l'etichetta intera, sigla compresa. " +
+                    "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (favorites.isEmpty()) {
+                Text(
+                    "Aprendo una corsa, la stellina in alto la aggiunge ai preferiti " +
+                        "e la ritrovi qui.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            when {
+                state.loading -> Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+
+                state.message != null -> Text(
+                    state.message!!,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                state.results.isNotEmpty() ->
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(
+                            state.results,
+                            key = { it.ref.originCode + it.ref.departureDateMillis },
+                        ) { corsa ->
+                            RunCard(corsa, onOpenTrain)
+                        }
+                    }
+            }
+
         }
     }
 }
 
 @Composable
-private fun RunCard(ref: TrainRef, onOpenTrain: (TrainRoute) -> Unit) {
-    val date = ref.dateInRome()
+private fun RunCard(corsa: TrainRun, onOpenTrain: (TrainRoute) -> Unit) {
+    val date = corsa.ref.dateInRome()
     Card(
         Modifier
             .fillMaxWidth()
-            .clickable { onOpenTrain(ref.toRoute()) },
+            .clickable { onOpenTrain(corsa.ref.toRoute()) },
     ) {
         Row(
             Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Treno ${ref.number}", style = MaterialTheme.typography.titleMedium)
+                // La sigla e' l'unica cosa che distingue due corse omonime:
+                // "EC 20" e "REG 20" sono due treni, "Treno 20" e' un enigma.
+                Text(corsa.label, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "da ${ref.originName ?: ref.originCode} · ${date.format(DATE)}",
+                    listOfNotNull(corsa.origin, corsa.destination).joinToString(" → ")
+                        .ifBlank { "percorso non disponibile" } + "  ·  " + date.format(DATE),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -230,7 +258,7 @@ private fun RunCard(ref: TrainRef, onOpenTrain: (TrainRoute) -> Unit) {
 
 /**
  * Un preferito porta con se' la descrizione del giorno in cui e' stato salvato:
- * "REG 2618 · Milano Centrale -> Lecco" dice all'utente qual e' il suo treno
+ * "REG 2618 Â· Milano Centrale -> Lecco" dice all'utente qual e' il suo treno
  * molto meglio di un numero nudo. Non e' un dato in tempo reale e non pretende
  * di esserlo: quello arriva dopo, quando la corsa viene cercata.
  */
@@ -258,7 +286,7 @@ private fun FavoriteCard(
                 val tratta = listOfNotNull(favorite.originName, favorite.destinationName)
                 if (tratta.isNotEmpty()) {
                     Text(
-                        tratta.joinToString(" → "),
+                        tratta.joinToString(" â†’ "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

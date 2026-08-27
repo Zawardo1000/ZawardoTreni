@@ -96,6 +96,22 @@ data class TrainRef(
     val departureDate: LocalDate? = null,
 )
 
+/**
+ * Una corsa trovata cercando per numero, con quel poco che serve a riconoscerla
+ * senza aprirla.
+ *
+ * Il numero da solo non basta: puo' appartenere a due treni diversi lo stesso
+ * giorno, e "Treno 20" non dice quale sia. La sigla e i capolinea invece si
+ * leggono a colpo d'occhio, ma stanno nel dettaglio della corsa, non
+ * nell'elenco: vanno chiesti apposta.
+ */
+data class TrainRun(
+    val ref: TrainRef,
+    val label: String,
+    val origin: String?,
+    val destination: String?,
+)
+
 enum class TrainState {
     /** In orario o in anticipo. */
     REGULAR,

@@ -39,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -202,7 +203,16 @@ fun TrainDetailScreen(
             )
         },
     ) { inner ->
-        Box(Modifier.fillMaxSize().padding(inner)) {
+        /*
+         * Trascinare verso il basso aggiorna. E' il gesto che la gente prova per
+         * istinto su una lista che invecchia da sola, e il bottone in alto resta
+         * comunque per chi lo cerca.
+         */
+        PullToRefreshBox(
+            isRefreshing = state.pulling,
+            onRefresh = vm::refresh,
+            modifier = Modifier.fillMaxSize().padding(inner),
+        ) {
             val status = state.status
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))

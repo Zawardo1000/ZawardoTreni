@@ -22,6 +22,14 @@ import java.time.LocalDateTime
 data class TrainDetailUiState(
     val loading: Boolean = true,
     val refreshing: Boolean = false,
+    /**
+     * Solo per l'aggiornamento chiesto col gesto.
+     *
+     * L'indicatore del trascinamento deve rispondere a chi trascina: farlo
+     * girare anche per il rinfresco automatico di ogni minuto sembrerebbe un
+     * difetto, non un servizio.
+     */
+    val pulling: Boolean = false,
     val status: TrainStatus? = null,
     /** Distinguere "non esiste" da "non c'e' il realtime" cambia il messaggio da mostrare. */
     val realtimeUnavailable: Boolean = false,
@@ -79,7 +87,7 @@ class TrainDetailViewModel(
         return TrainRef(trainNumber, origine, millis)
     }
 
-    fun refresh() = load(initial = false)
+    fun refresh() = load(initial = false, manual = true)
 
     /**
      * Si salva il numero; nome e capolinea sono solo la descrizione con cui
@@ -92,9 +100,16 @@ class TrainDetailViewModel(
         }
     }
 
-    private fun load(initial: Boolean) {
+    private fun load(initial: Boolean, manual: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(loading = initial, refreshing = !initial, error = null) }
+            _state.update {
+                it.copy(
+                    loading = initial,
+                    refreshing = !initial,
+                    pulling = manual && !initial,
+                    error = null,
+                )
+            }
 
             /*
              * ViaggiaTreno non copre tutto: sulle linee S del Passante milanese
@@ -111,6 +126,7 @@ class TrainDetailViewModel(
                         it.copy(
                             loading = false,
                             refreshing = false,
+                            pulling = false,
                             error = "Aggiornamento non riuscito: ${e.message ?: "errore di rete"}",
                         )
                     }
@@ -127,6 +143,7 @@ class TrainDetailViewModel(
                 it.copy(
                     loading = false,
                     refreshing = false,
+                    pulling = false,
                     status = status ?: it.status,
                     // 204 su una data non odierna significa "dato inesistente", non "errore".
                     realtimeUnavailable = status == null && it.status == null,

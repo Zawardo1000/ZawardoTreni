@@ -259,6 +259,48 @@ class IntegrazioneTest {
      * La sigla scritta a mano serve a scegliere fra due treni con lo stesso
      * numero, non a nasconderne: il confronto e' largo di proposito.
      */
+    /**
+     * Cercando un numero l'elenco deve bastare a scegliere.
+     *
+     * ViaggiaTreno di suo da' solo origine e data, quindi due treni diversi con
+     * lo stesso numero uscivano identici - "Treno 20" e "Treno 20" - e per
+     * sapere quale fosse quale bisognava aprirli a uno a uno.
+     */
+    @Test
+    fun `due corse con lo stesso numero non si assomigliano`() = runBlocking {
+        val numeri = trains.departures("S01700").map { it.trainRef.number }.distinct().take(12)
+        assertTrue("tabellone vuoto: non si puo' concludere nulla", numeri.isNotEmpty())
+
+        println("=== CORSE PER NUMERO ===")
+        var conDoppioni = 0
+        for (numero in numeri) {
+            val corse = runCatching { trains.findRuns(numero) }.getOrDefault(emptyList())
+            if (corse.isEmpty()) continue
+
+            for (c in corse) {
+                assertTrue(
+                    "la corsa $numero esce senza sigla: " + c.label,
+                    c.label != "Treno " + numero,
+                )
+            }
+            if (corse.size == 1) continue
+
+            conDoppioni++
+            corse.forEach {
+                println("  " + numero + ": " + it.label + "  " + it.origin + " -> " +
+                    it.destination + "  " + it.ref.departureDateMillis)
+            }
+            val impronte = corse.map {
+                listOf(it.label, it.origin, it.destination, it.ref.departureDateMillis).toString()
+            }
+            assertTrue(
+                "il numero $numero ha ${corse.size} corse indistinguibili nell'elenco",
+                impronte.size == impronte.toSet().size,
+            )
+        }
+        println("  numeri con piu' di una corsa: " + conDoppioni + " su " + numeri.size)
+    }
+
     @Test
     fun `la sigla scritta distingue due treni omonimi`() {
         assertTrue("REG20 -> " + trainCategoryOf("REG20"), trainCategoryOf("REG20") == "REG")

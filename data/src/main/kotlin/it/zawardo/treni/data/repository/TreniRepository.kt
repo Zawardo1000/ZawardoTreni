@@ -13,6 +13,7 @@ import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.matchesCategory
 import java.time.Duration
@@ -203,25 +204,35 @@ class TrainStatusRepository(
     }
 
     /**
-     * Le corse di un numero, ristrette dalla sigla quando e' stata scritta.
+     * Le corse di un numero, gia' riconoscibili.
      *
-     * "20" oggi sono due treni diversi: l'EC Milano Centrale - Chiasso e il REG
-     * Cocquio Trevisago - Milano Cadorna. Chi scrive "REG20" ha gia' detto quale
-     * dei due vuole, e ignorarlo vorrebbe dire fargli scegliere due volte.
+     * L'elenco che ViaggiaTreno restituisce cercando un numero da' solo origine
+     * e data: due treni diversi con lo stesso numero ne escono identici, e per
+     * distinguerli bisognerebbe aprirli. La sigla e i capolinea stanno nel
+     * dettaglio, quindi si chiede quello - in parallelo, una chiamata per corsa,
+     * e le corse sono quasi sempre una o due.
      *
-     * La sigla non e' nell'elenco delle corse ma nel dettaglio, quindi costa una
-     * chiamata per candidato: si paga solo quando i candidati sono piu' di uno.
-     * Se non resta nulla la sigla viene ignorata - restringe la scelta, non
-     * nasconde treni.
+     * Se una sigla e' stata scritta restringe la scelta: "REG20" apre il
+     * regionale, "EC20" l'eurocity. Se non lascia nulla viene ignorata, perche'
+     * deve restringere, mai nascondere.
      */
-    suspend fun resolve(trainNumber: String, category: String?): List<TrainRef> {
-        val refs = resolve(trainNumber)
-        if (category.isNullOrBlank() || refs.size <= 1) return refs
-        val ristretti = refs.filter { ref ->
-            status(ref)?.label?.let { matchesCategory(it, category) } == true
+    suspend fun findRuns(trainNumber: String, category: String? = null): List<TrainRun> =
+        withContext(Dispatchers.IO) {
+            val refs = resolve(trainNumber)
+            val corse = refs
+                .map { ref -> async { ref to status(ref) } }
+                .map { it.await() }
+                .map { (ref, stato) ->
+                    TrainRun(
+                        ref = ref,
+                        label = stato?.label ?: "Treno " + ref.number,
+                        origin = stato?.origin ?: ref.originName,
+                        destination = stato?.destination,
+                    )
+                }
+            if (category.isNullOrBlank() || corse.size <= 1) return@withContext corse
+            corse.filter { matchesCategory(it.label, category) }.ifEmpty { corse }
         }
-        return ristretti.ifEmpty { refs }
-    }
 
     /**
      * Sceglie la corsa giusta fra quelle che condividono lo stesso numero.
