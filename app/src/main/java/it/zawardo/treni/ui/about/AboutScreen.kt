@@ -120,12 +120,17 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = "I tuoi dati restano tuoi",
                 body = "Questa app non raccoglie niente di te. Nessun account, nessun " +
                     "profilo, nessun identificativo.\n\n" +
-                    "Il traffico di rete va in una direzione sola: l'app chiede orari e " +
-                    "ritardi, e riceve risposte. Non manda indietro nulla su di te, né a " +
-                    "me né a terzi. Cronologia e ricerche salvate restano sul telefono e " +
-                    "non escono da lì; disinstallando l'app spariscono con lei.\n\n" +
+                    "Di rete esce solo quello che serve a fare la domanda: le stazioni " +
+                    "che cerchi, l'orario che hai scelto, il numero del treno. Nient'altro: " +
+                    "nessun identificativo, niente che dica chi sei. E comunque niente che " +
+                    "torni a me, perché server miei non ne esistono. Cronologia, ricerche " +
+                    "salvate e treni preferiti restano sul telefono e non escono da lì; " +
+                    "disinstallando l'app spariscono con lei.\n\n" +
                     "La posizione, se la concedi, serve solo a trovare la stazione più " +
-                    "vicina in quel momento. Non viene memorizzata né trasmessa.\n\n" +
+                    "vicina. Per saperlo le coordinate vengono mandate a Trenitalia, che è " +
+                    "chi ha l'elenco delle stazioni: da solo non saprei rispondere. Non le " +
+                    "salvo e non le tengo, ma è giusto tu sappia che in quel momento " +
+                    "escono dal telefono.\n\n" +
                     "Non è una promessa generosa: è che i fatti degli altri non mi " +
                     "interessano, e rivenderli mi interessa ancora meno.",
             )
