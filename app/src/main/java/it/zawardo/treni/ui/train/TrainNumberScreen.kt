@@ -37,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -79,14 +78,14 @@ fun TrainNumberScreen(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Numero treno") },
-                placeholder = { Text("es. 9505, 888A, RE 2874") },
+                placeholder = { Text("es. 2874, 24852") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 keyboardOptions = KeyboardOptions(
-                    // Non Number: con la tastiera numerica le lettere di "888A"
-                    // non erano nemmeno digitabili.
-                    keyboardType = KeyboardType.Text,
-                    capitalization = KeyboardCapitalization.Characters,
+                    // Il numero e' sempre intero: tastierino numerico, che a
+                    // mano e' molto piu' rapido. L'etichetta incollata resta
+                    // gestita, perche' il numero lo si estrae dal testo.
+                    keyboardType = KeyboardType.Number,
                     autoCorrectEnabled = false,
                     imeAction = ImeAction.Search,
                 ),
@@ -112,7 +111,7 @@ fun TrainNumberScreen(
             }
 
             Text(
-                "Puoi incollare l'etichetta intera, sigla compresa. " +
+                "Puoi incollare l'etichetta intera: la sigla viene scartata. " +
                     "Solo i treni in circolazione oggi: ViaggiaTreno non conosce le altre giornate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

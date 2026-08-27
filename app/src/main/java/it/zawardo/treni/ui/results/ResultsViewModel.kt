@@ -223,7 +223,7 @@ class ResultsViewModel(
             val enriched = coroutineScope {
                 rows.map { row ->
                     async {
-                        // Solo i treni: interrogare ViaggiaTreno col "888A" di un bus
+                        // Solo i treni: interrogare ViaggiaTreno col "890A" di un bus
                         // sostitutivo e' una chiamata sprecata che fallisce sempre.
                         val number = row.journey.legs.firstOrNull { it.isTrain }?.trainNumber
                             ?: return@async row.copy(loadingStatus = false)

@@ -50,20 +50,19 @@ class TrainNumberViewModel : ViewModel() {
 
     fun onQueryChange(text: String) {
         /*
-         * Il campo accetta anche l'etichetta intera, perche' e' quella che si
-         * legge nei risultati e nei tabelloni: "RE 2874", "RE8 2828", "REG
-         * 2618". Toglierle gli spazi le trasformava in "RE82828", che non
-         * esiste da nessuna parte.
+         * Nel campo restano solo cifre, perche' su ViaggiaTreno i numeri di
+         * treno sono interi: le lettere che si vedono in giro sono sigle di
+         * linea ("RE8", "S8") o bus sostitutivi, e nessuna delle due si cerca
+         * qui.
          *
-         * Si normalizza in maiuscolo perche' e' cosi' che ViaggiaTreno indicizza
-         * i suffissi di lettera.
+         * Incollare l'etichetta intera continua pero' a funzionare, ed e' il
+         * motivo per cui si passa dall'estrazione invece di filtrare e basta:
+         * da "RE_8 2828" le sole cifre darebbero "82828", che e' un altro treno
+         * o nessuno.
          */
-        val cleaned = text
-            .filter { it.isLetterOrDigit() || it == ' ' || it == '_' || it == '-' || it == '/' }
-            .take(24)
-            .uppercase()
-        _state.update { it.copy(query = cleaned, message = null, suggestionsOpen = true) }
-        digitato.value = cleaned
+        val numero = trainNumberOf(text)?.filter { it.isDigit() }.orEmpty().take(6)
+        _state.update { it.copy(query = numero, message = null, suggestionsOpen = true) }
+        digitato.value = numero
     }
 
     /**

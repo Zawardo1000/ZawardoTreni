@@ -78,7 +78,7 @@ data class Leg(
     /** Solo i treni si possono seguire in tempo reale. */
     val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
 
-    /** Es. "FR 9505", "Bus 888A", "Urbano". */
+    /** Es. "FR 9505", "Bus 890A", "Urbano". */
     val label: String
         get() = when (kind) {
             TransportKind.TRAIN -> listOfNotNull(category, trainNumber).joinToString(" ")

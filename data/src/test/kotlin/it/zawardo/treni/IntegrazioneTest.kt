@@ -248,6 +248,26 @@ class IntegrazioneTest {
      * dove si trova il treno e' passato, e la posizione e' una sola. I dati
      * grezzi non lo garantiscono.
      */
+    /**
+     * Il campo della ricerca treno tiene solo cifre, ma ci si incolla dentro
+     * l'etichetta letta altrove. Filtrare e basta sarebbe la trappola: da
+     * "RE_8 2828" le sole cifre danno "82828".
+     */
+    @Test
+    fun `dall'etichetta incollata si ricava il numero, non le cifre della sigla`() {
+        fun campo(incollato: String) = trainNumberOf(incollato)?.filter { it.isDigit() }.orEmpty()
+
+        assertTrue("RE_8 2828 -> " + campo("RE_8 2828"), campo("RE_8 2828") == "2828")
+        assertTrue("RE8 2828 -> " + campo("RE8 2828"), campo("RE8 2828") == "2828")
+        assertTrue("RE 2874 -> " + campo("RE 2874"), campo("RE 2874") == "2874")
+        assertTrue("S8 24852 -> " + campo("S8 24852"), campo("S8 24852") == "24852")
+        assertTrue("REG2618 -> " + campo("REG2618"), campo("REG2618") == "2618")
+        assertTrue("2828 -> " + campo("2828"), campo("2828") == "2828")
+        assertTrue("digitazione a meta' -> " + campo("2"), campo("2") == "2")
+        assertTrue("campo svuotato -> " + campo(""), campo("") == "")
+        assertTrue("solo sigla -> " + campo("REG"), campo("REG") == "")
+    }
+
     @Test
     fun `il percorso resta coerente anche coi buchi in mezzo`() {
         fun fermata(
