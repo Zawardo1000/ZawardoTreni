@@ -33,32 +33,8 @@ in produzione. Possono cambiare o smettere di funzionare senza preavviso.
 **Il realtime esiste solo per la giornata corrente**: `andamentoTreno` risponde `204` per
 qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
 
-Le insidie note di queste API sono documentate nei commenti del modulo `:data`,
-accanto al codice che le aggira. Le principali:
-
-- il BFF **pretende l'offset di fuso** nella `departure_time`: senza, ignora l'ora
-  e riparte da mezzanotte;
-- `andamentoTreno` **non proietta il ritardo** sulle fermate future, che restano a
-  zero anche su un treno a +8: il ricalcolo lo fa l'app;
-- gli endpoint di dettaglio del BFF rispondono `410` e non vanno usati;
-- il `searchId` scade dopo circa 10 minuti;
-- **di Italo ViaggiaTreno non sa nulla**: non una riga nei tabelloni, e
-  `cercaNumeroTreno` sui suoi numeri non trova niente. Senza la fonte NTV, meta'
-  dell'alta velocita' per l'app non circola;
-- di Italo servono **tre** endpoint, e fanno cose diverse:
-  `RicercaStazioneService` e' il tabellone di stazione ed e' sempre vivo;
-  `RicercaTrattaService` da' le corse fra due stazioni **col percorso completo**
-  ed e' l'unico modo di avere le fermate di un Italo; `RicercaTrenoService`,
-  quello per numero, risponde `IsEmpty` quasi sempre — verificato sui cinque
-  Italo in viaggio verso Napoli e su uno con quindici minuti di ritardo;
-- il servizio "in viaggio" di Italo puo' **congelarsi**: il 27 agosto 2026 alle
-  21:00 rispondeva ancora con la fotografia delle 08:11, e il loro stesso sito
-  diceva "informazioni non disponibili" per un treno in corsa. Per questo il
-  tabellone e' la fonte primaria, il percorso un di piu', e l'ora
-  dell'aggiornamento viene sempre dichiarata a chi guarda;
-- Italo usa sigle stazione proprie (`RMT`, `MC_`) e nessun endpoint le traduce
-  in codici RFI: la tabella e' in `ItaloStations`, 64 voci prese dal loro
-  catalogo (`/api/getStations`) e verificate una a una su `autocompletaStazione`.
+Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del modulo
+`:data`, accanto al codice che le aggira.
 
 ## Build
 
