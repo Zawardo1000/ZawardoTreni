@@ -111,3 +111,18 @@ data class RecentTrainEntity(
     @ColumnInfo(name = "destination_name") val destinationName: String?,
     @ColumnInfo(name = "opened_at") val openedAt: Long,
 )
+
+/**
+ * Stazione messa fra le preferite.
+ *
+ * La chiave e' il codice RFI perche' e' quello che apre un tabellone: una
+ * stazione senza non sarebbe consultabile, e non ha senso poterla preferire.
+ * Il nome si porta dietro per mostrarlo senza dover interrogare la rete.
+ */
+@Entity(tableName = "favorite_stations")
+data class FavoriteStationEntity(
+    @PrimaryKey @ColumnInfo(name = "rfi_code") val rfiCode: String,
+    @ColumnInfo(name = "location_id") val locationId: Long,
+    val name: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+)

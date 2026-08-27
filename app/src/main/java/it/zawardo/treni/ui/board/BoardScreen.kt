@@ -20,6 +20,10 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -88,6 +92,8 @@ fun BoardScreen(
         }
     }
     val state by vm.state.collectAsState()
+    val favorites by vm.favorites.collectAsState()
+    val isFavorite by vm.isFavorite.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
@@ -123,6 +129,11 @@ fun BoardScreen(
         }
     }
 
+    // Svuotare il campo e' il gesto di chi vuole un'altra stazione: da li' le
+    // preferite tornano a portata, senza doverne scrivere il nome.
+    val scegliendo = state.station == null ||
+        (state.suggestionsOpen && state.suggestions.isEmpty())
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -138,6 +149,19 @@ fun BoardScreen(
                     }
                 },
                 actions = {
+                    // Solo dove un tabellone esiste: una fermata senza codice RFI
+                    // non e' consultabile, e preferirla non vorrebbe dire nulla.
+                    if (state.station?.rfiCode != null) {
+                        IconButton(onClick = vm::toggleFavorite) {
+                            Icon(
+                                if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                                contentDescription = if (isFavorite) "Togli dalle preferite"
+                                else "Aggiungi alle preferite",
+                                tint = if (isFavorite) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (state.station != null) {
                         IconButton(onClick = vm::load) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Aggiorna")
@@ -208,10 +232,49 @@ fun BoardScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
-            } else if (state.station == null) {
+            } else if (scegliendo) {
+                /*
+                 * Il momento in cui servono e' questo: nessun tabellone aperto,
+                 * oppure il campo appena svuotato per cambiare stazione. Sono
+                 * l'unica cosa che si puo' fare senza digitare.
+                 */
+                if (favorites.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.tertiary,
+                        )
+                        Text("  Preferite", style = MaterialTheme.typography.titleMedium)
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(favorites, key = { it.rfiCode.orEmpty() }) { preferita ->
+                            FavoriteStationRow(
+                                station = preferita,
+                                onOpen = {
+                                    keyboard?.hide()
+                                    focus.clearFocus(force = true)
+                                    vm.select(preferita)
+                                },
+                                onRemove = { preferita.rfiCode?.let(vm::removeFavorite) },
+                            )
+                        }
+                    }
+                }
                 Text(
-                    "Scegli una stazione o usa il mirino per quella più vicina.",
-                    Modifier.padding(vertical = 24.dp),
+                    if (favorites.isEmpty()) {
+                        "Scegli una stazione o usa il mirino per quella più vicina." +
+                            System.lineSeparator() + System.lineSeparator() +
+                            "Aprendo un tabellone, la stellina in alto lo aggiunge alle " +
+                            "preferite e lo ritrovi qui."
+                    } else {
+                        "Oppure cerca una stazione, o usa il mirino per quella più vicina."
+                    },
+                    Modifier.padding(vertical = 16.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -369,6 +432,46 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
                     "in arrivo",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Una stazione preferita: si tocca e si apre il suo tabellone.
+ *
+ * La stellina piena a destra la toglie, cosi' il gesto per aggiungerla e quello
+ * per rimuoverla sono lo stesso simbolo, in due posti diversi.
+ */
+@Composable
+private fun FavoriteStationRow(
+    station: Station,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                station.name,
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = onRemove) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = "Togli dalle preferite",
+                    tint = MaterialTheme.colorScheme.tertiary,
                 )
             }
         }

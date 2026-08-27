@@ -9,7 +9,10 @@ import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -44,11 +47,25 @@ class BoardViewModel : ViewModel() {
     private val stationsRepo = ServiceLocator.stationRepository
     private val trains = ServiceLocator.trainStatusRepository
     private val store = ServiceLocator.searchStore
+    private val preferite = ServiceLocator.stationFavorites
 
     private val _state = MutableStateFlow(BoardUiState())
     val state: StateFlow<BoardUiState> = _state.asStateFlow()
 
     private val queries = MutableStateFlow("")
+
+    /** Le stazioni preferite, per aprirle senza ricercarle. */
+    val favorites: StateFlow<List<Station>> = preferite.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Preferita o no, letto dal database e non tenuto a parte: la stellina resta
+     * d'accordo con l'elenco anche se la stazione viene tolta da li'.
+     */
+    val isFavorite: StateFlow<Boolean> = combine(favorites, _state) { elenco, s ->
+        val code = s.station?.rfiCode ?: return@combine false
+        elenco.any { it.rfiCode.equals(code, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /**
      * Da che ora chiedere il prossimo blocco.
@@ -150,6 +167,18 @@ class BoardViewModel : ViewModel() {
 
     fun closeSuggestions() {
         _state.update { it.copy(suggestionsOpen = false, suggestions = emptyList()) }
+    }
+
+    fun toggleFavorite() {
+        val station = _state.value.station ?: return
+        val wanted = !isFavorite.value
+        viewModelScope.launch {
+            preferite.toggle(station, wanted, System.currentTimeMillis())
+        }
+    }
+
+    fun removeFavorite(rfiCode: String) {
+        viewModelScope.launch { preferite.remove(rfiCode) }
     }
 
     fun setMode(mode: BoardMode) {

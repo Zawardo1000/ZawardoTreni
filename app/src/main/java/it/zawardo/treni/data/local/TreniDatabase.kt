@@ -15,8 +15,9 @@ import androidx.sqlite.execSQL
         StationEntity::class,
         FavoriteTrainEntity::class,
         RecentTrainEntity::class,
+        FavoriteStationEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class TreniDatabase : RoomDatabase() {
     abstract fun stationDao(): StationDao
     abstract fun favoriteTrainDao(): FavoriteTrainDao
     abstract fun recentTrainDao(): RecentTrainDao
+    abstract fun favoriteStationDao(): FavoriteStationDao
 
     companion object {
         /**
@@ -82,6 +84,20 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 aggiunge le stazioni preferite. */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `favorite_stations` (" +
+                        "`rfi_code` TEXT NOT NULL, " +
+                        "`location_id` INTEGER NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`rfi_code`))",
+                )
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -89,7 +105,7 @@ abstract class TreniDatabase : RoomDatabase() {
                 context.applicationContext,
                 TreniDatabase::class.java,
                 "treni.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }

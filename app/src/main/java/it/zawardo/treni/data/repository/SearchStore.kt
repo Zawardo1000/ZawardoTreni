@@ -68,6 +68,17 @@ class SearchStore(
         }
 
     suspend fun cache(station: Station) {
+        /*
+         * Senza un locationId vero non si mette in cache.
+         *
+         * Una stazione raggiunta da dentro una corsa ha solo il codice RFI e
+         * arriva con locationId 0, che e' la chiave della tabella: finirebbe per
+         * occupare quella riga e poi comparire nei suggerimenti, dove sceglierla
+         * romperebbe la ricerca per tratta - il BFF vuole l'id, e zero non e'
+         * l'id di niente. Il tabellone funziona lo stesso, perche' a lui basta
+         * il codice RFI.
+         */
+        if (station.locationId <= 0L) return
         stations.insertAll(
             listOf(
                 StationEntity(

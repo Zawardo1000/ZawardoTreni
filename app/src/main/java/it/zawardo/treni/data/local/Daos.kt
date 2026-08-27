@@ -144,3 +144,15 @@ interface RecentTrainDao {
 
     companion object { const val RECENT_LIMIT = 20 }
 }
+
+@Dao
+interface FavoriteStationDao {
+    @Query("SELECT * FROM favorite_stations ORDER BY created_at DESC")
+    fun observe(): Flow<List<FavoriteStationEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: FavoriteStationEntity)
+
+    @Query("DELETE FROM favorite_stations WHERE rfi_code = :rfiCode")
+    suspend fun delete(rfiCode: String)
+}
