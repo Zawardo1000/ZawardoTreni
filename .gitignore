@@ -8,8 +8,9 @@ local.properties
 keystore.properties
 .idea/
 
-# Piano di lavoro: appunti interni, non fanno parte del progetto
+# Appunti interni: non fanno parte del progetto
 PLAN.md
+CLAUDE.md
 
 # APK distribuibili: non vanno nel repository
 dist/
