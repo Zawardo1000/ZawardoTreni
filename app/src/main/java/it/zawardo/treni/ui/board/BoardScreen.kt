@@ -310,7 +310,15 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (String, LocalDate) -> Unit
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!cancelled && entry.delayMinutes != 0) {
+                if (!entry.hasRealtime) {
+                    // Senza tracciamento l'orario e' quello previsto: mostrarlo
+                    // come "in orario" sarebbe indistinguibile da un rilevamento.
+                    Text(
+                        "  previsto",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (!cancelled && entry.delayMinutes != 0) {
                     Text(
                         "  " + delayLabel(entry.delayMinutes),
                         style = MaterialTheme.typography.bodySmall,

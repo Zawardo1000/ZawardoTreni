@@ -213,6 +213,37 @@ class LiveApiTest {
         )
     }
 
+    /**
+     * ViaggiaTreno non pubblica nulla per le fermate sotterranee del Passante
+     * milanese, e su quelle stazioni anche la ricerca itinerari HAFAS salta il
+     * giorno corrente. Il tabellone Trenord e' l'unica fonte che elenchi i treni
+     * effettivi del giorno: se smette di funzionare, quelle stazioni tornano
+     * mute e questo test lo segnala.
+     */
+    @Test
+    fun `il tabellone Trenord copre le fermate del Passante`() = runBlocking {
+        val viaggiaTreno = trains.departures("S01650")
+        val trenordBoard = trenord.board("S01650")
+
+        println("\n=== MILANO DATEO ===")
+        println("  ViaggiaTreno: ${viaggiaTreno.size} treni")
+        println("  Trenord     : ${trenordBoard.size} treni")
+        trenordBoard.take(6).forEach {
+            println("     ${it.scheduledTime}  ${it.label.padEnd(12)} -> ${it.direction}")
+        }
+
+        assertTrue(
+            "il tabellone Trenord per Dateo e' vuoto: o la stazione e' davvero " +
+                "ferma, o il markup di station-details e' cambiato e il parser non " +
+                "trova piu' le righe",
+            trenordBoard.isNotEmpty() || viaggiaTreno.isNotEmpty(),
+        )
+        assertTrue(
+            "righe senza orario: il parser ha trovato i blocchi ma non i campi",
+            trenordBoard.all { !it.scheduledTime.isNullOrBlank() },
+        )
+    }
+
     @Test
     fun `stato realtime espone fermate, ritardi e posizione`() = runBlocking {
         // Si parte da un treno realmente in circolazione adesso, preso dal tabellone.

@@ -182,4 +182,13 @@ data class BoardEntry(
     val actualPlatform: String?,
     val state: TrainState,
     val inStation: Boolean,
+    /**
+     * Falso quando la corsa non e' tracciata e l'orario mostrato e' quello
+     * previsto, non un rilevamento.
+     *
+     * Serve a non spacciare per "in orario" un treno di cui semplicemente non
+     * si sa nulla: sul Passante milanese nessuna delle due sorgenti pubblica il
+     * tempo reale, e tacerlo sarebbe la bugia peggiore.
+     */
+    val hasRealtime: Boolean = true,
 )

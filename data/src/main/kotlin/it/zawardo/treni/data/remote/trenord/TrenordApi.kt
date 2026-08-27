@@ -99,7 +99,30 @@ interface TrenordApi {
         @Query("language") language: String = "it",
     ): ResponseBody
 
-    /** Dettaglio corsa con fermate e dati in tempo reale. */
+    /**
+     * Dettaglio corsa con fermate e dati in tempo reale.
+     * [date] va in formato `yyyy-MM-dd`: altri formati danno 400.
+     * Senza data l'endpoint risponde con l'orario nominale, non con la corsa
+     * del giorno, che su una linea deviata e' un'informazione diversa.
+     */
     @GET("train/{id}")
-    suspend fun train(@Path("id") trainId: String): ResponseBody
+    suspend fun train(
+        @Path("id") trainId: String,
+        @Query("date") date: String? = null,
+    ): ResponseBody
+
+    /**
+     * Tabellone di stazione.
+     *
+     * Sta fuori dal BFF e risponde in JSON **non cifrato**, ma con dentro
+     * frammenti di HTML gia' renderizzati. E' l'unica fonte per le fermate del
+     * Passante milanese.
+     */
+    @GET("https://www.trenord.it/rest/render/station-details")
+    suspend fun stationDetails(
+        @Query("mirCode") mirCode: String,
+        @Query("L") language: String = "it",
+        @Query("mxp") mxp: Boolean = false,
+        @Query("map_zoom") mapZoom: Int = 14,
+    ): TrenordStationDetailsDto
 }
