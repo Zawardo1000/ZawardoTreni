@@ -63,6 +63,16 @@ class ItaloRepository(
         /** Da dove si sale, quando si arriva da un tabellone: vedi sotto. */
         boardingRfi: String? = null,
         boardingName: String? = null,
+        /**
+         * Dove si scende, quando si arriva da una soluzione di viaggio.
+         *
+         * E' la strada migliore: con i due capi in mano la tratta si chiede
+         * subito, senza passare dal tabellone e senza dover indovinare la
+         * direzione da un nome scritto per esteso. Vale oggi per una corsa
+         * Italo aperta da una ricerca, e valdra' domani per le tratte Italo
+         * dentro un viaggio con cambi.
+         */
+        alightingRfi: String? = null,
     ): TrainStatus? = withContext(Dispatchers.IO) {
         /*
          * Solo per oggi.
@@ -75,6 +85,13 @@ class ItaloRepository(
 
         val pieno = runCatching { api.treno(trainNumber) }.getOrNull()?.toTrainStatus(date)
         if (pieno != null) return@withContext pieno
+
+        // Con i due capi del viaggio la tratta risponde senza altri passaggi.
+        if (boardingRfi != null && alightingRfi != null) {
+            route(boardingRfi, alightingRfi, date)
+                .firstOrNull { it.number.trim() == trainNumber }
+                ?.let { return@withContext it }
+        }
 
         /*
          * Il dettaglio tace quasi sempre.
