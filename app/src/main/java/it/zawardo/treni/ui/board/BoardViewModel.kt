@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import it.zawardo.treni.domain.model.stillCatchable
 import java.time.ZonedDateTime
 
@@ -142,6 +145,7 @@ class BoardViewModel : ViewModel() {
         val code = station.rfiCode ?: return
 
         nextFrom = ZonedDateTime.now()
+        verificate.clear()
         viewModelScope.launch {
             _state.update { it.copy(loading = true, message = null, noMore = false) }
 
@@ -239,8 +243,52 @@ class BoardViewModel : ViewModel() {
         }
 
 
+    /**
+     * Chiede alla corsa dove finisce davvero.
+     *
+     * Il tabellone di ViaggiaTreno a volte sbaglia la destinazione: il REG 12977
+     * da Acireale risulta diretto a Bicocca, mentre il record della corsa dice
+     * Catania Aeroporto Fontanarossa in ogni campo, orario compreso, e Bicocca
+     * non e' fra le sue fermate. Sul tabellone di Acireale capita a due righe su
+     * dieci: troppo per fidarsi, troppo poco per rinunciare al tabellone.
+     *
+     * Si domanda solo per le righe che l'utente ha davanti, una volta per corsa
+     * e poche per volta: il tabellone compare subito col dato grezzo e si
+     * corregge da se'. Chi non scorre non paga nulla.
+     */
+    fun verifyDirection(entry: BoardEntry) {
+        val chiave = key(entry)
+        if (chiave in verificate) return
+        verificate += chiave
+        val arrivi = _state.value.mode == BoardMode.ARRIVALS
+
+        viewModelScope.launch {
+            val vera = runCatching {
+                limite.withPermit { trains.status(entry.trainRef)?.terminus(arrivi) }
+            }.getOrNull()
+
+            if (vera.isNullOrBlank() || vera.equals(entry.direction, ignoreCase = true)) return@launch
+            _state.update { s ->
+                s.copy(
+                    entries = s.entries.map {
+                        if (key(it) == chiave) it.copy(direction = vera) else it
+                    },
+                )
+            }
+        }
+    }
+
     private fun key(e: BoardEntry) =
         e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime
+
+    /** Corse gia' interrogate: una volta a testa, anche scorrendo avanti e indietro. */
+    private val verificate = mutableSetOf<String>()
+
+    /**
+     * Poche richieste per volta. Una schermata mostra una decina di righe e
+     * lanciarle tutte insieme vorrebbe dire dieci connessioni per uno sguardo.
+     */
+    private val limite = Semaphore(3)
 
     private companion object {
         /** Ampiezza della finestra restituita da ViaggiaTreno, misurata. */

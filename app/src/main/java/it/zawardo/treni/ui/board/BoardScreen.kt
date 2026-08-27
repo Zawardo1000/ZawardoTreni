@@ -246,6 +246,11 @@ fun BoardScreen(
                             state.entries,
                             key = { it.trainRef.number + "|" + it.trainRef.departureDateMillis + "|" + it.scheduledTime },
                         ) { e ->
+                            // Solo per le righe che compaiono davvero: il
+                            // controllo della destinazione costa una chiamata.
+                            LaunchedEffect(e.trainRef.number, e.trainRef.departureDateMillis) {
+                                vm.verifyDirection(e)
+                            }
                             BoardRow(e) { entry ->
                                 onOpenTrain(
                                     TrainRoute(

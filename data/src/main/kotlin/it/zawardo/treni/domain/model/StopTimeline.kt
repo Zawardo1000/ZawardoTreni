@@ -57,3 +57,21 @@ private fun List<Stop>.segnaPosizione(): List<Stop> {
     if (ultima < 0) return this
     return mapIndexed { i, f -> if (i == ultima) f.copy(status = StopStatus.CURRENT) else f }
 }
+
+/**
+ * Il capolinea che riguarda chi viaggia.
+ *
+ * Il tabellone di ViaggiaTreno a volte nomina una stazione che la corsa non
+ * serve: il REG 12977 da Acireale risulta diretto a Bicocca mentre il suo
+ * record dice Catania Aeroporto Fontanarossa in ogni campo, orario compreso, e
+ * Bicocca non e' fra le fermate. Fra le due fonti vince la corsa, che e' l'unica
+ * a dire dove si scende.
+ *
+ * Le fermate soppresse non contano: un treno limitato finisce dove smette di
+ * fermarsi, non dove sarebbe dovuto arrivare.
+ */
+fun TrainStatus.terminus(arrivals: Boolean = false): String? =
+    stops.filter { it.status != StopStatus.CANCELLED }
+        .let { if (arrivals) it.firstOrNull() else it.lastOrNull() }
+        ?.stationName
+        ?.takeIf { it.isNotBlank() }

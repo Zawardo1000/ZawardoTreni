@@ -19,6 +19,7 @@ import it.zawardo.treni.domain.model.matchesCategory
 import it.zawardo.treni.domain.model.trainCategoryOf
 import it.zawardo.treni.domain.model.trainNumberOf
 import it.zawardo.treni.domain.model.stillCatchable
+import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -266,6 +267,48 @@ class IntegrazioneTest {
      * lo stesso numero uscivano identici - "Treno 20" e "Treno 20" - e per
      * sapere quale fosse quale bisognava aprirli a uno a uno.
      */
+    /**
+     * Fra tabellone e corsa, sulla destinazione vince la corsa.
+     *
+     * Il tabellone di ViaggiaTreno a volte nomina una stazione che il treno non
+     * serve - il REG 12977 da Acireale risulta diretto a Bicocca mentre finisce
+     * a Catania Aeroporto Fontanarossa - quindi l'app la chiede alla corsa. Qui
+     * si verifica che quella fonte sia coerente con se stessa, altrimenti non
+     * varrebbe piu' dell'altra.
+     */
+    @Test
+    fun `la destinazione vera viene dalla corsa, non dal tabellone`() = runBlocking {
+        val tabellone = trains.departures("S12328")
+        if (tabellone.isEmpty()) {
+            println("=== DESTINAZIONI: Acireale non ha partenze in questa fascia ===")
+            return@runBlocking
+        }
+
+        println("=== DESTINAZIONI (Acireale) ===")
+        var discordanti = 0
+        var controllate = 0
+        for (voce in tabellone.take(10)) {
+            val stato = runCatching { trains.status(voce.trainRef) }.getOrNull() ?: continue
+            val vera = stato.terminus() ?: continue
+            controllate++
+
+            // La corsa deve concordare con se stessa: il capolinea dichiarato e
+            // l'ultima fermata sono lo stesso posto, altrimenti non si sa a chi
+            // credere.
+            assertTrue(
+                voce.label + ": la corsa dichiara '" + stato.destination +
+                    "' ma finisce a '" + vera + "'",
+                stato.destination.orEmpty().equals(vera, ignoreCase = true),
+            )
+            if (!vera.equals(voce.direction, ignoreCase = true)) {
+                discordanti++
+                println("  " + voce.label + ": tabellone '" + voce.direction + "' -> corsa '" + vera + "'")
+            }
+        }
+        println("  controllate " + controllate + ", tabellone in disaccordo su " + discordanti)
+        assertTrue("nessuna corsa controllabile", controllate > 0)
+    }
+
     @Test
     fun `due corse con lo stesso numero non si assomigliano`() = runBlocking {
         val numeri = trains.departures("S01700").map { it.trainRef.number }.distinct().take(12)
