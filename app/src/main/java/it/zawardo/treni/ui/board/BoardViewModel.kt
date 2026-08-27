@@ -12,8 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 
@@ -153,10 +151,18 @@ class BoardViewModel : ViewModel() {
                 it.copy(
                     loading = false,
                     entries = entries,
-                    // Interrogate entrambe le sorgenti: se non c'e' niente,
-                    // davvero non passa nulla in questa finestra oraria.
+                    /*
+                     * Vuoto puo' voler dire due cose diverse e l'utente ha
+                     * diritto di distinguerle: nessun treno, oppure treni che
+                     * esistono ma di cui nessuna fonte pubblica ritardi.
+                     */
                     message = if (entries.isEmpty()) {
-                        "Nessun treno in questa fascia oraria."
+                        "Nessun treno tracciato in questa fascia oraria." +
+                            System.lineSeparator() + System.lineSeparator() +
+                            "Il tabellone mostra solo corse con ritardo e binario " +
+                            "rilevati. Alcune fermate, fra cui quelle sotterranee " +
+                            "del Passante milanese, non hanno tracciamento: per " +
+                            "quelle usa la ricerca per tratta."
                     } else {
                         null
                     },
@@ -208,18 +214,25 @@ class BoardViewModel : ViewModel() {
      * Si interrogano entrambe in parallelo e si fondono. ViaggiaTreno vince sui
      * doppioni perche' porta ritardo e binario, che l'altro non ha.
      */
-    private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> = coroutineScope {
+    private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> {
         val arrivals = _state.value.mode == BoardMode.ARRIVALS
-        val rfi = async {
-            if (arrivals) trains.arrivals(code, at) else trains.departures(code, at)
-        }
-        val tn = async {
-            // Il tabellone Trenord e' sempre "adesso": non accetta un orario,
-            // quindi si interroga solo per la prima finestra.
-            if (firstWindow) runCatching { trenord.board(code, arrivals) }.getOrDefault(emptyList())
-            else emptyList()
-        }
-        merge(rfi.await(), tn.await())
+        val rfi = if (arrivals) trains.arrivals(code, at) else trains.departures(code, at)
+
+        /*
+         * Trenord si interroga solo quando ViaggiaTreno tace.
+         *
+         * Dove RFI pubblica, i treni Trenord ci sono gia' e la fusione li
+         * scarterebbe come doppioni: chiedere il tabellone Trenord costerebbe
+         * una dozzina di chiamate per non aggiungere una riga. Resta utile solo
+         * sulle fermate scoperte, dove e' l'unica fonte.
+         *
+         * Il suo tabellone e' inoltre sempre "adesso": non accetta un orario,
+         * quindi partecipa solo alla prima finestra.
+         */
+        if (rfi.isNotEmpty() || !firstWindow) return merge(rfi, emptyList())
+
+        val tn = runCatching { trenord.board(code, arrivals) }.getOrDefault(emptyList())
+        return merge(rfi, tn)
     }
 
     /**
@@ -227,11 +240,22 @@ class BoardViewModel : ViewModel() {
      * visto dalle due sorgenti va mostrato una volta sola.
      */
     private fun merge(fromRfi: List<BoardEntry>, fromTrenord: List<BoardEntry>): List<BoardEntry> {
-        if (fromTrenord.isEmpty()) return fromRfi
-        if (fromRfi.isEmpty()) return fromTrenord
         val seen = fromRfi.map { it.trainRef.number + "|" + it.scheduledTime }.toSet()
         val extra = fromTrenord.filter { it.trainRef.number + "|" + it.scheduledTime !in seen }
-        return (fromRfi + extra).sortedBy { it.scheduledTime ?: "" }
+        return (fromRfi + extra)
+            /*
+             * Solo corse tracciate.
+             *
+             * Il tabellone Trenord e' orario teorico e per due terzi delle corse
+             * resta tale anche dopo aver interrogato il dettaglio. Una riga senza
+             * ritardo ne' binario non aggiunge nulla a un orario cartaceo, e
+             * mescolata alle altre fa sembrare misurato cio' che non lo e'.
+             *
+             * Il prezzo e' che le fermate senza copertura restano vuote: e'
+             * preferibile al rumore.
+             */
+            .filter { it.hasRealtime }
+            .sortedBy { it.scheduledTime ?: "" }
     }
 
     private fun key(e: BoardEntry) =
