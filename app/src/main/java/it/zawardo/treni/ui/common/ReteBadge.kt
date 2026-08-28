@@ -30,6 +30,19 @@ fun reteFuoriRfi(rfiCode: String?): String? = when {
     else -> null
 }
 
+/**
+ * La sigla del badge da mostrare, o `null` per niente badge.
+ *
+ * Il badge segnala una stazione che sta **solo** fuori da RFI. Se ha un gemello
+ * nazionale ([idNazionale] valorizzato) e' raggiungibile anche con Trenitalia
+ * (bus+Freccia): dietro le quinte teniamo la versione fuori-RFI per tabellone e
+ * misti, ma all'utente non serve saperlo — per lui e' una stazione come le
+ * altre, e marcarla confonderebbe. Il badge resta solo per quelle davvero
+ * esclusive, che quella rete e' l'unico modo di raggiungerle.
+ */
+fun siglaBadge(rfiCode: String?, idNazionale: Long?): String? =
+    if (idNazionale != null) null else reteFuoriRfi(rfiCode)
+
 /** Il gettone colorato con la sigla della rete, accanto al nome. */
 @Composable
 fun ReteBadge(sigla: String) {
@@ -57,6 +70,7 @@ fun ReteBadge(sigla: String) {
 fun NomeStazione(
     name: String,
     rfiCode: String?,
+    idNazionale: Long? = null,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyLarge,
     maxLines: Int = 1,
@@ -73,7 +87,7 @@ fun NomeStazione(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
-        reteFuoriRfi(rfiCode)?.let { ReteBadge(it) }
+        siglaBadge(rfiCode, idNazionale)?.let { ReteBadge(it) }
     }
 }
 
@@ -87,8 +101,10 @@ fun NomeStazione(
 fun TrattaConBadge(
     fromName: String,
     fromRfi: String?,
+    fromIdNazionale: Long?,
     toName: String,
     toRfi: String?,
+    toIdNazionale: Long?,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyLarge,
 ) {
@@ -97,8 +113,8 @@ fun TrattaConBadge(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        NomeStazione(fromName, fromRfi, Modifier.weight(1f, fill = false), style = style)
+        NomeStazione(fromName, fromRfi, fromIdNazionale, Modifier.weight(1f, fill = false), style = style)
         Text("→", style = style)
-        NomeStazione(toName, toRfi, Modifier.weight(1f, fill = false), style = style)
+        NomeStazione(toName, toRfi, toIdNazionale, Modifier.weight(1f, fill = false), style = style)
     }
 }

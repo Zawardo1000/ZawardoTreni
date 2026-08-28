@@ -105,8 +105,9 @@ private fun StationRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            // Il nome con la sigla della rete fuori-RFI, come dovunque altrove.
-            NomeStazione(station.name, station.rfiCode)
+            // Il nome col badge di rete: solo se la stazione e' esclusiva
+            // fuori-RFI (senza gemello nazionale), come dovunque altrove.
+            NomeStazione(station.name, station.rfiCode, station.idNazionale)
             if (!station.trackable && untrackedNote.isNotBlank()) {
                 // Senza codice RFI il treno non è tracciabile: meglio dirlo prima.
                 // Ma solo dove conta davvero — il tabellone — non nella ricerca.

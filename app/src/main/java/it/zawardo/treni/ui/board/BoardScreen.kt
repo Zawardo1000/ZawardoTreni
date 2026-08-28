@@ -478,6 +478,7 @@ private fun FavoriteStationRow(
             NomeStazione(
                 station.name,
                 station.rfiCode,
+                station.idNazionale,
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.titleMedium,
             )

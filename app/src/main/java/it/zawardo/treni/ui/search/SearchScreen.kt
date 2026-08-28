@@ -71,7 +71,7 @@ import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.ui.common.ReteBadge
 import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TrattaConBadge
-import it.zawardo.treni.ui.common.reteFuoriRfi
+import it.zawardo.treni.ui.common.siglaBadge
 import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
@@ -363,6 +363,7 @@ private fun SearchCard(
                         onUseLocation = onUseLocation,
                         locating = state.locating,
                         selectedRfi = state.from?.rfiCode,
+                        selectedIdNazionale = state.from?.idNazionale,
                     )
                     /*
                      * La lista sta attaccata al campo che si sta compilando, non
@@ -384,6 +385,7 @@ private fun SearchCard(
                         onFocused = { onFieldFocused(SearchField.TO) },
                         onClear = { onClearField(SearchField.TO) },
                         selectedRfi = state.to?.rfiCode,
+                        selectedIdNazionale = state.to?.idNazionale,
                     )
                     if (state.choosing && state.activeField == SearchField.TO) {
                         StationPicker(
@@ -569,6 +571,8 @@ private fun StationField(
     // Il codice della stazione scelta, per il badge di rete nel campo. Null
     // mentre si scrive (nessuna scelta ancora), valorizzato dopo la selezione.
     selectedRfi: String? = null,
+    // L'indirizzo nazionale della scelta: se c'e', niente badge (non e' esclusiva).
+    selectedIdNazionale: Long? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -579,9 +583,9 @@ private fun StationField(
         label = { Text(label) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
-        // Scelta una stazione fuori-RFI, la sua sigla resta nel campo, come nei
-        // suggerimenti: cosi' si vede a colpo d'occhio da che rete si parte.
-        leadingIcon = reteFuoriRfi(selectedRfi)?.let { sigla ->
+        // Scelta una stazione esclusiva fuori-RFI, la sua sigla resta nel campo,
+        // come nei suggerimenti. Se ha un gemello nazionale, niente badge.
+        leadingIcon = siglaBadge(selectedRfi, selectedIdNazionale)?.let { sigla ->
             @Composable { ReteBadge(sigla) }
         },
         trailingIcon = {
@@ -648,7 +652,10 @@ private fun HistoryAndSaved(
                             onClick = { onPick(h.from.toStation(), h.to.toStation(), null) },
                             onDelete = { onDeleteHistory(h.id) },
                         ) {
-                            TrattaConBadge(h.from.name, h.from.rfiCode, h.to.name, h.to.rfiCode)
+                            TrattaConBadge(
+                                h.from.name, h.from.rfiCode, h.from.idNazionale,
+                                h.to.name, h.to.rfiCode, h.to.idNazionale,
+                            )
                         }
                     }
                     item {
@@ -675,7 +682,10 @@ private fun HistoryAndSaved(
                             // la tratta coi badge sotto, solo se c'e' una rete da segnare.
                             val tratta = "${s.from.name} → ${s.to.name}"
                             if (s.label == tratta) {
-                                TrattaConBadge(s.from.name, s.from.rfiCode, s.to.name, s.to.rfiCode)
+                                TrattaConBadge(
+                                    s.from.name, s.from.rfiCode, s.from.idNazionale,
+                                    s.to.name, s.to.rfiCode, s.to.idNazionale,
+                                )
                             } else {
                                 Text(
                                     s.label,
@@ -683,11 +693,12 @@ private fun HistoryAndSaved(
                                     overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
-                                if (reteFuoriRfi(s.from.rfiCode) != null ||
-                                    reteFuoriRfi(s.to.rfiCode) != null
+                                if (siglaBadge(s.from.rfiCode, s.from.idNazionale) != null ||
+                                    siglaBadge(s.to.rfiCode, s.to.idNazionale) != null
                                 ) {
                                     TrattaConBadge(
-                                        s.from.name, s.from.rfiCode, s.to.name, s.to.rfiCode,
+                                        s.from.name, s.from.rfiCode, s.from.idNazionale,
+                                        s.to.name, s.to.rfiCode, s.to.idNazionale,
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
