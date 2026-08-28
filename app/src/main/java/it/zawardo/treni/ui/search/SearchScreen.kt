@@ -26,9 +26,11 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -64,6 +66,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
@@ -89,6 +92,8 @@ fun SearchScreen(
     val state by vm.state.collectAsState()
     val history by vm.history.collectAsState()
     val saved by vm.saved.collectAsState()
+    val sources by vm.enabledSources.collectAsState()
+    var showSources by remember { mutableStateOf(false) }
 
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
@@ -120,6 +125,9 @@ fun SearchScreen(
             TreniTopBar(
                 title = "ZawardoTreni",
                 actions = {
+                    IconButton(onClick = { showSources = true }) {
+                        Icon(Icons.Outlined.Tune, contentDescription = "Fonti dati")
+                    }
                     IconButton(onClick = onOpenAbout) {
                         Icon(Icons.AutoMirrored.Outlined.HelpOutline, contentDescription = "Info")
                     }
@@ -214,6 +222,79 @@ fun SearchScreen(
             onConfirm = vm::setTime,
         )
     }
+    if (showSources) {
+        SourcesDialog(
+            enabled = sources,
+            onToggle = vm::setSourceEnabled,
+            onDismiss = { showSources = false },
+        )
+    }
+}
+
+/**
+ * Le reti da cui pescare, da accendere e spegnere.
+ *
+ * Sono diventate tante, e ognuna e' traffico a ogni ricerca: spegnere quelle
+ * che non servono e' l'unico modo per non pagarle. Una rete annunciata ma non
+ * ancora collegata resta in elenco, spenta e non toccabile, perche' la si
+ * aspetta ma non c'e' niente da accendere.
+ */
+@Composable
+private fun SourcesDialog(
+    enabled: Set<DataSource>,
+    onToggle: (DataSource, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fatto") } },
+        title = { Text("Fonti dati") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Spegni le reti che non ti servono: la ricerca interroga meno " +
+                        "servizi ed e' piu' veloce.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier.size(8.dp))
+                DataSource.entries.forEach { fonte ->
+                    val acceso = fonte in enabled
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = fonte.available) {
+                                onToggle(fonte, !acceso)
+                            }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                fonte.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (fonte.available) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Text(
+                                if (fonte.available) fonte.detail else fonte.detail + " · prossimamente",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = acceso,
+                            onCheckedChange = { onToggle(fonte, it) },
+                            enabled = fonte.available,
+                        )
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable

@@ -9,6 +9,7 @@ import it.zawardo.treni.data.mapper.toTrainStatus
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
@@ -90,10 +91,18 @@ class JourneyRepository(
         to: Station,
         departure: LocalDateTime,
         limit: Int = 10,
+        /** Le reti da interrogare: quelle spente dall'utente non si chiamano. */
+        sources: Set<DataSource> = DataSource.defaultEnabled,
     ): SearchOutcome = withContext(Dispatchers.IO) {
-        val lefrecceJob = async { runCatching { search(from, to, departure, limit) }.getOrDefault(emptyList()) }
+        val lefrecceJob = async {
+            if (DataSource.TRENITALIA in sources) {
+                runCatching { search(from, to, departure, limit) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
         val trenordJob = async {
-            if (trenord?.covers(from, to) == true) {
+            if (DataSource.TRENORD in sources && trenord?.covers(from, to) == true) {
                 runCatching { trenord.search(from, to, departure) }.getOrNull()
             } else {
                 null

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Station
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,14 @@ class SearchViewModel : ViewModel() {
 
     val saved: StateFlow<List<SavedSearchEntity>> =
         store.savedSearches.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Le reti accese, per la schermata delle fonti. */
+    val enabledSources: StateFlow<Set<DataSource>> = settings.enabledSources
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DataSource.defaultEnabled)
+
+    fun setSourceEnabled(source: DataSource, enabled: Boolean) {
+        viewModelScope.launch { settings.setSourceEnabled(source, enabled) }
+    }
 
     private val queries = MutableStateFlow("")
 

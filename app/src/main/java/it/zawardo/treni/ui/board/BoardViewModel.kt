@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
@@ -106,7 +107,11 @@ class BoardViewModel : ViewModel() {
      */
     private val limite = Semaphore(3)
 
+    /** Le reti accese: il tabellone non interroga quelle spente. */
+    private var sources: Set<DataSource> = DataSource.defaultEnabled
+
     init {
+        viewModelScope.launch { ServiceLocator.settings.enabledSources.collect { sources = it } }
         viewModelScope.launch {
             queries.debounce(250).distinctUntilChanged().collect { suggest(it) }
         }
@@ -303,7 +308,8 @@ class BoardViewModel : ViewModel() {
         val arrivi = _state.value.mode == BoardMode.ARRIVALS
 
         val rfi = async {
-            if (arrivi) trains.arrivals(code, at) else trains.departures(code, at)
+            if (DataSource.TRENITALIA !in sources) emptyList()
+            else if (arrivi) trains.arrivals(code, at) else trains.departures(code, at)
         }
         /*
          * Italo va chiesto a parte, perche' su ViaggiaTreno non c'e'.
@@ -314,7 +320,7 @@ class BoardViewModel : ViewModel() {
          * servono, [ItaloRepository.covers] dice di no e non si chiede niente.
          */
         val ntv = async {
-            if (italo.covers(code)) {
+            if (DataSource.ITALO in sources && italo.covers(code)) {
                 runCatching { italo.board(code, arrivi) }.getOrDefault(emptyList())
             } else {
                 emptyList()
@@ -348,6 +354,7 @@ class BoardViewModel : ViewModel() {
      * vuoto e non si chiede altro: Roma Termini non paga niente.
      */
     private fun recuperaSoppresse(code: String) {
+        if (DataSource.TRENORD !in sources) return
         viewModelScope.launch {
             val arrivi = _state.value.mode == BoardMode.ARRIVALS
             val orario = runCatching { trenord.timetable(code, arrivi) }.getOrDefault(emptyList())

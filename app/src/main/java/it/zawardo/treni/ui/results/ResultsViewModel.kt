@@ -3,6 +3,7 @@ package it.zawardo.treni.ui.results
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
@@ -15,6 +16,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -84,6 +86,13 @@ class ResultsViewModel(
 
     private val journeys = ServiceLocator.journeyRepository
     private val trains = ServiceLocator.trainStatusRepository
+    private val settings = ServiceLocator.settings
+
+    /**
+     * Le reti accese, tenute aggiornate mentre la schermata vive: se l'utente
+     * ne spegne una e torna qui, la prossima ricerca la salta.
+     */
+    private var sources: Set<DataSource> = DataSource.defaultEnabled
 
     private val _state = MutableStateFlow(ResultsUiState())
     val state: StateFlow<ResultsUiState> = _state.asStateFlow()
@@ -97,7 +106,13 @@ class ResultsViewModel(
     private val isToday: Boolean = departure.toLocalDate() == LocalDate.now()
 
     init {
-        reload()
+        viewModelScope.launch {
+            // La prima ricerca deve gia' sapere quali reti sono accese, o
+            // partirebbe col default ignorando chi l'utente ha spento.
+            sources = runCatching { settings.enabledSources.first() }.getOrDefault(sources)
+            reload()
+        }
+        viewModelScope.launch { settings.enabledSources.collect { sources = it } }
     }
 
     fun reload() {
@@ -113,7 +128,7 @@ class ResultsViewModel(
                 )
             }
 
-            val outcome = runCatching { journeys.searchAll(from, to, departure, limit = PAGE) }
+            val outcome = runCatching { journeys.searchAll(from, to, departure, limit = PAGE, sources = sources) }
                 .getOrElse { e ->
                     _state.update {
                         it.copy(
@@ -168,7 +183,7 @@ class ResultsViewModel(
                 val clamped = maxOf(start, first.toLocalDate().atStartOfDay())
                 // searchAll e non search: anche andando indietro le corse Trenord
                 // devono comparire, altrimenti la lista cambia natura scorrendo.
-                val batch = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE) }
+                val batch = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE, sources = sources) }
                     .getOrNull()?.journeys.orEmpty()
                     .applyDirectFilter()
                     .filter { it.departure.isBefore(first) }
@@ -205,7 +220,7 @@ class ResultsViewModel(
             _state.update { it.copy(loadingLater = true) }
 
             val batch = runCatching {
-                journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE)
+                journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE, sources = sources)
             }.getOrNull()?.journeys.orEmpty().applyDirectFilter()
 
             val existing = current.journeys.map { it.key }.toSet()
