@@ -1,8 +1,10 @@
 package it.zawardo.treni
 
 import it.zawardo.treni.data.remote.NetworkModule
+import it.zawardo.treni.data.repository.ArstRepository
 import it.zawardo.treni.data.repository.EavRepository
 import it.zawardo.treni.data.repository.ItaloRepository
+import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.ViaggiMistiRepository
 import it.zawardo.treni.domain.model.DataSource
@@ -21,8 +23,10 @@ import java.time.LocalDate
 class FlussoRealeSorrentoTest {
     private val bff = StationRepository(NetworkModule.lefrecceApi)
     private val eav = EavRepository(NetworkModule.eavApi)
+    private val arst = ArstRepository()
     private val italo = ItaloRepository(NetworkModule.italoApi)
-    private val misti = ViaggiMistiRepository(eav, italo)
+    private val journeys = JourneyRepository(NetworkModule.lefrecceApi)
+    private val misti = ViaggiMistiRepository(eav, arst, italo, bff, journeys)
 
     private val tutte = setOf(DataSource.TRENITALIA, DataSource.EAV, DataSource.ITALO)
 

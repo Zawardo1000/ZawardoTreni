@@ -1,8 +1,11 @@
 package it.zawardo.treni
 
 import it.zawardo.treni.data.remote.NetworkModule
+import it.zawardo.treni.data.repository.ArstRepository
 import it.zawardo.treni.data.repository.EavRepository
 import it.zawardo.treni.data.repository.ItaloRepository
+import it.zawardo.treni.data.repository.JourneyRepository
+import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.ViaggiMistiRepository
 import it.zawardo.treni.domain.model.Station
 import kotlinx.coroutines.runBlocking
@@ -19,8 +22,11 @@ import java.time.LocalDateTime
 class ViaggiMistiLiveTest {
 
     private val eav = EavRepository(NetworkModule.eavApi)
+    private val arst = ArstRepository()
     private val italo = ItaloRepository(NetworkModule.italoApi)
-    private val misti = ViaggiMistiRepository(eav, italo)
+    private val stations = StationRepository(NetworkModule.lefrecceApi)
+    private val journeys = JourneyRepository(NetworkModule.lefrecceApi)
+    private val misti = ViaggiMistiRepository(eav, arst, italo, stations, journeys)
 
     // Sorrento (EAV) con le sue coordinate; Roma Termini (Italo)
     private val sorrento = Station("EAV62", 9_000_000_062, "Sorrento", 40.6258, 14.3797)

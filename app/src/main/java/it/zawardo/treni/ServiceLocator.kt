@@ -130,7 +130,9 @@ object ServiceLocator {
 
     /** I viaggi misti multi-operatore (beta): feeder fuori-RFI piu' alta velocita' Italo. */
     val viaggiMistiRepository: ViaggiMistiRepository by lazy {
-        ViaggiMistiRepository(eavRepository, italoRepository)
+        ViaggiMistiRepository(
+            eavRepository, arstRepository, italoRepository, stationRepository, journeyRepository,
+        )
     }
     val trainStatusRepository: TrainStatusRepository by lazy {
         TrainStatusRepository(NetworkModule.viaggiaTrenoApi, trenordRepository, italoRepository)
