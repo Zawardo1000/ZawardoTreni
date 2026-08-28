@@ -105,7 +105,11 @@ class IntegrazioneTest {
     @Test
     fun `la paginazione del tabellone avanza nel tempo`() = runBlocking {
         val code = "S01700"
-        val ora = ZonedDateTime.now()
+        // Un orario di punta del giorno dopo, non "adesso": a tarda sera il
+        // tabellone e' quasi vuoto e la seconda finestra non porta treni nuovi,
+        // facendo fallire il test per l'ora e non per un difetto. Alle 8 del
+        // mattino Milano Centrale ne ha per due finestre, sempre.
+        val ora = LocalDate.now(ROME).plusDays(1).atTime(8, 0).atZone(ROME)
         val primo = trains.departures(code, ora)
         val secondo = trains.departures(code, ora.plusMinutes(90))
 
