@@ -147,4 +147,12 @@ data class FavoriteStationEntity(
     @ColumnInfo(name = "location_id") val locationId: Long,
     val name: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    /**
+     * L'indirizzo nazionale, se la stazione fuori-RFI ha un gemello (Sorrento).
+     *
+     * Serve al badge: una preferita deduplicata non deve mostrarlo, come non lo
+     * mostra in ricerca. Nullable, quindi la migrazione 7→8 aggiunge la colonna
+     * senza `DEFAULT`. Vedi [it.zawardo.treni.domain.model.Station.idNazionale].
+     */
+    @ColumnInfo(name = "id_nazionale") val idNazionale: Long? = null,
 )

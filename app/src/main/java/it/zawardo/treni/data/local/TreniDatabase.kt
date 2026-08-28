@@ -17,7 +17,7 @@ import androidx.sqlite.execSQL
         RecentTrainEntity::class,
         FavoriteStationEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
@@ -143,6 +143,22 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * L'indirizzo nazionale entra anche nelle stazioni preferite.
+         *
+         * Serve al badge: una preferita deduplicata (Sorrento) non deve mostrarlo,
+         * come non lo mostra in ricerca. Colonna nullable, nessun `DEFAULT`; le
+         * preferite gia' salvate restano a NULL — quelle fuori-RFI terranno il
+         * badge finche' non le si ri-aggiunge, un prezzo minimo.
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE `favorite_stations` ADD COLUMN `id_nazionale` INTEGER",
+                )
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -152,7 +168,7 @@ abstract class TreniDatabase : RoomDatabase() {
                 "treni.db",
             ).addMigrations(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                MIGRATION_6_7,
+                MIGRATION_6_7, MIGRATION_7_8,
             )
                 .build()
                 .also { instance = it }

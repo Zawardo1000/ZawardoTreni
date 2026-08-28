@@ -13,7 +13,14 @@ import kotlinx.coroutines.flow.map
 class StationFavoritesStore(private val dao: FavoriteStationDao) {
 
     fun observe(): Flow<List<Station>> = dao.observe().map { righe ->
-        righe.map { Station(rfiCode = it.rfiCode, locationId = it.locationId, name = it.name) }
+        righe.map {
+            Station(
+                rfiCode = it.rfiCode,
+                locationId = it.locationId,
+                name = it.name,
+                idNazionale = it.idNazionale,
+            )
+        }
     }
 
     /**
@@ -31,6 +38,7 @@ class StationFavoritesStore(private val dao: FavoriteStationDao) {
                     locationId = station.locationId,
                     name = station.name,
                     createdAt = now,
+                    idNazionale = station.idNazionale,
                 ),
             )
         } else {
