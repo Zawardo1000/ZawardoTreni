@@ -113,6 +113,19 @@ ksp {
 }
 
 dependencies {
+    /*
+     * Non usiamo i Fragment: li tira dentro play-services-location, che dipende
+     * ancora dalla 1.1.0. Google la segnala come obsoleta in fase di
+     * pubblicazione, e nessun'altra libreria del grafo chiede una versione piu'
+     * alta, quindi Gradle si tiene quella. Il vincolo la rialza senza aggiungere
+     * una dipendenza diretta da una libreria che non ci serve.
+     */
+    constraints {
+        implementation(libs.androidx.fragment) {
+            because("play-services-location porta la 1.1.0, dichiarata obsoleta")
+        }
+    }
+
     implementation(project(":data"))
 
     implementation(libs.androidx.core.ktx)
