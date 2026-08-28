@@ -134,6 +134,28 @@ internal class ArstOrario(
 
     data class Passaggio(val corsa: Corsa, val fermata: Fermata, val origine: String?)
 
+    /**
+     * Le corse dirette fra due stazioni in un giorno, con orari.
+     *
+     * La ricerca A→B che ARST non pubblica: la si ricava dall'orario, tenendo le
+     * corse che fermano prima a [da] e poi ad [a]. Serve alla ricerca di
+     * itinerario dentro la Sardegna, dove non c'e' un tabellone di stazione a cui
+     * chiedere una tratta.
+     */
+    fun collegamenti(da: Int, a: Int, giorno: LocalDate): List<Collegamento> =
+        corse.asSequence()
+            .filter { attiva(it, giorno) }
+            .mapNotNull { corsa ->
+                val iDa = corsa.fermate.indexOfFirst { it.stazione == da }
+                val iA = corsa.fermate.indexOfLast { it.stazione == a }
+                if (iDa < 0 || iA <= iDa) return@mapNotNull null
+                Collegamento(corsa, corsa.fermate[iDa].partenza, corsa.fermate[iA].arrivo)
+            }
+            .sortedBy { it.partenza }
+            .toList()
+
+    data class Collegamento(val corsa: Corsa, val partenza: Int, val arrivo: Int)
+
     /** Il giorno piu' lontano che l'orario copre: oltre non si sa nulla. */
     val ultimoGiorno: LocalDate? = calendari.values.flatten().maxOrNull()
 

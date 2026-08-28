@@ -157,8 +157,14 @@ class BoardViewModel : ViewModel() {
          * altri suggerimenti e non mostrate a parte: chi scrive "Andria" vuole
          * Andria, e non deve sapere di chi sia la ferrovia per trovarla.
          */
-        val locali = fnb.search(query) + svizzera.search(query) + eav.search(query) +
-            arst.search(query)
+        // Solo le reti accese: spegnerne una ne toglie le stazioni dai
+        // suggerimenti, invece di proporre fermate che poi non danno tabellone.
+        val locali = buildList {
+            if (DataSource.FNB in sources) addAll(fnb.search(query))
+            if (DataSource.SVIZZERA in sources) addAll(svizzera.search(query))
+            if (DataSource.EAV in sources) addAll(eav.search(query))
+            if (DataSource.ARST in sources) addAll(arst.search(query))
+        }
 
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
         _state.update {

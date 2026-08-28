@@ -88,6 +88,8 @@ class ResultsViewModel(
 
     private val journeys = ServiceLocator.journeyRepository
     private val misti = ServiceLocator.viaggiMistiRepository
+    private val eav = ServiceLocator.eavRepository
+    private val arst = ServiceLocator.arstRepository
     private val trains = ServiceLocator.trainStatusRepository
     private val settings = ServiceLocator.settings
 
@@ -142,11 +144,23 @@ class ResultsViewModel(
                     return@launch
                 }
             /*
+             * I diretti sulle reti fuori-RFI, quando le due punte sono della
+             * stessa rete: Sorrento→Napoli su EAV, Sassari→Nuoro su ARST. Il BFF
+             * non conosce quelle stazioni e i viaggi misti richiedono l'alta
+             * velocita', quindi senza questo passo una tratta tutta-EAV o
+             * tutta-ARST resterebbe senza risultati, ora che quelle stazioni si
+             * possono scegliere. Escono senza tempo reale, come la loro rete.
+             */
+            val fuoriRfi = direttiFuoriRfi(sources)
+
+            /*
              * Il filtro si applica dopo, non prima: le sorgenti non sanno
              * filtrare i cambi, e chiedere meno risultati per poi scartarne una
              * parte svuoterebbe la lista. Per questo si chiede piu' del dovuto.
              */
-            val list = outcome.journeys.applyDirectFilter()
+            val list = (outcome.journeys + fuoriRfi)
+                .applyDirectFilter()
+                .sortedBy { it.departure }
 
             val rows = list.map { it.toRow() }
             val requestedDay = departure.toLocalDate()
@@ -173,6 +187,26 @@ class ResultsViewModel(
      * flag e' spento o la tratta non e' del tipo giusto: nessun cartello, nessun
      * indicatore, come se la funzione non esistesse.
      */
+    /**
+     * I viaggi diretti quando partenza e arrivo sono della stessa rete fuori-RFI.
+     *
+     * Solo EAV e ARST, che un orario ce l'hanno da cui ricavare gli itinerari.
+     * Ferrotramviaria e Vigezzina hanno il solo tabellone di stazione, da cui una
+     * ricerca A→B non si ricava: per ora quelle tratte interne restano scoperte.
+     */
+    private suspend fun direttiFuoriRfi(sources: Set<DataSource>): List<Journey> {
+        val f = from.rfiCode ?: return emptyList()
+        val t = to.rfiCode ?: return emptyList()
+        val giorno = departure.toLocalDate()
+        return when {
+            DataSource.EAV in sources && eav.covers(f) && eav.covers(t) ->
+                eav.itinerario(f, t, giorno)
+            DataSource.ARST in sources && arst.covers(f) && arst.covers(t) ->
+                arst.itinerario(f, t, giorno)
+            else -> emptyList()
+        }
+    }
+
     private fun cercaMisti(direttoMigliore: java.time.Duration?) {
         viewModelScope.launch {
             // Un misto ha sempre un cambio: con "solo diretti" attivo non lo si
@@ -182,7 +216,7 @@ class ResultsViewModel(
             if (!attivo) return@launch
 
             _state.update { it.copy(loadingMisti = true) }
-            val trovati = runCatching { misti.cerca(from, to, departure, direttoMigliore) }
+            val trovati = runCatching { misti.cerca(from, to, departure, direttoMigliore, sources) }
                 .getOrDefault(emptyList())
 
             _state.update { s ->

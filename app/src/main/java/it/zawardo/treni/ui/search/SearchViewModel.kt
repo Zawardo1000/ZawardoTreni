@@ -56,6 +56,10 @@ data class SearchUiState(
 class SearchViewModel : ViewModel() {
 
     private val stations = ServiceLocator.stationRepository
+    private val eav = ServiceLocator.eavRepository
+    private val fnb = ServiceLocator.fnbRepository
+    private val svizzera = ServiceLocator.svizzeraRepository
+    private val arst = ServiceLocator.arstRepository
     private val store = ServiceLocator.searchStore
     private val settings = ServiceLocator.settings
 
@@ -71,6 +75,16 @@ class SearchViewModel : ViewModel() {
     /** Le reti accese, per la schermata delle fonti. */
     val enabledSources: StateFlow<Set<DataSource>> = settings.enabledSources
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DataSource.defaultEnabled)
+
+    /**
+     * Le reti accese, tenute a parte da una collezione dedicata.
+     *
+     * Non si legge [enabledSources] `.value`: quello e' uno StateFlow
+     * `WhileSubscribed`, e senza un osservatore attivo resterebbe fermo al
+     * default. Il filtro dei suggerimenti deve valere sempre, anche prima che
+     * la UI si agganci, quindi il valore lo si tiene qui.
+     */
+    private var sourcesNow: Set<DataSource> = DataSource.defaultEnabled
 
     fun setSourceEnabled(source: DataSource, enabled: Boolean) {
         viewModelScope.launch { settings.setSourceEnabled(source, enabled) }
@@ -93,6 +107,7 @@ class SearchViewModel : ViewModel() {
         viewModelScope.launch {
             settings.viaggiMisti.collect { m -> _state.update { it.copy(viaggiMisti = m) } }
         }
+        viewModelScope.launch { settings.enabledSources.collect { sourcesNow = it } }
         /*
          * Nessun `distinctUntilChanged` dopo il debounce.
          *
@@ -174,14 +189,34 @@ class SearchViewModel : ViewModel() {
             _state.update { it.copy(suggestions = emptyList(), loadingSuggestions = false) }
             return
         }
-        // Prima la cache locale: la lista compare subito, poi si arricchisce dalla rete.
+        /*
+         * Le reti fuori-RFI sono locali e istantanee: EAV, Ferrotramviaria,
+         * Vigezzina, ARST. Si cercano solo se **accese**, altrimenti le loro
+         * stazioni comparirebbero fra i suggerimenti anche a chi quelle reti le
+         * ha spente — proponendo partenze che poi non danno risultati. La rete
+         * nazionale non si filtra: c'e' sempre.
+         */
+        val acc = sourcesNow
+        val locali = buildList {
+            if (DataSource.EAV in acc) addAll(eav.search(query))
+            if (DataSource.FNB in acc) addAll(fnb.search(query))
+            if (DataSource.SVIZZERA in acc) addAll(svizzera.search(query))
+            if (DataSource.ARST in acc) addAll(arst.search(query))
+        }
+
+        // Poi la cache locale: la lista compare subito, poi si arricchisce dalla rete.
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
-        _state.update { it.copy(suggestions = offline.sortedByName(), loadingSuggestions = true) }
+        _state.update {
+            it.copy(
+                suggestions = (locali + offline).distinctBy { s -> s.locationId }.sortedByName(),
+                loadingSuggestions = true,
+            )
+        }
 
         val remote = runCatching { stations.search(query) }.getOrNull()
         if (remote != null) {
             runCatching { store.cacheAll(remote) }
-            val merged = (remote + offline).distinctBy { it.locationId }.sortedByName()
+            val merged = (locali + remote + offline).distinctBy { it.locationId }.sortedByName()
             _state.update { it.copy(suggestions = merged, loadingSuggestions = false, error = null) }
         } else {
             _state.update {

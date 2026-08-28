@@ -12,11 +12,23 @@ data class StationRef(
     @ColumnInfo(name = "rfi_code") val rfiCode: String?,
     @ColumnInfo(name = "location_id") val locationId: Long,
     @ColumnInfo(name = "name") val name: String,
+    /**
+     * Le coordinate, salvate anche qui.
+     *
+     * Non sono un ornamento: una ricerca ricordata o salvata le usa per i viaggi
+     * misti, che scelgono gli hub di cambio dalla geografia. Senza, riaprire
+     * l'ultima ricerca da Sorrento le azzerava e i misti non partivano piu'.
+     */
+    // defaultValue esplicito: la migrazione 5→6 aggiunge le colonne con
+    // `DEFAULT 0.0`, e Room confronta anche i default con lo schema atteso —
+    // senza questa dichiarazione la validazione fallirebbe all'avvio.
+    @ColumnInfo(name = "latitude", defaultValue = "0.0") val latitude: Double = 0.0,
+    @ColumnInfo(name = "longitude", defaultValue = "0.0") val longitude: Double = 0.0,
 ) {
-    fun toStation() = Station(rfiCode = rfiCode, locationId = locationId, name = name)
+    fun toStation() = Station(rfiCode, locationId, name, latitude, longitude)
 
     companion object {
-        fun of(s: Station) = StationRef(s.rfiCode, s.locationId, s.name)
+        fun of(s: Station) = StationRef(s.rfiCode, s.locationId, s.name, s.latitude, s.longitude)
     }
 }
 

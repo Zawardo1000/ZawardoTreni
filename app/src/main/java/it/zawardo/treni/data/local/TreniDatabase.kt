@@ -17,7 +17,7 @@ import androidx.sqlite.execSQL
         RecentTrainEntity::class,
         FavoriteStationEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
@@ -98,6 +98,31 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Le coordinate entrano nella cronologia e nelle ricerche salvate.
+         *
+         * Servono ai viaggi misti: una ricerca ripresa o salvata deve poter
+         * scegliere gli hub di cambio, e senza le due coordinate arriverebbe a
+         * zero. Le righe gia' esistenti restano a 0.0 — la loro geografia si
+         * ripopola alla prima nuova ricerca — ma non si perde la cronologia.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(connection: SQLiteConnection) {
+                for (tabella in listOf("search_history", "saved_searches")) {
+                    for (capo in listOf("from", "to")) {
+                        connection.execSQL(
+                            "ALTER TABLE `$tabella` ADD COLUMN `${capo}_latitude` " +
+                                "REAL NOT NULL DEFAULT 0.0",
+                        )
+                        connection.execSQL(
+                            "ALTER TABLE `$tabella` ADD COLUMN `${capo}_longitude` " +
+                                "REAL NOT NULL DEFAULT 0.0",
+                        )
+                    }
+                }
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -105,7 +130,7 @@ abstract class TreniDatabase : RoomDatabase() {
                 context.applicationContext,
                 TreniDatabase::class.java,
                 "treni.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { instance = it }
         }

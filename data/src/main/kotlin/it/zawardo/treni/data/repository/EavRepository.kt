@@ -10,6 +10,9 @@ import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
+import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import kotlinx.coroutines.Dispatchers
@@ -179,6 +182,59 @@ class EavRepository(
                 realtime = false,
             )
         }
+    }
+
+    /**
+     * Il dettaglio di una corsa EAV, ricostruito dall'orario.
+     *
+     * Serve ad aprire una corsa che il tempo reale non copre — le sue, sempre, e
+     * quelle di domani. Le fermate escono con l'orario **previsto** e nient'altro:
+     * niente ritardo, niente binario reale, perche' EAV non li pubblica. Il
+     * [TrainStatus.notice] lo dice a chiare lettere, cosi' quegli orari non
+     * sembrano misurati. Meglio un elenco fermate onesto che una schermata che
+     * dice "nessun dato".
+     */
+    fun dettaglioCorsa(numero: String, date: LocalDate = LocalDate.now(ROME)): TrainStatus? {
+        val o = orario() ?: return null
+        if (!o.copre(date)) return null
+        val c = o.corsa(numero, date) ?: return null
+        val mezzanotte = date.atStartOfDay()
+
+        val stops = c.fermate.mapIndexed { i, f ->
+            val naz = EavStations.byId(f.codLoc)
+            Stop(
+                index = i + 1,
+                stationName = naz?.nome ?: "Fermata ${f.codLoc}",
+                stationCode = naz?.codice,
+                // Il capolinea non ha arrivo in ingresso ne' partenza in uscita.
+                scheduledArrival = if (i == 0) null else mezzanotte.plusMinutes(f.arrivo.toLong()),
+                actualArrival = null,
+                arrivalDelayMinutes = 0,
+                scheduledDeparture = if (i == c.fermate.lastIndex) null else mezzanotte.plusMinutes(f.partenza.toLong()),
+                actualDeparture = null,
+                departureDelayMinutes = 0,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                status = StopStatus.FUTURE,
+                // Orari di tabella, non rilevati: dirlo evita che sembrino precisi.
+                detected = false,
+            )
+        }
+        if (stops.size < 2) return null
+
+        return TrainStatus(
+            number = numero,
+            category = EavStations.LINEE["L" + c.linea] ?: ("Linea " + c.linea),
+            label = numero,
+            origin = stops.first().stationName,
+            destination = c.destinazione.ifBlank { stops.last().stationName },
+            delayMinutes = 0,
+            state = TrainState.REGULAR,
+            lastDetectionStation = null,
+            lastDetectionTime = null,
+            notice = "Orario previsto. EAV non pubblica il tempo reale di questa corsa.",
+            stops = stops,
+        )
     }
 
     /** Il giorno piu' lontano su cui l'orario sappia rispondere. */

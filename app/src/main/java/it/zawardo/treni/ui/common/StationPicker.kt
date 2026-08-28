@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -18,6 +19,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -103,12 +105,21 @@ private fun StationRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
-                station.name,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    station.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Le reti fuori-RFI portano la loro sigla, cosi' si distingue a
+                // colpo d'occhio la Sorrento della Circumvesuviana dal resto.
+                reteFuoriRfi(station.rfiCode)?.let { sigla -> ReteBadge(sigla) }
+            }
             if (!station.trackable) {
                 // Senza codice RFI il treno non è tracciabile: meglio dirlo prima.
                 Text(
@@ -141,4 +152,36 @@ private fun formatDistance(km: Double): String = when {
     km < 1.0 -> "${(km * 1000 / 50).toInt() * 50} m"
     km < 10.0 -> String.format(Locale.ITALIAN, "%.1f km", km)
     else -> "${km.toInt()} km"
+}
+
+/**
+ * La sigla della rete fuori-RFI di una stazione, dal prefisso del suo codice.
+ *
+ * Le reti fuori dal registro nazionale usano codici sintetici col prefisso della
+ * rete; le stazioni RFI — nazionale, Trenord, Italo — hanno codici `S…`/`Z…` e
+ * nessun badge, perche' sono la norma e marcarle tutte sarebbe rumore.
+ */
+private fun reteFuoriRfi(rfiCode: String?): String? = when {
+    rfiCode == null -> null
+    rfiCode.startsWith("EAV") -> "EAV"
+    rfiCode.startsWith("FNB") -> "FNB"
+    rfiCode.startsWith("ARST") -> "ARST"
+    rfiCode.startsWith("CH") -> "CH"
+    else -> null
+}
+
+/** Il gettone colorato con la sigla della rete, accanto al nome. */
+@Composable
+private fun ReteBadge(sigla: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(4.dp),
+    ) {
+        Text(
+            sigla,
+            Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+    }
 }

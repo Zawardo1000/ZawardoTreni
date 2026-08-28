@@ -1,5 +1,6 @@
 package it.zawardo.treni.ui.board
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -345,11 +346,20 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
     // non ferma. Da questa banchina, la differenza non cambia cosa puoi prendere.
     val cancelled = entry.state.soppressione
 
+    // Sfondo tenue per le corse senza tempo reale: l'orario e' previsto, non
+    // misurato, e la riga lo distingue dal colore oltre che dalla scritta.
+    val fondo = if (!entry.realtime) {
+        Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+    } else {
+        Modifier
+    }
+
     Row(
         Modifier
             .fillMaxWidth()
             .clickable { onOpenTrain(entry) }
-            .padding(vertical = 12.dp),
+            .then(fondo)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Monospace sull'orario: incolonna le cifre come un tabellone vero.
@@ -457,7 +467,7 @@ private fun FavoriteStationRow(
     Card(
         Modifier.fillMaxWidth().clickable(onClick = onOpen),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
         Row(

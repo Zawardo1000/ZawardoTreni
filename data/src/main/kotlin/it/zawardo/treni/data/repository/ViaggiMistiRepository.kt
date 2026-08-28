@@ -45,7 +45,19 @@ class ViaggiMistiRepository(
         to: Station,
         quando: LocalDateTime,
         direttoMigliore: Duration? = null,
+        /**
+         * Le reti che l'utente ha acceso. Un misto usa due operatori, e li usa
+         * **solo se entrambi sono accesi**: chi ha spento Italo non lo vuole
+         * vedere nemmeno dentro un viaggio composto, e lo stesso vale per EAV.
+         * Il flag beta abilita la funzione, non scavalca le fonti.
+         */
+        sources: Set<DataSource> = DataSource.entries.toSet(),
     ): List<Journey> = coroutineScope {
+        // Lo schema EAV + Italo richiede tutte e due le reti accese.
+        if (DataSource.EAV !in sources || DataSource.ITALO !in sources) {
+            return@coroutineScope emptyList()
+        }
+
         val fromEav = EavStations.isEav(from.rfiCode)
         val toEav = EavStations.isEav(to.rfiCode)
         val fromItalo = italo.covers(from.rfiCode)

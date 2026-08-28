@@ -4,7 +4,13 @@ import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.remote.arst.ArstOrario
 import it.zawardo.treni.data.remote.StationMatching
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
+import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import kotlinx.coroutines.Dispatchers
@@ -159,6 +165,99 @@ class ArstRepository(
 
     /** Tutte le stazioni ARST. */
     fun allStations(): List<Station> = orario()?.stazioni?.map { it.toStation() } ?: emptyList()
+
+    /**
+     * I viaggi diretti ARST fra due sue stazioni, in un giorno.
+     *
+     * E' la ricerca A→B dentro la Sardegna: senza, una tratta come Sassari→Nuoro
+     * — entrambe stazioni ARST, che ora si possono scegliere nella ricerca — non
+     * darebbe risultati, perche' il BFF non conosce quelle stazioni e i viaggi
+     * misti richiedono l'alta velocita', che in Sardegna non c'e'. Le gambe
+     * escono senza tempo reale, come tutto ARST.
+     */
+    fun itinerario(
+        fromCode: String,
+        toCode: String,
+        date: LocalDate = LocalDate.now(ROME),
+    ): List<Journey> {
+        val da = idStazione(fromCode) ?: return emptyList()
+        val a = idStazione(toCode) ?: return emptyList()
+        val o = orario() ?: return emptyList()
+        if (!o.copre(date)) return emptyList()
+
+        val fromStation = o.stazione(da)?.toStation() ?: return emptyList()
+        val toStation = o.stazione(a)?.toStation() ?: return emptyList()
+
+        return o.collegamenti(da, a, date).map { c ->
+            val partenza = date.atStartOfDay().plusMinutes(c.partenza.toLong())
+            val arrivo = date.atStartOfDay().plusMinutes(c.arrivo.toLong())
+            val leg = Leg(
+                trainNumber = c.corsa.id,
+                category = o.linee[c.corsa.linea] ?: c.corsa.linea,
+                from = fromStation,
+                to = toStation,
+                departure = partenza,
+                arrival = arrivo,
+                source = DataSource.ARST,
+            )
+            Journey(
+                departure = partenza,
+                arrival = arrivo,
+                duration = java.time.Duration.between(partenza, arrivo),
+                legs = listOf(leg),
+            )
+        }
+    }
+
+    /**
+     * Il dettaglio di una corsa ARST, dall'orario.
+     *
+     * Come per il tabellone, e' tutto orario previsto: ARST non pubblica un solo
+     * dato in tempo reale. Le fermate escono col loro orario di tabella e il
+     * [TrainStatus.notice] lo dichiara. Aprendo una corsa si vede il percorso e
+     * dove si sale, che e' quanto si puo' offrire — e molto meglio di "nessun
+     * dato".
+     */
+    fun dettaglioCorsa(numero: String, date: LocalDate = LocalDate.now(ROME)): TrainStatus? {
+        val o = orario() ?: return null
+        if (!o.copre(date)) return null
+        val c = o.corseDel(date).firstOrNull { it.id == numero } ?: return null
+        val mezzanotte = date.atStartOfDay()
+
+        val stops = c.fermate.mapIndexed { i, f ->
+            val naz = o.stazione(f.stazione)
+            Stop(
+                index = i + 1,
+                stationName = naz?.nome ?: "Fermata ${f.stazione}",
+                stationCode = naz?.let { PREFIX + it.id },
+                scheduledArrival = if (i == 0) null else mezzanotte.plusMinutes(f.arrivo.toLong()),
+                actualArrival = null,
+                arrivalDelayMinutes = 0,
+                scheduledDeparture = if (i == c.fermate.lastIndex) null else mezzanotte.plusMinutes(f.partenza.toLong()),
+                actualDeparture = null,
+                departureDelayMinutes = 0,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                status = StopStatus.FUTURE,
+                detected = false,
+            )
+        }
+        if (stops.size < 2) return null
+
+        return TrainStatus(
+            number = numero,
+            category = o.linee[c.linea] ?: c.linea,
+            label = "Treno $numero",
+            origin = stops.first().stationName,
+            destination = c.destinazione.ifBlank { stops.last().stationName },
+            delayMinutes = 0,
+            state = TrainState.REGULAR,
+            lastDetectionStation = null,
+            lastDetectionTime = null,
+            notice = "Orario previsto. ARST non pubblica il tempo reale.",
+            stops = stops,
+        )
+    }
 
     /** Minuti dalla mezzanotte in `HH:mm`, riportando oltre le 24 nel giorno dopo. */
     private fun orologio(minuti: Int): String =

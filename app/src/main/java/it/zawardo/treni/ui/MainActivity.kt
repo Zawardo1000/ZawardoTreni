@@ -100,6 +100,18 @@ data class ResultsRoute(
     val whenEpochSec: Long,
     /** Filtro "solo diretti": viaggia nella rotta perche' fa parte della ricerca. */
     val directOnly: Boolean = false,
+    /**
+     * Le coordinate delle due punte.
+     *
+     * Non sono un di piu': servono ai viaggi misti per scegliere gli hub di
+     * cambio. Senza, arriverebbero a zero, la preselezione geografica
+     * fallirebbe e i misti non comparirebbero mai — la ricerca da Sorrento
+     * dava sempre lo stesso risultato, con o senza il flag acceso.
+     */
+    val fromLat: Double = 0.0,
+    val fromLon: Double = 0.0,
+    val toLat: Double = 0.0,
+    val toLon: Double = 0.0,
 )
 
 /**
@@ -254,6 +266,10 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                                 toName = to.name,
                                 whenEpochSec = dateTime.toEpochSecond(ZoneOffset.UTC),
                                 directOnly = directOnly,
+                                fromLat = from.latitude,
+                                fromLon = from.longitude,
+                                toLat = to.latitude,
+                                toLon = to.longitude,
                             )
                         )
                     },
@@ -290,8 +306,8 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
             composable<ResultsRoute> { entry ->
                 val r = entry.toRoute<ResultsRoute>()
                 ResultsScreen(
-                    from = Station(r.fromRfi, r.fromId, r.fromName),
-                    to = Station(r.toRfi, r.toId, r.toName),
+                    from = Station(r.fromRfi, r.fromId, r.fromName, r.fromLat, r.fromLon),
+                    to = Station(r.toRfi, r.toId, r.toName, r.toLat, r.toLon),
                     departure = LocalDateTime.ofEpochSecond(r.whenEpochSec, 0, ZoneOffset.UTC),
                     directOnly = r.directOnly,
                     onBack = { nav.popBackStack() },

@@ -289,8 +289,25 @@ private fun JourneyCard(
     // Barrato come su un tabellone: la corsa c'e' in orario, ma non si fa.
     val cancelled = row.state == TrainState.CANCELLED
 
+    /*
+     * Sfondo tenue quando non c'e' tempo reale.
+     *
+     * Due casi, entrambi da distinguere a colpo d'occhio dai treni "vivi": le
+     * corse di un altro giorno, di cui il ritardo si sapra' ma non adesso, e i
+     * viaggi che un tempo reale non lo avranno mai — un misto con gamba EAV, o
+     * un servizio sostitutivo. In tutti l'orario e' previsto, non misurato, e la
+     * card lo dice col colore prima ancora delle parole.
+     */
+    val soloPrevisto = !row.realtimeNow
+    val fondo = if (soloPrevisto) {
+        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    } else {
+        CardDefaults.cardColors()
+    }
+
     Card(
-        Modifier
+        colors = fondo,
+        modifier = Modifier
             .fillMaxWidth()
             .clickable {
                 // Solo i treni hanno un dettaglio: aprirlo per un bus porterebbe
@@ -376,6 +393,19 @@ private fun JourneyCard(
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
+                        /*
+                         * Su un viaggio con cambio va detto che il prezzo e' del
+                         * viaggio intero, cambi compresi, non di una sola tratta.
+                         * Il BFF lo da' gia' come totale, ma da utente si e' in
+                         * dubbio: la riga toglie l'ambiguita'.
+                         */
+                        if (!j.isDirect) {
+                            Text(
+                                "intero viaggio",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -496,7 +526,7 @@ private fun AlertCard(alert: ServiceAlert) {
             containerColor = if (alert.severe) {
                 MaterialTheme.colorScheme.errorContainer
             } else {
-                MaterialTheme.colorScheme.surfaceContainerHighest
+                MaterialTheme.colorScheme.surfaceVariant
             },
         ),
     ) {
