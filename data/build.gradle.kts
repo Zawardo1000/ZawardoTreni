@@ -110,6 +110,17 @@ tasks.withType<Test>().configureEach {
     useJUnit()
 
     /*
+     * I test girano in una JVM separata: una `-D` sulla riga di comando arriva
+     * al demone Gradle e non a loro. Le poche property che pilotano i
+     * generatori a mano (rigenerazione orari, generazione coordinate) vanno
+     * inoltrate esplicitamente, altrimenti quei test escono in silenzio
+     * fingendo di non essere stati chiamati.
+     */
+    listOf("eav.rigenera", "arst.rigenera", "genera").forEach { chiave ->
+        System.getProperty(chiave)?.let { systemProperty(chiave, it) }
+    }
+
+    /*
      * Questi test interrogano API reali: l'esito dipende dai treni che circolano
      * in questo momento, non dal codice. Lasciarli cacheare significherebbe
      * vedere "PASSED" restituito dalla cache mentre l'API e' gia' cambiata,

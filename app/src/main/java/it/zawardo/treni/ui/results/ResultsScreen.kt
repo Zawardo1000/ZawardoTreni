@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -255,6 +256,21 @@ fun ResultsScreen(
                             onClick = vm::loadLater,
                         )
                     }
+
+                    if (state.loadingMisti) {
+                        item {
+                            // I misti arrivano dopo i diretti: la gamba Italo costa
+                            // un paio di secondi. Un rigo lo dice, senza bloccare.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Text(
+                                    "  Cerco soluzioni con più operatori…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -285,6 +301,23 @@ private fun JourneyCard(
             },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            if (j.assembled) {
+                /*
+                 * Il viaggio misto si annuncia per quello che e'.
+                 *
+                 * Cambia operatore per strada, l'abbiamo costruito noi, e la
+                 * gamba Italo puo' non avere prezzo: chi lo sceglie deve saperlo
+                 * prima, non scoprirlo alla biglietteria. Il badge lo distingue
+                 * dai viaggi che una sorgente da' gia' pronti.
+                 */
+                Text(
+                    "Più operatori · beta",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
 
             if (otherDay) {
                 /*
@@ -366,15 +399,25 @@ private fun JourneyCard(
                         enabled = leg.isTrain,
                         onClick = { leg.trainNumber?.let { onOpenTrain(it, leg) } },
                         label = { Text(leg.label, style = MaterialTheme.typography.labelMedium) },
-                        leadingIcon = if (leg.isTrain) {
-                            null
-                        } else {
-                            {
-                                Icon(
-                                    Icons.Filled.DirectionsBus,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
+                        leadingIcon = when {
+                            leg.isTrain -> null
+                            leg.isWalk -> {
+                                {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.DirectionsWalk,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                            else -> {
+                                {
+                                    Icon(
+                                        Icons.Filled.DirectionsBus,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
                             }
                         },
                         colors = AssistChipDefaults.assistChipColors(
@@ -382,6 +425,17 @@ private fun JourneyCard(
                         ),
                     )
                 }
+            }
+
+            if (j.assembled) {
+                // Il prezzo di un misto e' parziale: la gamba Italo non lo
+                // pubblica. Dirlo qui evita che la sua assenza sembri un difetto.
+                Text(
+                    "Cambio fra operatori diversi. Il prezzo Italo non è " +
+                        "disponibile; verifica orari e biglietti sui siti dei gestori.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             when {

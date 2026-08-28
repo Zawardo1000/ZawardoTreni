@@ -42,6 +42,22 @@ class SettingsStore(private val context: Context) {
     }
 
     /**
+     * "Soluzioni con piu' operatori (beta)": i viaggi misti.
+     *
+     * Spento di default, e a ragione. Aggiungono un cambio di rete che nessuna
+     * fonte da sola conosce — EAV fino a Napoli, poi Italo — ma poggiano sulla
+     * gamba Italo, che su date future puo' essere incompleta e di cui il prezzo
+     * non si sa. E' un di piu' per chi ne ha bisogno, non il comportamento
+     * normale della ricerca: chi lo accende sa cosa aspettarsi.
+     */
+    val viaggiMisti: Flow<Boolean> =
+        context.dataStore.data.map { it[KEY_VIAGGI_MISTI] ?: false }
+
+    suspend fun setViaggiMisti(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_VIAGGI_MISTI] = enabled }
+    }
+
+    /**
      * Le reti accese.
      *
      * Si salvano i nomi, non un booleano per rete: cosi' aggiungerne una nuova
@@ -85,6 +101,7 @@ class SettingsStore(private val context: Context) {
     private companion object {
         val KEY_REMEMBER_LAST = booleanPreferencesKey("remember_last_search")
         val KEY_DIRECT_ONLY = booleanPreferencesKey("direct_only")
+        val KEY_VIAGGI_MISTI = booleanPreferencesKey("viaggi_misti")
         val KEY_SOURCES = stringSetPreferencesKey("enabled_sources")
     }
 }

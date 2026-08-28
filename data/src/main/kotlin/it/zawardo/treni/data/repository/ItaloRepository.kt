@@ -6,6 +6,10 @@ import it.zawardo.treni.data.mapper.toTrainStatus
 import it.zawardo.treni.data.remote.italo.ItaloApi
 import it.zawardo.treni.data.remote.italo.ItaloStations
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainStatus
@@ -131,6 +135,46 @@ class ItaloRepository(
         val tratta = runCatching { api.tratta(da, a) }.getOrNull() ?: return@withContext emptyList()
         if (tratta.empty) return@withContext emptyList()
         tratta.schedules.mapNotNull { it.toTrainStatus(tratta.lastUpdate, date) }
+    }
+
+    /**
+     * Le corse Italo fra due stazioni, come gambe di viaggio pronte da concatenare.
+     *
+     * E' [route] ridotta all'osso che serve a un viaggio misto: di ogni corsa si
+     * tiene solo il tratto [fromRfi]→[toRfi], con i suoi due orari, dimenticando
+     * il resto del percorso. La gamba esce etichettata [DataSource.ITALO], cosi'
+     * il motore dei misti sa a chi chiederne il tempo reale.
+     *
+     * Ne condivide anche i limiti: risponde solo per le corse che il servizio
+     * Italo sta seguendo, quindi su date lontane puo' dare poco o niente. E'
+     * un'informazione, non un'assenza di treni.
+     */
+    suspend fun itinerario(
+        fromRfi: String,
+        toRfi: String,
+        date: LocalDate = LocalDate.now(ROME),
+    ): List<Journey> = route(fromRfi, toRfi, date).mapNotNull { ts ->
+        val stopFrom = ts.stops.firstOrNull { it.stationCode == fromRfi } ?: return@mapNotNull null
+        val stopTo = ts.stops.lastOrNull { it.stationCode == toRfi } ?: return@mapNotNull null
+        val partenza = stopFrom.scheduledDeparture ?: stopFrom.scheduledArrival ?: return@mapNotNull null
+        val arrivo = stopTo.scheduledArrival ?: stopTo.scheduledDeparture ?: return@mapNotNull null
+        if (!arrivo.isAfter(partenza)) return@mapNotNull null
+
+        val leg = Leg(
+            trainNumber = ts.number,
+            category = "Italo",
+            from = Station(rfiCode = fromRfi, locationId = 0, name = stopFrom.stationName),
+            to = Station(rfiCode = toRfi, locationId = 0, name = stopTo.stationName),
+            departure = partenza,
+            arrival = arrivo,
+            source = DataSource.ITALO,
+        )
+        Journey(
+            departure = partenza,
+            arrival = arrivo,
+            duration = java.time.Duration.between(partenza, arrivo),
+            legs = listOf(leg),
+        )
     }
 
     /** Il percorso completo di una corsa, quando la tratta la conosce. */

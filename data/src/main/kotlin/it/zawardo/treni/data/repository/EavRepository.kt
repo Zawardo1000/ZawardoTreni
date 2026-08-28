@@ -6,6 +6,9 @@ import it.zawardo.treni.data.remote.eav.EavBoardParser
 import it.zawardo.treni.data.remote.eav.EavOrario
 import it.zawardo.treni.data.remote.eav.EavStations
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
@@ -215,6 +218,48 @@ class EavRepository(
     /** Le fermate EAV che corrispondono a quello che si sta digitando. */
     fun search(query: String, limit: Int = 12): List<Station> =
         EavStations.cerca(query, limit).map { it.toStation() }
+
+    /**
+     * I viaggi diretti EAV fra due sue stazioni, in un giorno.
+     *
+     * E' il feeder di un viaggio misto: Sorrento→Napoli per poi cambiare
+     * sull'alta velocita'. Nasce dall'orario imbarcato, quindi le gambe escono
+     * senza tempo reale (`realtime = false`) e la data puo' essere anche futura,
+     * finche' l'orario la copre. Vuoto se una delle due stazioni non e' EAV, o
+     * se non c'e' corsa diretta: un misto con due cambi sulla sola rete di
+     * adduzione non lo costruiamo.
+     */
+    fun itinerario(
+        fromCode: String,
+        toCode: String,
+        date: LocalDate = LocalDate.now(ROME),
+    ): List<Journey> {
+        val da = EavStations.byCodice(fromCode) ?: return emptyList()
+        val a = EavStations.byCodice(toCode) ?: return emptyList()
+        val o = orario() ?: return emptyList()
+        if (!o.copre(date)) return emptyList()
+
+        val giornoMillis = millis(date)
+        return o.collegamenti(da.id, a.id, date).map { c ->
+            val partenza = date.atStartOfDay().plusMinutes(c.partenza.toLong())
+            val arrivo = date.atStartOfDay().plusMinutes(c.arrivo.toLong())
+            val leg = Leg(
+                trainNumber = c.corsa.numero,
+                category = EavStations.LINEE["L" + c.corsa.linea] ?: ("Linea " + c.corsa.linea),
+                from = da.toStation(),
+                to = a.toStation(),
+                departure = partenza,
+                arrival = arrivo,
+                source = DataSource.EAV,
+            )
+            Journey(
+                departure = partenza,
+                arrival = arrivo,
+                duration = java.time.Duration.between(partenza, arrivo),
+                legs = listOf(leg),
+            )
+        }
+    }
 
     /** Tutte le fermate EAV, per chi voglia elencarle per linea. */
     fun allStations(): List<Station> = EavStations.tutte.map { it.toStation() }

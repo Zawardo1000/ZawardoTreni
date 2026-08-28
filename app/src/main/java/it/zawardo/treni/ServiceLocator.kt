@@ -11,6 +11,7 @@ import it.zawardo.treni.data.repository.EavRepository
 import it.zawardo.treni.data.repository.FnbRepository
 import it.zawardo.treni.data.repository.ItaloRepository
 import it.zawardo.treni.data.repository.JourneyRepository
+import it.zawardo.treni.data.repository.ViaggiMistiRepository
 import it.zawardo.treni.data.repository.SearchStore
 import it.zawardo.treni.data.repository.StationFavoritesStore
 import it.zawardo.treni.data.repository.StationRepository
@@ -96,6 +97,11 @@ object ServiceLocator {
 
     val journeyRepository: JourneyRepository by lazy {
         JourneyRepository(NetworkModule.lefrecceApi, trenordRepository)
+    }
+
+    /** I viaggi misti multi-operatore (beta): feeder fuori-RFI piu' alta velocita' Italo. */
+    val viaggiMistiRepository: ViaggiMistiRepository by lazy {
+        ViaggiMistiRepository(eavRepository, italoRepository)
     }
     val trainStatusRepository: TrainStatusRepository by lazy {
         TrainStatusRepository(NetworkModule.viaggiaTrenoApi, trenordRepository, italoRepository)

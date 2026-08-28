@@ -37,6 +37,7 @@ data class SearchUiState(
     val dateTime: LocalDateTime = LocalDateTime.now(),
     val rememberLast: Boolean = true,
     val directOnly: Boolean = false,
+    val viaggiMisti: Boolean = false,
     val alreadySaved: Boolean = false,
     val locating: Boolean = false,
     val error: String? = null,
@@ -89,6 +90,9 @@ class SearchViewModel : ViewModel() {
         viewModelScope.launch {
             settings.directOnly.collect { only -> _state.update { it.copy(directOnly = only) } }
         }
+        viewModelScope.launch {
+            settings.viaggiMisti.collect { m -> _state.update { it.copy(viaggiMisti = m) } }
+        }
         /*
          * Nessun `distinctUntilChanged` dopo il debounce.
          *
@@ -124,6 +128,10 @@ class SearchViewModel : ViewModel() {
 
     fun setDirectOnly(enabled: Boolean) {
         viewModelScope.launch { settings.setDirectOnly(enabled) }
+    }
+
+    fun setViaggiMisti(enabled: Boolean) {
+        viewModelScope.launch { settings.setViaggiMisti(enabled) }
     }
 
     fun setRememberLast(enabled: Boolean) {

@@ -108,6 +108,33 @@ internal class EavOrario(
 
     data class Passaggio(val corsa: Corsa, val fermata: Fermata, val origineCodLoc: Int)
 
+    /**
+     * Le corse che collegano due fermate in quel giorno, con orari.
+     *
+     * E' la ricerca A→B che EAV non offre da nessuna parte: si ricava
+     * dall'orario, tenendo le corse che fermano prima a [daCodLoc] e poi a
+     * [aCodLoc], nell'ordine giusto. Serve al feeder di un viaggio misto —
+     * Sorrento→Napoli per prendere l'Italo — dove non basta il tabellone di una
+     * sola stazione.
+     */
+    fun collegamenti(daCodLoc: Int, aCodLoc: Int, giorno: LocalDate): List<Collegamento> =
+        corse.asSequence()
+            .filter { calendari[it.calendario]?.contains(giorno) == true }
+            .mapNotNull { corsa ->
+                val iDa = corsa.fermate.indexOfFirst { it.codLoc == daCodLoc }
+                val iA = corsa.fermate.indexOfLast { it.codLoc == aCodLoc }
+                if (iDa < 0 || iA <= iDa) return@mapNotNull null
+                Collegamento(
+                    corsa = corsa,
+                    partenza = corsa.fermate[iDa].partenza,
+                    arrivo = corsa.fermate[iA].arrivo,
+                )
+            }
+            .sortedBy { it.partenza }
+            .toList()
+
+    data class Collegamento(val corsa: Corsa, val partenza: Int, val arrivo: Int)
+
     /** Il giorno piu' lontano che l'orario copre: oltre non si sa nulla. */
     val ultimoGiorno: LocalDate? = calendari.values.flatten().maxOrNull()
 

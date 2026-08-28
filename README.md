@@ -18,6 +18,8 @@ App Android per orari e stato in tempo reale dei treni italiani.
 - Stazione più vicina via GPS
 - Prezzo del biglietto, dove Trenitalia e Trenord lo pubblicano
 - Reti accendibili e spegnibili una per una, per non pagare chiamate che non servono
+- Viaggi con più operatori (beta): combina reti che nessuno collega, es.
+  Circumvesuviana + Italo per Sorrento → Roma. Vedi [`data/VIAGGI-MISTI.md`](data/VIAGGI-MISTI.md)
 - "Segui treno": notifica quando il ritardo cambia di oltre 3 minuti
 
 ## Fonti dati

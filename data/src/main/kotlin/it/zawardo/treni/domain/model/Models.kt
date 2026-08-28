@@ -86,12 +86,29 @@ data class Journey(
      * certo qualcosa che nessuno ha detto.
      */
     val price: Price? = null,
+    /**
+     * Vero quando questo viaggio l'abbiamo **costruito noi** concatenando piu'
+     * operatori, invece di riceverlo gia' fatto da una sorgente.
+     *
+     * Non e' la stessa cosa di "ha un cambio": il BFF Le Frecce restituisce
+     * viaggi con cambio interni alla sua rete, e quelli non sono assemblati.
+     * Assemblato e' solo cio' che passa dal motore dei viaggi misti, ed e' la
+     * cosa che l'UI marca come beta, che tiene in coda ai diretti nel ranking, e
+     * per cui avverte che il prezzo puo' essere parziale.
+     */
+    val assembled: Boolean = false,
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
     val isDirect: Boolean get() = legs.size <= 1
 
     /** Se nessuna tratta e' un treno, non c'e' alcun tempo reale da mostrare. */
     val hasTrain: Boolean get() = legs.any { it.isTrain }
+
+    /** Le reti attraversate, senza ripetizioni e senza la gamba a piedi. */
+    val sources: List<DataSource> get() = legs.mapNotNull { it.source }.distinct()
+
+    /** Vero se il viaggio cambia operatore per strada. */
+    val multiOperator: Boolean get() = sources.size > 1
 }
 
 /**
@@ -130,7 +147,21 @@ data class Price(
  * non hanno un numero interrogabile su ViaggiaTreno. Confonderli con i treni
  * significa promettere un tempo reale che per loro non esistera' mai.
  */
-enum class TransportKind { TRAIN, BUS, OTHER }
+enum class TransportKind {
+    TRAIN,
+    BUS,
+    OTHER,
+
+    /**
+     * Un trasferimento a piedi fra due stazioni vicine di operatori diversi.
+     *
+     * Non e' un mezzo, e' l'assenza di mezzo: nasce solo dentro un viaggio misto
+     * (vedi [Journey.assembled]), quando si cambia rete a Napoli scendendo da EAV
+     * a Garibaldi e salendo su Italo a Centrale. Non si segue in tempo reale e
+     * non ha numero: e' un tempo dichiarato, non una corsa.
+     */
+    WALK,
+}
 
 /** Una singola tratta del viaggio. */
 data class Leg(
@@ -143,15 +174,33 @@ data class Leg(
     val kind: TransportKind = TransportKind.TRAIN,
     /** Testo leggibile fornito dal BFF: "Autobus", "Urbano", "Frecciarossa". */
     val kindLabel: String? = null,
+    /**
+     * La rete che segue questa tratta in tempo reale.
+     *
+     * Sui viaggi a rete singola resta null: il tempo reale si risolve gia' per
+     * numero di treno, in cascata. Serve invece sui **viaggi misti**, dove ogni
+     * gamba appartiene a un operatore diverso e va interrogata alla sua fonte —
+     * la gamba EAV al tabellone EAV, quella Italo al servizio Italo — perche' il
+     * numero da solo non basta a dire chi lo conosce. Null anche sulla gamba a
+     * piedi, che una fonte non ce l'ha.
+     */
+    val source: DataSource? = null,
 ) {
     /** Solo i treni si possono seguire in tempo reale. */
     val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
 
-    /** Es. "FR 9505", "Bus 890A", "Urbano". */
+    /** Vero per il trasferimento a piedi di un viaggio misto. */
+    val isWalk: Boolean get() = kind == TransportKind.WALK
+
+    /** Minuti di questa tratta, utile per il trasferimento a piedi. */
+    val minutes: Long get() = java.time.Duration.between(departure, arrival).toMinutes()
+
+    /** Es. "FR 9505", "Bus 890A", "Urbano", "10 min a piedi". */
     val label: String
         get() = when (kind) {
             TransportKind.TRAIN -> listOfNotNull(category, trainNumber).joinToString(" ")
             TransportKind.BUS -> listOfNotNull("Bus", trainNumber).joinToString(" ")
+            TransportKind.WALK -> "${minutes.coerceAtLeast(1)} min a piedi"
             TransportKind.OTHER -> kindLabel ?: "Collegamento"
         }.ifBlank { kindLabel ?: "—" }
 }

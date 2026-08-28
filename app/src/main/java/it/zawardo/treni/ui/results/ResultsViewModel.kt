@@ -75,6 +75,8 @@ data class ResultsUiState(
     /** Avvisi di servizio: lavori, sospensioni, bus sostitutivi. Solo da Trenord. */
     val alerts: List<ServiceAlert> = emptyList(),
     val directOnly: Boolean = false,
+    /** Sta ancora cercando i viaggi misti (beta), che arrivano dopo i diretti. */
+    val loadingMisti: Boolean = false,
 )
 
 class ResultsViewModel(
@@ -85,6 +87,7 @@ class ResultsViewModel(
 ) : ViewModel() {
 
     private val journeys = ServiceLocator.journeyRepository
+    private val misti = ServiceLocator.viaggiMistiRepository
     private val trains = ServiceLocator.trainStatusRepository
     private val settings = ServiceLocator.settings
 
@@ -157,6 +160,39 @@ class ResultsViewModel(
                 )
             }
             enrich(rows)
+            cercaMisti(direttoMigliore = list.minByOrNull { it.duration }?.duration)
+        }
+    }
+
+    /**
+     * Cerca i viaggi misti (beta) e li aggiunge in coda, senza rallentare i diretti.
+     *
+     * Parte **dopo** che la lista principale e' gia' a schermo, in una coroutine
+     * sua, perche' la gamba Italo costa un paio di secondi e non deve pesare su
+     * chi cerca Milano-Roma e vuole solo la lista pulita. Silenzioso quando il
+     * flag e' spento o la tratta non e' del tipo giusto: nessun cartello, nessun
+     * indicatore, come se la funzione non esistesse.
+     */
+    private fun cercaMisti(direttoMigliore: java.time.Duration?) {
+        viewModelScope.launch {
+            // Un misto ha sempre un cambio: con "solo diretti" attivo non lo si
+            // vuole, e non ha senso spendere le chiamate per poi scartarlo.
+            if (directOnly) return@launch
+            val attivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
+            if (!attivo) return@launch
+
+            _state.update { it.copy(loadingMisti = true) }
+            val trovati = runCatching { misti.cerca(from, to, departure, direttoMigliore) }
+                .getOrDefault(emptyList())
+
+            _state.update { s ->
+                // I misti non si arricchiscono col tempo reale aggregato: le loro
+                // gambe sono di reti diverse e il realtime si legge aprendo la
+                // singola corsa. Si aggiungono evitando i doppioni con la lista.
+                val gia = s.journeys.map { it.key }.toHashSet()
+                val nuove = trovati.map { it.toRow() }.filter { it.key !in gia }
+                s.copy(loadingMisti = false, journeys = s.journeys + nuove)
+            }
         }
     }
 

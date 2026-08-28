@@ -181,6 +181,7 @@ fun SearchScreen(
                 onNow = vm::setNow,
                 onToggleRemember = vm::setRememberLast,
                 onToggleDirectOnly = vm::setDirectOnly,
+                onToggleViaggiMisti = vm::setViaggiMisti,
                 onSave = vm::saveCurrent,
                 onUseLocation = {
                     keyboard?.hide()
@@ -327,6 +328,7 @@ private fun SearchCard(
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
     onToggleDirectOnly: (Boolean) -> Unit,
+    onToggleViaggiMisti: (Boolean) -> Unit,
     onSave: () -> Unit,
     onUseLocation: () -> Unit,
     onSearch: () -> Unit,
@@ -413,6 +415,7 @@ private fun SearchCard(
                     onNow = onNow,
                     onToggleRemember = onToggleRemember,
                     onToggleDirectOnly = onToggleDirectOnly,
+                    onToggleViaggiMisti = onToggleViaggiMisti,
                     onSave = onSave,
                     onSearch = onSearch,
                 )
@@ -440,6 +443,7 @@ private fun SearchOptions(
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
     onToggleDirectOnly: (Boolean) -> Unit,
+    onToggleViaggiMisti: (Boolean) -> Unit,
     onSave: () -> Unit,
     onSearch: () -> Unit,
 ) {
@@ -509,6 +513,22 @@ private fun SearchOptions(
                 )
             }
             Switch(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Soluzioni con più operatori · beta", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Combina reti diverse, es. Circumvesuviana e Italo. " +
+                        "Più lenta e senza prezzo Italo.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = state.viaggiMisti, onCheckedChange = onToggleViaggiMisti)
         }
 
         Row(
