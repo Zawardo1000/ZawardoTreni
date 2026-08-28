@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -259,6 +261,7 @@ fun ResultsScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun JourneyCard(
     row: JourneyRow,
@@ -322,11 +325,12 @@ private fun JourneyCard(
                     /*
                      * Il prezzo compare solo quando c'e'.
                      *
-                     * Lo pubblica il solo BFF Le Frecce, e nemmeno sempre: sulla
-                     * stessa tratta una ricerca su cinque torna senza. Riempire
-                     * il vuoto con un trattino o con "n.d." darebbe l'idea di un
-                     * dato mancante per colpa dell'app; non scrivere niente e'
-                     * piu' onesto e piu' pulito.
+                     * Lo pubblicano le due sorgenti che vendono — Trenitalia e
+                     * Trenord — e nemmeno loro sempre: sulla stessa tratta una
+                     * ricerca su cinque torna senza. Riempire il vuoto con un
+                     * trattino o con "n.d." darebbe l'idea di un dato mancante
+                     * per colpa dell'app; non scrivere niente e' piu' onesto e
+                     * piu' pulito.
                      */
                     j.price?.let { p ->
                         Text(
@@ -343,7 +347,19 @@ private fun JourneyCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            /*
+             * Le tratte vanno a capo invece di stringersi.
+             *
+             * Con tre cambi i chip diventano quattro e in una `Row` non ci
+             * stanno: Compose li comprimeva in orizzontale finche' l'ultimo
+             * restava alto e largo un carattere, illeggibile. Un viaggio con
+             * piu' cambi e' proprio quello che ha piu' bisogno di essere letto,
+             * quindi si va a capo.
+             */
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 j.legs.forEach { leg ->
                     AssistChip(
                         // Un bus non ha dettaglio da aprire: il chip resta inerte.

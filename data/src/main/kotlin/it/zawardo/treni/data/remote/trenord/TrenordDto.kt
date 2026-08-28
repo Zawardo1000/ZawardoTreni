@@ -46,6 +46,46 @@ data class TrenordSolutionDto(
     @SerialName("dep_day_offset") val departureDayOffset: Int = 0,
     @SerialName("arr_day_offset") val arrivalDayOffset: Int = 0,
     @SerialName("journey_list") val journeys: List<TrenordJourneyDto> = emptyList(),
+    /**
+     * I titoli di viaggio validi per questa soluzione, raggruppati per tratta.
+     *
+     * Trenord vende, quindi il prezzo ce l'ha: e' una lista perche' un viaggio
+     * con cambio puo' richiedere piu' biglietti, uno per tratta, e perche' per
+     * ciascuna offre piu' tipi — ordinario, giornaliero, e altri.
+     */
+    @SerialName("ticket_routes") val ticketRoutes: List<TrenordTicketRouteDto> = emptyList(),
+    /** Dichiara se quella soluzione sia effettivamente acquistabile. */
+    val saleability: TrenordSaleabilityDto? = null,
+)
+
+@Serializable
+data class TrenordTicketRouteDto(
+    @SerialName("route_index") val routeIndex: Int = 0,
+    val products: List<TrenordProductDto> = emptyList(),
+)
+
+/**
+ * Un titolo di viaggio.
+ *
+ * [type] distingue cosa si sta comprando: `ordinary` e' la corsa singola, che e'
+ * l'unica confrontabile col prezzo delle altre sorgenti. `daily` e i suoi
+ * fratelli sono abbonamenti giornalieri e simili: costano di piu' e valgono di
+ * piu', e metterli sulla stessa riga di un biglietto di corsa semplice farebbe
+ * sembrare Trenord tre volte piu' cara di quanto sia.
+ */
+@Serializable
+data class TrenordProductDto(
+    val name: String? = null,
+    val type: String? = null,
+    val category: String? = null,
+    /** Numero, non stringa: qui il prezzo arriva come `2.2`. */
+    val price: Double? = null,
+    @SerialName("localized_name") val localizedName: String? = null,
+)
+
+@Serializable
+data class TrenordSaleabilityDto(
+    val saleable: Boolean? = null,
 )
 
 @Serializable

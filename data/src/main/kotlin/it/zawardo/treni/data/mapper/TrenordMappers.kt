@@ -10,6 +10,7 @@ import it.zawardo.treni.data.remote.trenord.TrenordAlertDto
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.JourneySource
 import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.domain.model.Price
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
@@ -197,6 +198,51 @@ fun TrenordSolutionDto.toJourney(): Journey? {
         // `delay` e' attendibile solo quando il flag lo dichiara: altrimenti e'
         // assenza di dato, non assenza di ritardo.
         delayMinutes = delay?.takeIf { delayDefined },
+        price = toPrice(),
+    )
+}
+
+/**
+ * Il prezzo della corsa semplice, sommato su tutte le tratte del viaggio.
+ *
+ * Trenord vende, e nella risposta di ricerca allega i titoli validi per ogni
+ * tratta. Due scelte guidano questa funzione:
+ *
+ *  - **solo i biglietti ordinari.** Fra i prodotti ci sono anche i giornalieri e
+ *    gli altri titoli a tempo, che costano il triplo e valgono un giorno intero:
+ *    mescolarli farebbe apparire Trenord molto piu' cara di quanto sia. Su
+ *    Milano Centrale - Porta Garibaldi l'ordinario e' 2,20 e il giornaliero
+ *    7,60, e il prezzo giusto da mostrare accanto a una singola corsa e' il
+ *    primo.
+ *  - **la somma sulle tratte, non il minimo.** Un viaggio con cambio puo'
+ *    richiedere due biglietti distinti, uno per tratta: `ticket_routes` ne ha
+ *    una voce per ciascuna, e chi parte deve pagarle tutte. Prendere solo la
+ *    piu' economica direbbe meta' del prezzo vero.
+ *
+ * Null quando i titoli non ci sono — capita sulle tratte fuori dall'area
+ * tariffaria integrata — che e' diverso da gratis.
+ */
+private fun TrenordSolutionDto.toPrice(): Price? {
+    if (ticketRoutes.isEmpty()) return null
+
+    val perTratta = ticketRoutes.mapNotNull { tratta ->
+        tratta.products
+            .filter { it.type.equals("ordinary", ignoreCase = true) }
+            .mapNotNull { it.price }
+            .filter { it > 0.0 }
+            .minOrNull()
+    }
+    // Se anche una sola tratta non ha un titolo, il totale sarebbe parziale e
+    // quindi falso: meglio non dire niente che dire meno del vero.
+    if (perTratta.size != ticketRoutes.size || perTratta.isEmpty()) return null
+
+    val totale = perTratta.sum()
+    if (totale <= 0.0) return null
+
+    return Price(
+        amount = "%.2f".format(java.util.Locale.US, totale),
+        currency = "EUR",
+        saleable = saleability?.saleable != false,
     )
 }
 

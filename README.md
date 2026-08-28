@@ -16,7 +16,7 @@ App Android per orari e stato in tempo reale dei treni italiani.
 - Ricerca per numero treno
 - Tabellone partenze/arrivi di stazione
 - Stazione più vicina via GPS
-- Prezzo del biglietto, dove Trenitalia lo pubblica
+- Prezzo del biglietto, dove Trenitalia e Trenord lo pubblicano
 - Reti accendibili e spegnibili una per una, per non pagare chiamate che non servono
 - "Segui treno": notifica quando il ritardo cambia di oltre 3 minuti
 
@@ -28,7 +28,7 @@ Otto servizi, sette reti. Nessuno di questi è documentato, e nessuno è ufficia
 |---|---|---|
 | [Le Frecce BFF](https://app.lefrecce.it) | ricerca stazioni, itinerari A→B, **prezzi** | — |
 | [ViaggiaTreno](http://www.viaggiatreno.it) | ritardi, fermate, binari, posizione del treno | sì |
-| [Trenord](https://www.trenord.it) | regionale lombardo, linee S del Passante, avvisi | sì |
+| [Trenord](https://www.trenord.it) | regionale lombardo, linee S del Passante, avvisi, **prezzi** | sì |
 | [Italo in viaggio](https://italoinviaggio.italotreno.com) | le corse NTV, assenti da ogni altra fonte | sì |
 | [EAV](https://orariotreni.eavsrl.it) | Circumvesuviana, Cumana, Circumflegrea | sì, dove c'è il monitor |
 | [GTFS EAV](https://www.eavsrl.it/open-data/) | orario EAV: giorni futuri e linee senza monitor | no |

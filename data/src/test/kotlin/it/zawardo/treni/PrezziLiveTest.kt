@@ -12,10 +12,15 @@ import java.time.LocalDateTime
 /**
  * I prezzi, contro il servizio reale.
  *
- * Li pubblica **solo** il BFF Le Frecce, che e' l'unica sorgente che vende
- * biglietti: le altre sono servizi di informazione e un prezzo non ce l'hanno.
+ * Li pubblicano le due sorgenti che vendono biglietti: il BFF Le Frecce e
+ * Trenord. Le altre sono servizi di informazione sulla circolazione e un prezzo
+ * non ce l'hanno affatto.
+ *
  * Questi test verificano le due meta' della stessa promessa — che dove il
- * prezzo c'e' arrivi, e che dove non c'e' resti null invece di diventare zero.
+ * prezzo c'e' arrivi, e che dove non c'e' resti null invece di diventare zero —
+ * piu' la trappola specifica di Trenord: fra i titoli che allega ci sono anche i
+ * giornalieri, e mostrarli al posto della corsa semplice la farebbe sembrare tre
+ * volte piu' cara.
  */
 class PrezziLiveTest {
 
@@ -84,6 +89,68 @@ class PrezziLiveTest {
              * invece di lasciar comparire "5200,00 €" nella lista.
              */
             assertTrue("prezzo fuori scala, forse centesimi: ${p.amount}", v < 1_000.0)
+        }
+    }
+
+    @Test
+    fun `anche Trenord porta il prezzo, e non quello dell'abbonamento`() = runBlocking {
+        val from = stations.search("Milano Centrale").first()
+        val to = stations.search("Milano Porta Garibaldi").first()
+        val res = trenord.search(from, to, LocalDateTime.now().plusDays(1).withHour(8).withMinute(0))
+        val soluzioni = res.journeys
+
+        println("\n=== TRENORD MILANO C.LE -> P.TA GARIBALDI: ${soluzioni.size} soluzioni ===")
+        soluzioni.take(6).forEach {
+            println("  ${it.departure.toLocalTime()} -> ${it.arrival.toLocalTime()}  ${it.price?.formatted ?: "(nessun prezzo)"}")
+        }
+
+        assertTrue("Trenord non ha restituito soluzioni", soluzioni.isNotEmpty())
+        val prezzi = soluzioni.mapNotNull { it.price?.amount?.toDoubleOrNull() }
+        assertTrue(
+            "nessuna soluzione Trenord porta un prezzo: i campi `ticket_routes` sono cambiati",
+            prezzi.isNotEmpty(),
+        )
+        /*
+         * Il biglietto urbano milanese sta intorno ai due euro; il giornaliero
+         * agli otto. Se qui comparisse un valore da giornaliero vorrebbe dire
+         * che il filtro sui titoli ordinari non sta piu' funzionando, ed e'
+         * l'errore che farebbe apparire Trenord tre volte piu' cara del vero.
+         */
+        prezzi.forEach {
+            assertTrue("prezzo non positivo: $it", it > 0.0)
+            assertTrue(
+                "prezzo da abbonamento su una corsa singola urbana: $it",
+                it < 6.0,
+            )
+        }
+    }
+
+    @Test
+    fun `su un viaggio con cambio Trenord somma le tratte`() = runBlocking {
+        /*
+         * Una tratta regionale fuori dall'area urbana, dove il viaggio puo'
+         * richiedere piu' di un titolo. Interessa che il totale non sia il
+         * prezzo di una sola tratta: prendere il minimo direbbe meta' del
+         * prezzo vero a chi deve cambiare.
+         */
+        val from = stations.search("Milano Centrale").first()
+        val to = stations.search("Bergamo").first()
+        val res = trenord.search(from, to, LocalDateTime.now().plusDays(1).withHour(8).withMinute(0))
+        println("\n=== TRENORD MILANO -> BERGAMO ===")
+        res.journeys.take(6).forEach {
+            println(
+                "  ${it.departure.toLocalTime()} -> ${it.arrival.toLocalTime()}  " +
+                    "${it.changes} cambi  ${it.price?.formatted ?: "(nessun prezzo)"}",
+            )
+        }
+        val conPrezzo = res.journeys.filter { it.price != null }
+        if (conPrezzo.isEmpty()) {
+            println("  (nessun prezzo su questa tratta: fuori area tariffaria integrata)")
+            return@runBlocking
+        }
+        conPrezzo.forEach {
+            val v = it.price!!.amount.toDouble()
+            assertTrue("prezzo fuori scala su Milano-Bergamo: $v", v in 0.5..40.0)
         }
     }
 

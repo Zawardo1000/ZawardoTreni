@@ -76,11 +76,14 @@ data class Journey(
     /**
      * Il prezzo piu' basso di questa soluzione, quando la sorgente lo pubblica.
      *
-     * Null non vuol dire gratis: vuol dire **non lo so**. Lo espone solo il BFF
-     * Le Frecce, che vende i biglietti; le altre sorgenti sono servizi di
-     * informazione e un prezzo non lo conoscono affatto. Trattare null come
-     * zero, o non distinguerlo da "esaurito", darebbe per certo qualcosa che
-     * nessuno ha detto.
+     * Null non vuol dire gratis: vuol dire **non lo so**. Lo espongono le due
+     * sorgenti che vendono biglietti — il BFF Le Frecce e Trenord — e nemmeno
+     * loro sempre: Trenitalia lo omette su circa una ricerca su cinque, Trenord
+     * fuori dall'area tariffaria integrata. Le altre sorgenti sono servizi di
+     * informazione sulla circolazione e un prezzo non lo conoscono affatto.
+     *
+     * Trattare null come zero, o non distinguerlo da "esaurito", darebbe per
+     * certo qualcosa che nessuno ha detto.
      */
     val price: Price? = null,
 ) {
