@@ -48,6 +48,42 @@ data class SolutionDto(
     /** Sequenza delle categorie, una per tratta: es. ["RE","RE"] oppure ["FR"]. */
     val classificationAcronymsSequence: List<String> = emptyList(),
     val solutionNodes: List<SolutionNodeDto> = emptyList(),
+    /**
+     * Il prezzo piu' basso disponibile per questa soluzione, come stringa
+     * decimale: `"52.00"`.
+     *
+     * Il BFF lo ripete in una decina di posti — dentro ogni offerta, dentro
+     * ogni nodo, dentro `bookingInfo` — ma qui in cima e' gia' il totale del
+     * viaggio, cambi compresi, che e' l'unica cifra sensata da mostrare in un
+     * elenco di soluzioni.
+     */
+    val totalPrice: String? = null,
+    val totalAmount: AmountDto? = null,
+    /**
+     * Se il biglietto e' acquistabile adesso.
+     *
+     * Va guardato: una soluzione puo' avere un prezzo e non essere vendibile —
+     * esaurita, inibita, o fuori dalla finestra di vendita. Mostrare "52,00 €"
+     * accanto a un treno che non si puo' prendere sarebbe peggio che tacere.
+     */
+    val saleable: Boolean? = null,
+    val soldOut: Boolean? = null,
+    val inhibited: Boolean? = null,
+)
+
+/**
+ * Un importo col suo perche'.
+ *
+ * [showPrice] non e' decorativo: il BFF lo mette a falso quando il prezzo
+ * esiste nei suoi archivi ma non va mostrato all'utente — tariffe riservate,
+ * abbonamenti, soluzioni non commercializzate. Ignorarlo significherebbe
+ * pubblicare cifre che Trenitalia stessa non pubblica.
+ */
+@Serializable
+data class AmountDto(
+    val amount: String? = null,
+    val currency: String? = null,
+    val showPrice: Boolean? = null,
 )
 
 @Serializable

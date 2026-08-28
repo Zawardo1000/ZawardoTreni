@@ -9,6 +9,7 @@ import it.zawardo.treni.data.remote.viaggiatreno.TabelloneVoceDto
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.domain.model.Price
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
@@ -96,6 +97,48 @@ fun SolutionDto.toJourney(): Journey? {
         arrival = arr,
         duration = if (totalDuration > 0) Duration.ofMillis(totalDuration) else Duration.between(dep, arr),
         legs = legs,
+        price = toPrice(),
+    )
+}
+
+/**
+ * Il prezzo della soluzione, quando c'e' ed e' lecito mostrarlo.
+ *
+ * Tre condizioni, e servono tutte e tre:
+ *
+ *  - **una cifra**, ovviamente. Le soluzioni regionali spesso non ce l'hanno,
+ *    perche' il BFF non le commercializza tutte.
+ *  - **`showPrice`**, che il BFF mette a falso quando il prezzo esiste nei suoi
+ *    archivi ma non e' da pubblicare. Ignorarlo vorrebbe dire mostrare cifre
+ *    che Trenitalia stessa non mostra.
+ *  - **una cifra sensata**: uno zero o un valore illeggibile e' quasi sempre un
+ *    campo non popolato, e "0,00 €" su un Frecciarossa sarebbe una bugia
+ *    vistosa.
+ *
+ * `saleable` invece non filtra, qualifica: un treno esaurito il suo prezzo ce
+ * l'ha, e sapere quanto costava serve comunque a scegliere. Chi mostra la riga
+ * dira' che non e' acquistabile.
+ *
+ * **Il prezzo e' intermittente, e non e' un difetto nostro.** Misurato il
+ * 28/08/2026 su cinque sessioni di ricerca consecutive per la stessa tratta e
+ * lo stesso orario: quattro rispondevano con i prezzi, una con `totalPrice`
+ * null su tutte le soluzioni. Richiamare le soluzioni sullo stesso `searchId`
+ * non cambia nulla — provato tre volte di seguito — quindi non c'e' un ritardo
+ * da aspettare ne' una chiamata da ripetere: quella sessione di ricerca i
+ * prezzi non li ha e basta. Ne segue che la UI deve reggere l'assenza come
+ * caso normale, non come errore.
+ */
+private fun SolutionDto.toPrice(): Price? {
+    val cifra = (totalAmount?.amount ?: totalPrice)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (totalAmount?.showPrice == false) return null
+    if ((cifra.toDoubleOrNull() ?: return null) <= 0.0) return null
+
+    return Price(
+        amount = cifra,
+        currency = totalAmount?.currency?.takeIf { it.isNotBlank() } ?: "EUR",
+        // Vendibile finche' non e' detto il contrario: i tre flag arrivano null
+        // sulle soluzioni che il BFF non tratta commercialmente.
+        saleable = saleable != false && soldOut != true && inhibited != true,
     )
 }
 

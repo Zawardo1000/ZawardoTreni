@@ -3,12 +3,14 @@ package it.zawardo.treni.ui.train
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +70,7 @@ class TrainDetailViewModel(
     private val trenord = ServiceLocator.trenordRepository
     private val italo = ServiceLocator.italoRepository
     private val memory = ServiceLocator.trainMemory
+    private val settings = ServiceLocator.settings
 
     private val _state = MutableStateFlow(TrainDetailUiState())
     val state: StateFlow<TrainDetailUiState> = _state.asStateFlow()
@@ -120,15 +123,26 @@ class TrainDetailViewModel(
              * ViaggiaTreno non copre tutto: sulle linee S del Passante milanese
              * non ha alcun dato. Quando non risponde si ripiega su Trenord,
              * che quelle corse le conosce.
+             *
+             * I ripieghi rispettano gli interruttori delle sorgenti, che prima
+             * qui venivano ignorati: chi aveva spento Italo se lo vedeva
+             * comunque interrogare aprendo una corsa qualunque, e l'interruttore
+             * valeva sui tabelloni e sulla ricerca ma non qui. Si leggono al
+             * momento del caricamento e non una volta sola all'avvio, cosi' che
+             * spegnere una rete abbia effetto subito.
              */
+            val sources = runCatching { settings.enabledSources.first() }
+                .getOrDefault(DataSource.defaultEnabled)
+
             val status = runCatching {
                 exactRef()?.let { trains.status(it) }
                     ?: trains.statusByNumber(trainNumber, date, boardingCode, boardingAt)
                     // Con la data: senza, per una corsa di domani Trenord
                     // risponderebbe con quella di oggi.
-                    ?: trenord.trainStatus(trainNumber, date)
+                    ?: trenord.takeIf { DataSource.TRENORD in sources }?.trainStatus(trainNumber, date)
                     // Ultima: le corse Italo, che nelle altre fonti non esistono.
-                    ?: italo.trainStatus(trainNumber, date, boardingCode, boardingName, alightingCode)
+                    ?: italo.takeIf { DataSource.ITALO in sources }
+                        ?.trainStatus(trainNumber, date, boardingCode, boardingName, alightingCode)
             }
                 .getOrElse { e ->
                     _state.update {

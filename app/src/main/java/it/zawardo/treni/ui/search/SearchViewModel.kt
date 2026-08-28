@@ -6,14 +6,15 @@ import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.sortedByName
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -31,6 +32,8 @@ data class SearchUiState(
     val activeField: SearchField? = null,
     val suggestions: List<Station> = emptyList(),
     val loadingSuggestions: Boolean = false,
+    /** Le stazioni proposte dal mirino: si mostrano al posto dei suggerimenti. */
+    val nearby: List<NearbyStation> = emptyList(),
     val dateTime: LocalDateTime = LocalDateTime.now(),
     val rememberLast: Boolean = true,
     val directOnly: Boolean = false,
@@ -41,6 +44,11 @@ data class SearchUiState(
     /** Cercare una tratta verso se stessa non ha senso: il pulsante resta spento. */
     val canSearch: Boolean
         get() = from != null && to != null && from.locationId != to.locationId
+
+    /** C'e' una lista aperta sotto il campo attivo: si sta scegliendo una stazione. */
+    val choosing: Boolean
+        get() = activeField != null &&
+            (suggestions.isNotEmpty() || nearby.isNotEmpty() || loadingSuggestions)
 }
 
 @OptIn(FlowPreview::class)
@@ -81,8 +89,17 @@ class SearchViewModel : ViewModel() {
         viewModelScope.launch {
             settings.directOnly.collect { only -> _state.update { it.copy(directOnly = only) } }
         }
+        /*
+         * Nessun `distinctUntilChanged` dopo il debounce.
+         *
+         * Un MutableStateFlow non ripete due volte lo stesso valore, quindi non
+         * servirebbe; ma dopo il debounce filtrerebbe anche i ritorni al punto
+         * di partenza — scrivo "mi", cancello la "i", la riscrivo — che al
+         * collector arrivano come un solo "mi" uguale al precedente. La ricerca
+         * non ripartirebbe, e il campo resterebbe in attesa per sempre.
+         */
         viewModelScope.launch {
-            queries.debounce(250).distinctUntilChanged().collect { runSuggest(it) }
+            queries.debounce(250).collect { runSuggest(it) }
         }
     }
 
@@ -119,30 +136,44 @@ class SearchViewModel : ViewModel() {
     fun onQueryChange(field: SearchField, text: String) {
         _state.update {
             when (field) {
-                SearchField.FROM -> it.copy(fromQuery = text, from = null, activeField = field)
-                SearchField.TO -> it.copy(toQuery = text, to = null, activeField = field)
-            }
+                SearchField.FROM -> it.copy(fromQuery = text, from = null)
+                SearchField.TO -> it.copy(toQuery = text, to = null)
+            }.copy(
+                activeField = field,
+                nearby = emptyList(),
+                /*
+                 * I suggerimenti di prima restano finche' non arrivano i nuovi.
+                 * Svuotarli a ogni lettera faceva sparire e ricomparire la lista
+                 * dentro la scheda, che si apriva e si richiudeva mentre si
+                 * scriveva; il debounce di 250 ms basta a renderlo visibile.
+                 */
+                loadingSuggestions = text.length >= MIN_QUERY,
+            )
         }
         queries.value = text
     }
 
+    /** Cambiando campo i suggerimenti di prima non c'entrano piu' nulla. */
     fun onFieldFocused(field: SearchField) {
-        _state.update { it.copy(activeField = field, suggestions = emptyList()) }
+        _state.update {
+            if (it.activeField == field) it
+            else it.copy(activeField = field, suggestions = emptyList(), nearby = emptyList())
+        }
     }
 
     private suspend fun runSuggest(query: String) {
-        if (query.length < 2) {
+        if (query.length < MIN_QUERY) {
             _state.update { it.copy(suggestions = emptyList(), loadingSuggestions = false) }
             return
         }
         // Prima la cache locale: la lista compare subito, poi si arricchisce dalla rete.
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
-        _state.update { it.copy(suggestions = offline, loadingSuggestions = true) }
+        _state.update { it.copy(suggestions = offline.sortedByName(), loadingSuggestions = true) }
 
         val remote = runCatching { stations.search(query) }.getOrNull()
         if (remote != null) {
             runCatching { store.cacheAll(remote) }
-            val merged = (remote + offline).distinctBy { it.locationId }
+            val merged = (remote + offline).distinctBy { it.locationId }.sortedByName()
             _state.update { it.copy(suggestions = merged, loadingSuggestions = false, error = null) }
         } else {
             _state.update {
@@ -159,7 +190,7 @@ class SearchViewModel : ViewModel() {
             when (field) {
                 SearchField.FROM -> it.copy(from = station, fromQuery = station.name)
                 SearchField.TO -> it.copy(to = station, toQuery = station.name)
-            }.copy(suggestions = emptyList(), activeField = null)
+            }.copy(suggestions = emptyList(), nearby = emptyList(), activeField = null)
         }
         if (field == SearchField.FROM) ServiceLocator.currentDeparture.value = station
         viewModelScope.launch {
@@ -169,18 +200,35 @@ class SearchViewModel : ViewModel() {
     }
 
     /**
-     * Imposta come partenza la stazione piu' vicina.
-     * Si prende il primo risultato: l'endpoint restituisce gia' la piu' vicina.
+     * Propone le stazioni piu' vicine, senza sceglierne nessuna.
+     *
+     * La piu' vicina in linea d'aria spesso non e' quella da cui conviene
+     * partire: a Milano il mirino cadeva su una fermata suburbana mentre
+     * Centrale era cinquecento metri piu' in la'. Scegliere resta all'utente;
+     * l'app si limita a mettergli davanti le tre candidate, in ordine.
      */
-    fun useNearestAsDeparture(latitude: Double, longitude: Double) {
+    fun proposeNearest(latitude: Double, longitude: Double) {
         viewModelScope.launch {
             _state.update { it.copy(locating = true, error = null) }
-            val nearest = runCatching { stations.closest(latitude, longitude) }.getOrNull()
-            if (nearest == null) {
-                _state.update { it.copy(locating = false, error = "Nessuna stazione trovata nei dintorni.") }
-            } else {
-                _state.update { it.copy(locating = false) }
-                select(SearchField.FROM, nearest)
+            val vicine = runCatching { stations.nearest(latitude, longitude) }.getOrDefault(emptyList())
+            when {
+                vicine.isEmpty() -> _state.update {
+                    it.copy(locating = false, error = "Nessuna stazione trovata nei dintorni.")
+                }
+                // Con una sola candidata non c'e' niente da scegliere.
+                vicine.size == 1 -> {
+                    _state.update { it.copy(locating = false) }
+                    select(SearchField.FROM, vicine.first().station)
+                }
+                else -> _state.update {
+                    it.copy(
+                        locating = false,
+                        activeField = SearchField.FROM,
+                        nearby = vicine,
+                        suggestions = emptyList(),
+                        loadingSuggestions = false,
+                    )
+                }
             }
         }
     }
@@ -203,6 +251,7 @@ class SearchViewModel : ViewModel() {
                 toQuery = it.fromQuery,
                 dateTime = LocalDateTime.now(),
                 suggestions = emptyList(),
+                nearby = emptyList(),
                 activeField = null,
             )
         }
@@ -215,13 +264,20 @@ class SearchViewModel : ViewModel() {
             when (field) {
                 SearchField.FROM -> it.copy(from = null, fromQuery = "")
                 SearchField.TO -> it.copy(to = null, toQuery = "")
-            }.copy(suggestions = emptyList())
+            }.copy(suggestions = emptyList(), nearby = emptyList())
         }
     }
 
     private fun clearFields() {
         _state.update {
-            it.copy(from = null, to = null, fromQuery = "", toQuery = "", suggestions = emptyList())
+            it.copy(
+                from = null,
+                to = null,
+                fromQuery = "",
+                toQuery = "",
+                suggestions = emptyList(),
+                nearby = emptyList(),
+            )
         }
     }
 
@@ -257,6 +313,7 @@ class SearchViewModel : ViewModel() {
                 toQuery = to.name,
                 dateTime = target,
                 suggestions = emptyList(),
+                nearby = emptyList(),
                 activeField = null,
             )
         }
@@ -308,5 +365,10 @@ class SearchViewModel : ViewModel() {
         val from = s.from ?: return
         val to = s.to ?: return
         viewModelScope.launch { store.record(from, to) }
+    }
+
+    private companion object {
+        /** Sotto due lettere i suggerimenti sarebbero mezza rete ferroviaria. */
+        const val MIN_QUERY = 2
     }
 }

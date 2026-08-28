@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ZawardoTreni</string>
-    <string name="disclaimer">App non ufficiale, non affiliata né approvata da Trenitalia S.p.A., Ferrovie dello Stato Italiane, Trenord S.r.l. o Italo &#8211; Nuovo Trasporto Viaggiatori S.p.A. Dati da ViaggiaTreno, Le Frecce, Trenord e Italo. Nessuna vendita di biglietti.</string>
+    <string name="disclaimer">App non ufficiale, non affiliata né approvata da Trenitalia S.p.A., Ferrovie dello Stato Italiane, Trenord S.r.l., Italo &#8211; Nuovo Trasporto Viaggiatori S.p.A., Ferrotramviaria S.p.A., SSIF, FART, TILO, FFS/SBB, EAV o ARST. Dati da ViaggiaTreno, Le Frecce, Trenord, Italo, Ferrotramviaria, dall\'orario dei trasporti svizzeri e dai GTFS ufficiali di EAV e ARST. Coordinate delle fermate Ferrotramviaria da OpenStreetMap, © i suoi contributori, licenza ODbL. Nessuna vendita di biglietti.</string>
 </resources>

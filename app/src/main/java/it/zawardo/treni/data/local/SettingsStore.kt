@@ -53,14 +53,26 @@ class SettingsStore(private val context: Context) {
     val enabledSources: Flow<Set<DataSource>> =
         context.dataStore.data.map { prefs ->
             val salvati = prefs[KEY_SOURCES] ?: return@map DataSource.defaultEnabled
-            salvati
+            val scelte = salvati
                 .mapNotNull { runCatching { DataSource.valueOf(it) }.getOrNull() }
                 .filterTo(HashSet()) { it.available }
+            /*
+             * La rete nazionale si aggiunge sempre, qualunque cosa sia salvata.
+             *
+             * Non e' ridondante: chi usa l'app da prima che questa distinzione
+             * esistesse puo' avere Trenitalia spenta nelle sue preferenze, e
+             * senza questo innesto si troverebbe l'app quasi muta dopo un
+             * aggiornamento, senza un interruttore per rimediare — perche' quel
+             * interruttore non c'e' piu'.
+             */
+            scelte + DataSource.sempreAttive
         }
 
     suspend fun setSourceEnabled(source: DataSource, enabled: Boolean) {
         // Una rete non ancora collegata non si accende: non c'e' cosa accendere.
         if (!source.available) return
+        // E la rete nazionale non si spegne: vedi DataSource.opzionale.
+        if (!source.opzionale) return
         context.dataStore.edit { prefs ->
             val correnti = prefs[KEY_SOURCES]
                 ?.mapNotNullTo(HashSet()) { runCatching { DataSource.valueOf(it) }.getOrNull() }

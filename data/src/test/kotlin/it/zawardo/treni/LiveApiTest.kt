@@ -9,6 +9,7 @@ import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.StopStatus
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -44,6 +45,26 @@ class LiveApiTest {
         val centrale = res.firstOrNull { it.name.contains("Centrale", ignoreCase = true) }
         assertNotNull("Bologna Centrale non trovata", centrale)
         assertTrue("manca il codice RFI, il realtime sarebbe impossibile", centrale!!.trackable)
+    }
+
+    /**
+     * `locations/closest` risponde una stazione sola: le tre piu' vicine si
+     * ottengono sondando piu' punti attorno. Il test verifica quello che
+     * l'utente vede — tre stazioni distinte, in ordine di distanza — e non il
+     * modo in cui ci si arriva.
+     */
+    @Test
+    fun `le stazioni piu' vicine arrivano in ordine di distanza`() = runBlocking {
+        // Piazza del Duomo, Milano: attorno ce n'e' piu' d'una a poche centinaia
+        // di metri, che e' esattamente il caso in cui sceglierne una sola sbaglia.
+        val vicine = stations.nearest(45.4642, 9.1900)
+        println("\n=== PIU' VICINE A MILANO DUOMO ===")
+        vicine.forEach { println("  %6.2f km  %s".format(it.distanceKm, it.station.name)) }
+
+        assertTrue("attorno al Duomo ne servono tre", vicine.size == 3)
+        assertEquals("ordinate per distanza", vicine.sortedBy { it.distanceKm }, vicine)
+        assertEquals("stazioni ripetute", 3, vicine.map { it.station.locationId }.toSet().size)
+        assertTrue("nessuna e' davvero vicina", vicine.first().distanceKm < 3.0)
     }
 
     @Test

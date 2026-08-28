@@ -1,5 +1,8 @@
 package it.zawardo.treni.data.remote
 
+import it.zawardo.treni.data.remote.svizzera.SvizzeraApi
+import it.zawardo.treni.data.remote.eav.EavApi
+import it.zawardo.treni.data.remote.fnb.FnbApi
 import it.zawardo.treni.data.remote.italo.ItaloApi
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
 import it.zawardo.treni.data.remote.trenord.TrenordApi
@@ -138,6 +141,63 @@ object NetworkModule {
             .addConverterFactory(jsonConverter)
             .build()
             .create(ItaloApi::class.java)
+    }
+
+    /**
+     * EAV risponde HTML, non JSON: il convertitore serializzato qui non entra
+     * mai in gioco perche' il metodo restituisce il corpo grezzo.
+     *
+     * Non serve Referer: l'endpoint alimenta i monitor fisici delle stazioni e
+     * non sta dietro ad alcun filtro. Restano i soli header di base.
+     */
+    val eavApi: EavApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(EavApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(EavApi::class.java)
+    }
+
+    /**
+     * Ferrotramviaria risponde JSON in chiaro, senza chiavi ne' sessione: e' la
+     * piu' semplice delle sorgenti non-RFI, e non serve altro che il client base.
+     */
+    val fnbApi: FnbApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(FnbApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(FnbApi::class.java)
+    }
+
+    /**
+     * La Vigezzina si chiede all'orario svizzero, che e' una vera API pubblica:
+     * niente chiavi, niente Referer, niente filtri anti-bot da assecondare.
+     */
+    val svizzeraApi: SvizzeraApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(SvizzeraApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(SvizzeraApi::class.java)
+    }
+
+    /**
+     * Il client per gli orari GTFS, che e' un mestiere diverso dagli altri.
+     *
+     * Le API rispondono in pochi KB e un timeout di 45 secondi e' generoso.
+     * Qui si scaricano archivi da 3 MB (EAV) e 19,7 MB (ARST): sul cellulare in
+     * movimento quel limite li interromperebbe a meta', e l'aggiornamento
+     * fallirebbe sistematicamente senza che nulla sia rotto.
+     */
+    val orariClient: OkHttpClient by lazy {
+        baseClient()
+            .readTimeout(5, TimeUnit.MINUTES)
+            .callTimeout(10, TimeUnit.MINUTES)
+            .build()
     }
 
     val lefrecceApi: LefrecceApi by lazy {

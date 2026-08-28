@@ -11,6 +11,7 @@ import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
@@ -25,8 +26,17 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** Ricerca stazioni. */
@@ -41,11 +51,100 @@ class StationRepository(
                 .map { it.toStation() }
         }
 
-    suspend fun closest(lat: Double, lon: Double): Station? =
+    /**
+     * Le stazioni piu' vicine a un punto, dalla piu' vicina in poi.
+     *
+     * Il BFF non sa rispondere a questa domanda: `locations/closest` restituisce
+     * **una sola** stazione e ignora qualunque parametro di quantita' (provato
+     * con `limit`, che non cambia la risposta). L'unico modo di averne tre e'
+     * chiedere piu' volte, da punti diversi: la stazione piu' vicina a un punto
+     * a sette chilometri a nord non e' quasi mai la stessa piu' vicina a te.
+     *
+     * Quindi: una prima chiamata sul punto vero, che da' l'ancora e soprattutto
+     * dice **quanto e' lontana** la stazione piu' vicina; da quella distanza si
+     * dimensionano due anelli di sonde. In citta' gli anelli restano stretti e
+     * pescano le stazioni urbane; in montagna si allargano da soli, dove
+     * altrimenti tutte le sonde avrebbero risposto la stessa cosa.
+     *
+     * Le risposte si fondono per `locationId` e si riordinano per distanza vera
+     * calcolata in casa: l'ordine che ne esce e' corretto anche quando il BFF,
+     * che sceglie con un indice suo, non ha proposto proprio la piu' vicina.
+     *
+     * Costo: tredici richieste da poche centinaia di byte, tutte verso
+     * `locations/closest` come prima, e solo quando l'utente tocca il mirino.
+     */
+    suspend fun nearest(lat: Double, lon: Double, limit: Int = 3): List<NearbyStation> =
         withContext(Dispatchers.IO) {
-            runCatching { lefrecce.closest(lat, lon).toStation() }.getOrNull()
+            val anchor = closest(lat, lon) ?: return@withContext emptyList()
+            val found = linkedMapOf(anchor.locationId to anchor)
+
+            val inner = maxOf(MIN_RING_KM, distanceKm(lat, lon, anchor.latitude, anchor.longitude) + 1.0)
+            val probes = INNER_BEARINGS.map { inner to it } + OUTER_BEARINGS.map { inner * OUTER_FACTOR to it }
+
+            val gate = Semaphore(MAX_PARALLEL)
+            coroutineScope {
+                probes.map { (km, bearing) ->
+                    val (pLat, pLon) = offset(lat, lon, km, bearing)
+                    async { gate.withPermit { closest(pLat, pLon) } }
+                }.awaitAll()
+            }.filterNotNull().forEach { found.putIfAbsent(it.locationId, it) }
+
+            found.values
+                .map { NearbyStation(it, distanceKm(lat, lon, it.latitude, it.longitude)) }
+                .sortedBy { it.distanceKm }
+                .take(limit)
         }
+
+    private suspend fun closest(lat: Double, lon: Double): Station? =
+        runCatching { lefrecce.closest(lat, lon).toStation() }
+            .getOrNull()
+            // Senza coordinate non e' ordinabile, e una voce fuori posto in una
+            // lista che promette "in ordine di distanza" e' peggio di una in meno.
+            ?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 }
+
+    /** Sposta un punto di [km] lungo la direzione [bearing] (0 = nord, in gradi). */
+    private fun offset(lat: Double, lon: Double, km: Double, bearing: Int): Pair<Double, Double> {
+        val rad = Math.toRadians(bearing.toDouble())
+        val dLat = km * cos(rad) / KM_PER_DEGREE
+        val dLon = km * sin(rad) / (KM_PER_DEGREE * cos(Math.toRadians(lat)))
+        return lat + dLat to lon + dLon
+    }
+
+    private companion object {
+        /** Un grado di latitudine, in chilometri. */
+        const val KM_PER_DEGREE = 111.32
+
+        /**
+         * Raggio minimo dell'anello interno.
+         *
+         * Sotto, in una stazione grande le sonde ricadrebbero tutte sulla stessa
+         * banchina da cui si e' partiti.
+         */
+        const val MIN_RING_KM = 1.8
+
+        /** Otto direzioni vicine: e' l'anello che decide la seconda e la terza. */
+        val INNER_BEARINGS = listOf(0, 45, 90, 135, 180, 225, 270, 315)
+
+        /** Quattro direzioni lontane: servono solo dove attorno non c'e' niente. */
+        val OUTER_BEARINGS = listOf(0, 90, 180, 270)
+
+        const val OUTER_FACTOR = 3.0
+
+        /** Tredici richieste insieme sarebbero una raffica: si va a scaglioni. */
+        const val MAX_PARALLEL = 4
+    }
 }
+
+/** Distanza in linea d'aria fra due punti, in chilometri (formula dell'emisenoverso). */
+internal fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2).pow(2) +
+        cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+    return 2 * EARTH_RADIUS_KM * asin(sqrt(a).coerceAtMost(1.0))
+}
+
+private const val EARTH_RADIUS_KM = 6371.0
 
 /** Risultato di una ricerca: le soluzioni piu' gli avvisi che le spiegano. */
 data class SearchOutcome(

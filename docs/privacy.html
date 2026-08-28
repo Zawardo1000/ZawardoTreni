@@ -82,7 +82,10 @@ elencati più avanti, che sono titolari autonomi del trattamento per le richiest
   <li>Nessuna analitica di prodotto, nessuna telemetria, nessuna segnalazione automatica di crash.</li>
   <li>Nessuna vendita, cessione o condivisione di dati a fini commerciali.</li>
   <li>Nessun accesso a rubrica, foto, file, microfono o fotocamera: l'app non chiede questi permessi.</li>
-  <li>L'app non vende biglietti e non accede ad alcun account dei gestori ferroviari.</li>
+  <li>L'app non vende biglietti e non accede ad alcun account dei gestori ferroviari. Dove
+  Trenitalia pubblica il prezzo di una soluzione, l'app lo mostra così com'è, a titolo
+  informativo: non aggiunge costi, non trattiene commissioni e non ha alcun rapporto commerciale
+  con i gestori. Per acquistare si passa dai loro canali.</li>
 </ul>
 
 <h2>Cosa resta sul telefono</h2>
@@ -119,7 +122,7 @@ l'intestazione <code>User-Agent</code>.</p>
       <td>Trenitalia<span class="sub">orari e itinerari nazionali</span></td>
       <td><code>app.lefrecce.it</code></td>
       <td>stazione di partenza e di arrivo, data e ora scelte, filtri di ricerca. Solo su tua
-      richiesta esplicita, le coordinate per individuare la stazione più vicina.</td>
+      richiesta esplicita, le coordinate per individuare le stazioni più vicine.</td>
     </tr>
     <tr>
       <td>RFI — ViaggiaTreno<span class="sub">ritardi, fermate, binari</span></td>
@@ -136,6 +139,31 @@ l'intestazione <code>User-Agent</code>.</p>
       <td><code>italoinviaggio.italotreno.com</code></td>
       <td>sigla della stazione, numero del treno.</td>
     </tr>
+    <tr>
+      <td>Ferrotramviaria<span class="sub">Bari–Barletta e aeroporto di Bari</span></td>
+      <td><code>eticket.ferrovienordbarese.it</code></td>
+      <td>codice della fermata.</td>
+    </tr>
+    <tr>
+      <td>Orario dei trasporti svizzeri<span class="sub">Vigezzina–Centovalli e linee S del Ticino</span></td>
+      <td><code>transport.opendata.ch</code></td>
+      <td>identificativo della fermata.</td>
+    </tr>
+    <tr>
+      <td>EAV<span class="sub">Circumvesuviana, Cumana, Circumflegrea</span></td>
+      <td><code>orariotreni.eavsrl.it</code></td>
+      <td>codice della stazione, e se vuoi le partenze o gli arrivi.</td>
+    </tr>
+    <tr>
+      <td>EAV — orario<span class="sub">solo per scaricare il file degli orari</span></td>
+      <td><code>www.wimob.it</code></td>
+      <td>nulla: è la richiesta di un file pubblico, uguale per tutti.</td>
+    </tr>
+    <tr>
+      <td>ARST — orario<span class="sub">solo per scaricare il file degli orari</span></td>
+      <td><code>www.arstspa.info</code></td>
+      <td>nulla: è la richiesta di un file pubblico, uguale per tutti.</td>
+    </tr>
   </tbody>
 </table>
 </div>
@@ -144,6 +172,38 @@ l'intestazione <code>User-Agent</code>.</p>
 interrogati su endpoint pubblici e senza alcuna autenticazione. L'app non invia loro nulla che ti
 riguardi: non il tuo nome, non un identificativo, non uno storico. Ogni richiesta è indipendente
 dalle precedenti e non è collegabile alle altre.</p>
+
+<h3>Gli orari scaricati</h3>
+<p>Due reti si appoggiano anche a un <strong>orario distribuito come file unico</strong>, in formato
+GTFS, di cui l'app porta già dentro di sé una copia e che sostituisce quando invecchia. I motivi
+sono diversi: <strong>ARST</strong> non pubblica alcun servizio in tempo reale, quindi di quelle
+corse l'orario è tutto ciò che esiste; <strong>EAV</strong> il tempo reale ce l'ha, ma solo per la
+giornata in corso e solo nelle stazioni dotate di monitor, e l'orario copre il resto — i giorni
+successivi e le fermate delle linee per Aversa, Piedimonte Matese e Benevento.</p>
+
+<p>È un traffico diverso da tutto il resto, e va descritto per quello che è:</p>
+<ul>
+  <li><strong>Non si invia nulla.</strong> È la richiesta di un file pubblico, identica per chiunque
+  la faccia. Non contiene la stazione che stai guardando né alcunché che ti riguardi: chi ospita il
+  file vede una richiesta di scaricamento e l'indirizzo IP, come per qualunque pagina.</li>
+  <li><strong>Solo per le reti che hai acceso.</strong> Se EAV o ARST sono spente nelle impostazioni,
+  il rispettivo file non viene mai richiesto. Il controllo scatta all'avvio dell'app e nel momento in
+  cui accendi una di quelle reti.</li>
+  <li><strong>Di rado.</strong> Solo quando l'orario a bordo ha superato i tre mesi. Negli altri casi
+  non parte alcuna richiesta.</li>
+  <li><strong>Non di nascosto.</strong> Mentre lo scaricamento è in corso l'app lo dichiara con un
+  avviso in cima allo schermo, indicando quale rete sta aggiornando. Il file ARST pesa circa 20 MB e
+  quello EAV circa 3: non è traffico da consumare in silenzio.</li>
+  <li><strong>Resta sul dispositivo.</strong> Il file viene ridotto al solo servizio ferroviario e
+  salvato in locale. Non viene inviato a nessuno.</li>
+</ul>
+
+<p>Un'eccezione va detta con chiarezza: <code>transport.opendata.ch</code> <strong>non appartiene al
+gestore della ferrovia</strong>. È il servizio aperto che espone l'orario dei trasporti pubblici
+svizzeri, dentro il quale sono pubblicate sia la Vigezzina–Centovalli, per intero e stazioni
+italiane comprese, sia le linee S del Ticino. Quando consulti una di quelle fermate, la richiesta
+arriva quindi a un terzo rispetto a SSIF, FART e TILO. Contiene l'identificativo della fermata e
+nient'altro, e non richiede alcuna registrazione.</p>
 
 <p>Nelle ricerche di itinerario su Trenitalia il servizio assegna un cookie tecnico di sessione,
 necessario perché le pagine successive dei risultati si riferiscano alla stessa ricerca. L'app lo
@@ -164,7 +224,8 @@ dell'app; tutto il resto del traffico è obbligatoriamente HTTPS. Te lo si dice 
 saperlo.</p>
 
 <h2>La posizione</h2>
-<p>L'app usa la posizione per una sola funzione: proporti la stazione più vicina a dove ti trovi.</p>
+<p>L'app usa la posizione per una sola funzione: proporti le stazioni più vicine a dove ti
+trovi, perché tu scelga da quale partire.</p>
 <ul>
   <li>Viene richiesta <strong>solo quando tocchi il pulsante</strong> corrispondente, mai in
   sottofondo e mai all'avvio.</li>
@@ -172,6 +233,10 @@ saperlo.</p>
   di localizzazione di Google Play Services presenti sul dispositivo.</li>
   <li>Le coordinate vengono inviate a Trenitalia (<code>app.lefrecce.it</code>), che è chi dispone
   dell'elenco geolocalizzato delle stazioni: l'app da sola non saprebbe rispondere.</li>
+  <li>Quel servizio sa rispondere con <strong>una</strong> stazione per volta. Per proportene tre
+  l'app gli fa una dozzina di domande: la prima con la tua posizione, le altre con punti spostati
+  di qualche chilometro attorno — punti calcolati, dove non ti trovi. Vanno tutte allo stesso
+  destinatario e partono tutte da quel singolo tocco sul pulsante.</li>
   <li>Le coordinate non vengono salvate dall'app, né conservate, né inviate a nessun altro. Servono
   per quella singola domanda e vengono dimenticate.</li>
 </ul>
@@ -222,8 +287,11 @@ della versione corrispondente, e cambierà la data di ultimo aggiornamento in ci
 delle revisioni è consultabile nella storia del repository.</p>
 
 <footer>
-  ZawardoTreni · applicazione indipendente, non affiliata né approvata da Trenitalia, RFI, Trenord o
-  Italo NTV. I marchi citati appartengono ai rispettivi titolari.
+  ZawardoTreni · applicazione indipendente, non affiliata né approvata da Trenitalia, RFI, Trenord,
+  Italo NTV, Ferrotramviaria, SSIF, FART, TILO, FFS/SBB, EAV o ARST. I marchi citati appartengono ai rispettivi
+  titolari. Le coordinate delle fermate di Ferrotramviaria provengono da OpenStreetMap, © i suoi
+  contributori, disponibili con licenza ODbL. Gli orari EAV e ARST provengono dai rispettivi GTFS
+  ufficiali, pubblicati in Italian Open Data Licence.
 </footer>
 
 </main>

@@ -1,0 +1,203 @@
+package it.zawardo.treni.data.repository
+
+import it.zawardo.treni.data.mapper.ROME
+import it.zawardo.treni.data.remote.arst.ArstOrario
+import it.zawardo.treni.data.remote.StationMatching
+import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.TrainRef
+import it.zawardo.treni.domain.model.TrainState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.time.LocalDate
+
+/**
+ * ARST: le quattro ferrovie a scartamento ridotto della Sardegna.
+ *
+ * Monserrato - Mandas - Isili, Macomer - Nuoro, Sassari - Alghero,
+ * Sassari - Sorso. Prima di questa classe la Sardegna interna nell'app non
+ * c'era: Mandas, Isili, Sorso, Bortigali e gli altri non hanno un codice RFI
+ * perche' sulla rete nazionale non hanno stazione.
+ *
+ * ## E' diversa da tutte le altre sorgenti
+ *
+ * Le altre cinque rispondono in tempo reale e non sanno niente di domani.
+ * Questa fa l'opposto: **non ha tempo reale affatto** — ARST non pubblica ne'
+ * tabelloni ne' API — ma ha l'orario, quindi sa rispondere anche per i giorni
+ * futuri, finche' il feed li copre.
+ *
+ * Da qui due conseguenze che il resto dell'app deve rispettare:
+ *
+ * - ogni riga esce con [BoardEntry.realtime] falso. Il ritardo a zero non vuol
+ *   dire "in orario", vuol dire "non lo sa nessuno", e chi mostra la riga deve
+ *   dirlo invece di far sembrare una previsione una misura.
+ * - fuori dalla copertura dell'orario non si risponde vuoto per sbaglio ma per
+ *   scelta, ed e' la stessa cosa: oltre l'ultimo giorno del feed non si sa
+ *   niente.
+ *
+ * ## L'orario sta in un file, non in rete
+ *
+ * Viene da [ArstOrario], che lo legge dal file scaricato se c'e' e altrimenti
+ * da quello imbarcato nell'APK. Nessuna chiamata di rete parte da qui: quella
+ * la fa, di rado e solo se ARST e' accesa nelle impostazioni,
+ * [it.zawardo.treni.data.remote.gtfs.AggiornamentoOrari].
+ */
+class ArstRepository(
+    /** Dove l'aggiornamento deposita l'orario. Null = si usa solo l'imbarcato. */
+    private val cartella: File? = null,
+) {
+
+    /**
+     * L'orario, letto una volta e tenuto.
+     *
+     * Sono venti KB compressi e poche centinaia di oggetti: rileggerlo a ogni
+     * tabellone sarebbe uno spreco, tenerlo non pesa. [ricarica] serve a
+     * riprenderlo dopo un aggiornamento, che e' l'unico momento in cui cambia.
+     */
+    @Volatile
+    private var orario: ArstOrario? = null
+    private val lucchetto = Any()
+
+    private fun orario(): ArstOrario? {
+        orario?.let { return it }
+        return synchronized(lucchetto) {
+            orario ?: ArstOrario.carica(cartella)?.also { orario = it }
+        }
+    }
+
+    /** Rilegge l'orario da disco: da chiamare dopo un aggiornamento riuscito. */
+    fun ricarica() {
+        synchronized(lucchetto) { orario = null }
+    }
+
+    /** Vero se il codice indirizza una stazione ARST. */
+    fun covers(stationCode: String?): Boolean = idStazione(stationCode) != null
+
+    /** Il nome della stazione dietro un codice, per le intestazioni. */
+    fun stationName(stationCode: String?): String? =
+        idStazione(stationCode)?.let { orario()?.stazione(it)?.nome }
+
+    /** La data piu' lontana su cui l'orario abbia qualcosa da dire. */
+    fun ultimoGiorno(): LocalDate? = orario()?.ultimoGiorno
+
+    /** Quando e' stato generato l'orario che si sta usando. */
+    fun generato(): LocalDate? = orario()?.generato
+
+    /**
+     * Partenze o arrivi di una stazione ARST, nel modello del tabellone.
+     *
+     * A differenza delle altre sorgenti accetta **qualunque data coperta
+     * dall'orario**, non solo oggi: e' l'unica che un orario ce l'abbia.
+     * Oltre la copertura risponde vuoto, perche' oltre non si sa nulla — non
+     * perche' non ci siano treni.
+     */
+    suspend fun board(
+        stationCode: String,
+        arrivals: Boolean = false,
+        date: LocalDate = LocalDate.now(ROME),
+    ): List<BoardEntry> = withContext(Dispatchers.IO) {
+        val id = idStazione(stationCode) ?: return@withContext emptyList()
+        val o = orario() ?: return@withContext emptyList()
+        if (!o.copre(date)) return@withContext emptyList()
+
+        val millis = date.atStartOfDay(ROME).toInstant().toEpochMilli()
+        o.passaggi(id, date, partenze = !arrivals).map { p ->
+            val minuti = if (arrivals) p.fermata.arrivo else p.fermata.partenza
+            BoardEntry(
+                trainRef = TrainRef(
+                    number = p.corsa.id,
+                    // ARST non ha un codice d'origine interrogabile: non c'e'
+                    // nessun servizio a cui chiedere l'andamento della corsa.
+                    originCode = "",
+                    departureDateMillis = millis,
+                ),
+                label = "Treno " + p.corsa.id,
+                category = o.linee[p.corsa.linea] ?: p.corsa.linea,
+                direction = if (arrivals) p.origine else p.corsa.destinazione,
+                scheduledTime = orologio(minuti),
+                /*
+                 * Zero perche' il modello vuole un intero, non perche' il treno
+                 * sia in orario: [BoardEntry.realtime] falso dice che quello
+                 * zero non e' una misura. Chi lo mostrasse come "puntuale"
+                 * starebbe inventando.
+                 */
+                delayMinutes = 0,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                state = TrainState.REGULAR,
+                inStation = false,
+                realtime = false,
+            )
+        }
+    }
+
+    /**
+     * La stazione ARST piu' vicina a un punto, se e' abbastanza vicina da avere
+     * senso proporla.
+     *
+     * Venticinque chilometri, piu' larghi dei dieci delle reti urbane: in
+     * Sardegna interna le stazioni sono rade e i paesi distanti, e un limite
+     * stretto lascerebbe senza risposta chi ha comunque quella come unica
+     * ferrovia a disposizione.
+     */
+    fun nearest(latitude: Double, longitude: Double, maxMeters: Double = 25_000.0): Station? {
+        val o = orario() ?: return null
+        return o.stazioni.asSequence()
+            .map { it to StationMatching.distanzaMetri(latitude, longitude, it.lat, it.lon) }
+            .minByOrNull { it.second }
+            ?.takeIf { it.second <= maxMeters }
+            ?.first
+            ?.toStation()
+    }
+
+    /** Le stazioni che corrispondono a quello che si sta digitando. */
+    fun search(query: String, limit: Int = 12): List<Station> {
+        val o = orario() ?: return emptyList()
+        return StationMatching.cerca(o.stazioni, query, limit) { it.nome }.map { it.toStation() }
+    }
+
+    /** Tutte le stazioni ARST. */
+    fun allStations(): List<Station> = orario()?.stazioni?.map { it.toStation() } ?: emptyList()
+
+    /** Minuti dalla mezzanotte in `HH:mm`, riportando oltre le 24 nel giorno dopo. */
+    private fun orologio(minuti: Int): String =
+        "%02d:%02d".format((minuti / 60) % 24, minuti % 60)
+
+    /** L'id numerico dietro un codice sintetico, null se non e' ARST. */
+    private fun idStazione(codice: String?): Int? {
+        if (codice == null || !codice.startsWith(PREFIX)) return null
+        val id = codice.removePrefix(PREFIX).toIntOrNull() ?: return null
+        return if (orario()?.stazione(id) != null) id else null
+    }
+
+    private companion object {
+        /** Prefisso dei codici sintetici. Nessun codice RFI comincia cosi'. */
+        const val PREFIX = "ARST"
+
+        /**
+         * Base degli id sintetici.
+         *
+         * Quarta fascia dopo EAV (9,0 · 10⁹), Ferrotramviaria (9,1 · 10⁹) e
+         * Vigezzina (9,2 · 10⁹). Gli id ARST arrivano a cinque cifre e senza una
+         * fascia propria sconfinerebbero nelle altre.
+         */
+        const val LOCATION_ID_BASE = 9_300_000_000L
+    }
+
+    /**
+     * La stazione nel modello comune.
+     *
+     * [Station.rfiCode] porta il codice sintetico, come per le altre reti fuori
+     * da RFI: quel campo e' "il codice con cui si chiede il tabellone", e qui
+     * quello e'. [Station.trackable] resta vero perche' un tabellone c'e' — e'
+     * fatto di orari previsti, e la riga lo dichiara.
+     */
+    private fun ArstOrario.Stazione.toStation() = Station(
+        rfiCode = PREFIX + id,
+        locationId = LOCATION_ID_BASE + id,
+        name = nome,
+        latitude = lat,
+        longitude = lon,
+    )
+}

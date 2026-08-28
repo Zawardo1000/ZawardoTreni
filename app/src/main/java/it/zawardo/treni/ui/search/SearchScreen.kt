@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,6 +67,7 @@ import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
@@ -81,6 +82,16 @@ import java.util.Locale
 
 private val DATE_FMT = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
+
+/**
+ * Dove sta il pulsante inverti dentro la colonna dei due campi.
+ *
+ * Meta' dell'altezza dei due campi (56 dp l'uno, 8 dp di stacco) meno mezzo
+ * pulsante: 60 - 24. Serve un numero perche' con la lista dei suggerimenti
+ * aperta il contenitore diventa alto quanto la lista, e "al centro" non
+ * significherebbe piu' "fra i due campi".
+ */
+private val SWAP_TOP = 36.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,7 +125,7 @@ fun SearchScreen(
                 if (loc == null) {
                     vm.reportLocationProblem("Posizione non disponibile. Il GPS è attivo?")
                 } else {
-                    vm.useNearestAsDeparture(loc.latitude, loc.longitude)
+                    vm.proposeNearest(loc.latitude, loc.longitude)
                 }
             }
         }
@@ -147,6 +158,13 @@ fun SearchScreen(
                 onQueryChange = vm::onQueryChange,
                 onFieldFocused = vm::onFieldFocused,
                 onClearField = vm::clearField,
+                onPickStation = { field, station ->
+                    vm.select(field, station)
+                    // Scelta la stazione, il campo ha finito: via cursore e tastiera,
+                    // altrimenti la tastiera copre il resto della schermata.
+                    keyboard?.hide()
+                    focus.clearFocus(force = true)
+                },
                 onSwap = {
                     keyboard?.hide()
                     focus.clearFocus(force = true)
@@ -181,19 +199,9 @@ fun SearchScreen(
                 },
             )
 
-            if (state.activeField != null && (state.suggestions.isNotEmpty() || state.loadingSuggestions)) {
-                SuggestionList(
-                    suggestions = state.suggestions,
-                    loading = state.loadingSuggestions,
-                    onPick = { station ->
-                        vm.select(state.activeField!!, station)
-                        // Scelta la stazione, il campo ha finito: via cursore e tastiera,
-                        // altrimenti la tastiera copre il resto della schermata.
-                        keyboard?.hide()
-                        focus.clearFocus(force = true)
-                    },
-                )
-            } else {
+            // Mentre si sceglie una stazione la scheda occupa tutto: cronologia
+            // e salvate sarebbero una seconda lista in competizione con la prima.
+            if (!state.choosing) {
                 HistoryAndSaved(
                     tab = tab,
                     onTabChange = { tab = it },
@@ -252,13 +260,22 @@ private fun SourcesDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "Spegni le reti che non ti servono: la ricerca interroga meno " +
-                        "servizi ed e' piu' veloce.",
+                    "La rete nazionale c'e' sempre. Qui aggiungi le reti locali " +
+                        "che ti servono: ognuna in piu' e' qualche richiesta in " +
+                        "piu' a ogni ricerca.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Box(Modifier.size(8.dp))
-                DataSource.entries.forEach { fonte ->
+                /*
+                 * Trenitalia non compare, ed e' voluto.
+                 *
+                 * Le Frecce e ViaggiaTreno coprono quasi tutti i treni italiani:
+                 * spegnerle non renderebbe la ricerca piu' veloce, la
+                 * renderebbe vuota. Un interruttore il cui unico esito e'
+                 * rompere l'app non e' una scelta da offrire.
+                 */
+                DataSource.entries.filter { it.opzionale }.forEach { fonte ->
                     val acceso = fonte in enabled
                     Row(
                         Modifier
@@ -303,6 +320,7 @@ private fun SearchCard(
     onQueryChange: (SearchField, String) -> Unit,
     onFieldFocused: (SearchField) -> Unit,
     onClearField: (SearchField) -> Unit,
+    onPickStation: (SearchField, Station) -> Unit,
     onSwap: () -> Unit,
     onPickDate: () -> Unit,
     onPickTime: () -> Unit,
@@ -319,8 +337,8 @@ private fun SearchCard(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-            // I due campi e il pulsante inverti condividono la stessa riga:
-            // il pulsante sta al centro verticale, tra partenza e arrivo.
+            // I due campi e il pulsante inverti condividono la stessa riga: il
+            // pulsante sta in mezzo, fra partenza e arrivo.
             Box(Modifier.fillMaxWidth()) {
                 Column(
                     Modifier
@@ -339,6 +357,20 @@ private fun SearchCard(
                         onUseLocation = onUseLocation,
                         locating = state.locating,
                     )
+                    /*
+                     * La lista sta attaccata al campo che si sta compilando, non
+                     * in fondo alla schermata: li' finiva sotto la tastiera, e si
+                     * sceglieva alla cieca fra le due righe che restavano fuori.
+                     */
+                    if (state.choosing && state.activeField == SearchField.FROM) {
+                        StationPicker(
+                            suggestions = state.suggestions,
+                            nearby = state.nearby,
+                            loading = state.loadingSuggestions,
+                            untrackedNote = "Senza dati in tempo reale",
+                            onPick = { onPickStation(SearchField.FROM, it) },
+                        )
+                    }
                     StationField(
                         label = "Arrivo",
                         value = state.toQuery,
@@ -346,11 +378,24 @@ private fun SearchCard(
                         onFocused = { onFieldFocused(SearchField.TO) },
                         onClear = { onClearField(SearchField.TO) },
                     )
+                    if (state.choosing && state.activeField == SearchField.TO) {
+                        StationPicker(
+                            suggestions = state.suggestions,
+                            // Il mirino sta solo sulla partenza: sull'arrivo non
+                            // c'e' mai niente di vicino da proporre.
+                            nearby = emptyList(),
+                            loading = state.loadingSuggestions,
+                            untrackedNote = "Senza dati in tempo reale",
+                            onPick = { onPickStation(SearchField.TO, it) },
+                        )
+                    }
                 }
+                // Ancorato in alto e non al centro: vedi [SWAP_TOP].
                 FilledIconButton(
                     onClick = onSwap,
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
+                        .align(Alignment.TopEnd)
+                        .offset(y = SWAP_TOP)
                         .size(48.dp),
                     shape = CircleShape,
                 ) {
@@ -358,95 +403,131 @@ private fun SearchCard(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedButton(onClick = onPickDate, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp))
-                    Text(
-                        "  " + state.dateTime.format(DATE_FMT),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                OutlinedButton(onClick = onPickTime) {
-                    Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp))
-                    Text("  " + state.dateTime.format(TIME_FMT))
-                }
-                TextButton(onClick = onNow) { Text("Adesso") }
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(
-                    onClick = onSearch,
-                    enabled = state.canSearch,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
-                    Text("  Cerca")
-                }
-                // Bottone con testo, non solo icona: da icona sola non si capiva
-                // che la ricerca si potesse salvare.
-                OutlinedButton(
-                    onClick = onSave,
-                    enabled = state.canSearch && !state.alreadySaved,
-                ) {
-                    Icon(
-                        if (state.alreadySaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(if (state.alreadySaved) "  Salvata" else "  Salva")
-                }
-            }
-
-            HorizontalDivider()
-
-            // I due interruttori condividono la stessa forma: sono entrambi
-            // preferenze che restano, non azioni della singola ricerca.
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Nasconde le soluzioni con cambi",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Ricorda ultima ricerca", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (state.rememberLast) {
-                            "All'apertura ripropone le stazioni, con l'orario di adesso"
-                        } else {
-                            "All'apertura i campi restano vuoti"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = state.rememberLast, onCheckedChange = onToggleRemember)
+            // Con la lista aperta il resto della scheda sparisce: e' lo spazio
+            // che serve ai suggerimenti per stare sopra la tastiera.
+            if (!state.choosing) {
+                SearchOptions(
+                    state = state,
+                    onPickDate = onPickDate,
+                    onPickTime = onPickTime,
+                    onNow = onNow,
+                    onToggleRemember = onToggleRemember,
+                    onToggleDirectOnly = onToggleDirectOnly,
+                    onSave = onSave,
+                    onSearch = onSearch,
+                )
             }
 
             state.error?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
+        }
+    }
+}
+
+/**
+ * La parte bassa della scheda: quando partire, e con quali preferenze.
+ *
+ * Sta a parte perche' mentre si sceglie una stazione non viene mostrata: un
+ * `if` attorno a novanta righe dentro [SearchCard] le avrebbe solo spinte in
+ * un rientro in piu'.
+ */
+@Composable
+private fun SearchOptions(
+    state: SearchUiState,
+    onPickDate: () -> Unit,
+    onPickTime: () -> Unit,
+    onNow: () -> Unit,
+    onToggleRemember: (Boolean) -> Unit,
+    onToggleDirectOnly: (Boolean) -> Unit,
+    onSave: () -> Unit,
+    onSearch: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onPickDate, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp))
+                Text(
+                    "  " + state.dateTime.format(DATE_FMT),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            OutlinedButton(onClick = onPickTime) {
+                Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp))
+                Text("  " + state.dateTime.format(TIME_FMT))
+            }
+            TextButton(onClick = onNow) { Text("Adesso") }
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Button(
+                onClick = onSearch,
+                enabled = state.canSearch,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
+                Text("  Cerca")
+            }
+            // Bottone con testo, non solo icona: da icona sola non si capiva
+            // che la ricerca si potesse salvare.
+            OutlinedButton(
+                onClick = onSave,
+                enabled = state.canSearch && !state.alreadySaved,
+            ) {
+                Icon(
+                    if (state.alreadySaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(if (state.alreadySaved) "  Salvata" else "  Salva")
+            }
+        }
+
+        HorizontalDivider()
+
+        // I due interruttori condividono la stessa forma: sono entrambi
+        // preferenze che restano, non azioni della singola ricerca.
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Nasconde le soluzioni con cambi",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Ricorda ultima ricerca", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (state.rememberLast) {
+                        "All'apertura ripropone le stazioni, con l'orario di adesso"
+                    } else {
+                        "All'apertura i campi restano vuoti"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = state.rememberLast, onCheckedChange = onToggleRemember)
         }
     }
 }
@@ -493,45 +574,6 @@ private fun StationField(
             }
         },
     )
-}
-
-@Composable
-private fun SuggestionList(
-    suggestions: List<Station>,
-    loading: Boolean,
-    onPick: (Station) -> Unit,
-) {
-    Card(Modifier.fillMaxWidth()) {
-        if (loading && suggestions.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.size(28.dp))
-            }
-        }
-        LazyColumn(Modifier.heightIn(max = 340.dp)) {
-            items(suggestions, key = { it.locationId }) { s ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onPick(s) }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.name, style = MaterialTheme.typography.bodyLarge)
-                        if (!s.trackable) {
-                            // Senza codice RFI il treno non è tracciabile: meglio dirlo prima.
-                            Text(
-                                "Senza dati in tempo reale",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-            }
-        }
-    }
 }
 
 @Composable

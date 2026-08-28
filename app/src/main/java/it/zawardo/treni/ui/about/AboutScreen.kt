@@ -157,7 +157,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Section(
                 icon = Icons.Outlined.Hub,
                 title = "Da dove arrivano i dati",
-                body = "Quattro sorgenti, perché nessuna da sola basta.\n\n" +
+                body = "Più sorgenti, perché nessuna da sola basta.\n\n" +
                     "• Le Frecce — orari e itinerari sulla rete nazionale.\n\n" +
                     "• ViaggiaTreno (RFI) — ritardi, fermate, binari e posizione " +
                     "dei treni in tempo reale.\n\n" +
@@ -168,8 +168,30 @@ fun AboutScreen(onBack: () -> Unit) {
                     "• Italo — le corse NTV, che nessuna delle altre tre pubblica: " +
                     "su ViaggiaTreno un treno Italo non compare affatto. Dal loro " +
                     "tabellone arrivano ritardo e binario.\n\n" +
+                    "• Ferrotramviaria — la Bari–Barletta e il collegamento con " +
+                    "l'aeroporto di Bari. Bitonto, Terlizzi, Ruvo, Corato e Andria " +
+                    "sulla rete nazionale non hanno stazione: quei treni non " +
+                    "esistono in nessuna delle altre fonti.\n\n" +
+                    "• Orario dei trasporti svizzeri — la Vigezzina–Centovalli, " +
+                    "Domodossola–Locarno. Non è rete RFI, ma la Svizzera la " +
+                    "pubblica per intero, fermate italiane comprese: è l'unico " +
+                    "modo per avere la Val Vigezzo in tempo reale.\n\n" +
+                    "• ARST — le quattro ferrovie sarde a scartamento ridotto: " +
+                    "Monserrato–Mandas–Isili, Macomer–Nuoro, Sassari–Alghero e " +
+                    "Sassari–Sorso. È l'unica sorgente senza tempo reale: ARST " +
+                    "non pubblica tabelloni, quindi di quelle corse si conosce " +
+                    "l'orario previsto e mai il ritardo. In compenso è l'unica " +
+                    "che sappia rispondere anche per i giorni futuri.\n\n" +
                     "Sono servizi pubblici ma non documentati: possono cambiare " +
-                    "senza preavviso.",
+                    "senza preavviso.\n\n" +
+                    "Gli orari di EAV e ARST viaggiano dentro l'app e si " +
+                    "riscaricano da soli quando superano i tre mesi, ma solo se " +
+                    "quella rete è accesa nelle impostazioni. Mentre succede " +
+                    "l'app lo dice: il file ARST pesa una ventina di megabyte, e " +
+                    "non è traffico da consumarti alle spalle.\n\n" +
+                    "Le coordinate delle fermate Ferrotramviaria vengono da " +
+                    "OpenStreetMap, © i suoi contributori, con licenza ODbL: " +
+                    "l'orario aperto dell'azienda non è più raggiungibile.",
             )
 
             SourceLink(

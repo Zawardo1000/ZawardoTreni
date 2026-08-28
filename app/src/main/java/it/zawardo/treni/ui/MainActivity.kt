@@ -10,18 +10,30 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.DepartureBoard
 import androidx.compose.material.icons.outlined.Train
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
@@ -30,6 +42,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.data.remote.gtfs.AggiornamentoOrari
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.ui.about.AboutScreen
 import it.zawardo.treni.ui.board.BoardScreen
@@ -180,6 +194,15 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
         }
     }
 
+    /*
+     * Il controllo degli orari parte qui, una volta per sessione.
+     *
+     * Sorveglia le reti accese, quindi copre da solo i due momenti che contano:
+     * l'avvio dell'app, quando il flusso emette l'insieme corrente, e
+     * l'accensione di una rete dalle impostazioni, che ne emette un altro.
+     */
+    LaunchedEffect(Unit) { ServiceLocator.sorvegliaOrari() }
+
     val tabs = listOf(
         TabItem(SearchRoute, SearchRoute::class, "Tratta", Icons.Filled.Search),
         TabItem(TrainSearchRoute, TrainSearchRoute::class, "Treno", Icons.Outlined.Train),
@@ -208,12 +231,15 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
             }
         },
     ) { inner ->
-        NavHost(
-            navController = nav,
-            startDestination = SearchRoute,
+        androidx.compose.foundation.layout.Column(
             modifier = Modifier.padding(
                 bottom = if (showBar) inner.calculateBottomPadding() else 0.dp,
             ),
+        ) {
+        AvvisoAggiornamentoOrari()
+        NavHost(
+            navController = nav,
+            startDestination = SearchRoute,
         ) {
             composable<SearchRoute> {
                 SearchScreen(
@@ -290,6 +316,54 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     onOpenStation = { rfi, name -> nav.navigate(StationBoardRoute(rfi, name)) },
                 )
             }
+        }
+        }
+    }
+}
+
+/**
+ * L'avviso che un orario si sta scaricando, con dentro il nome della rete.
+ *
+ * Non e' un vezzo. Aggiornare l'orario ARST vuol dire tirare giu' 19,7 MB di
+ * archivio e ricostruirlo: farlo di nascosto, sulla connessione dati di
+ * qualcun altro, e' esattamente il genere di cosa che un'app non deve
+ * permettersi. Chi sta guardando lo schermo deve poter vedere che sta
+ * succedendo e per quale rete — anche solo per sapere a cosa attribuire il
+ * traffico.
+ *
+ * Compare solo mentre il lavoro e' in corso e sparisce da solo: non serve
+ * chiuderlo, e non c'e' niente da fare oltre ad aspettare. Un aggiornamento
+ * fallito non produce allarmi, perche' resta valido l'orario di prima.
+ */
+@Composable
+private fun AvvisoAggiornamentoOrari() {
+    val stato by ServiceLocator.aggiornamentoOrari.stato.collectAsState()
+    val inCorso = stato as? AggiornamentoOrari.Stato.InCorso ?: return
+
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Aggiorno l'orario di ${inCorso.sorgente.label}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Scarico il file degli orari e lo preparo. Puoi continuare a usare l'app.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

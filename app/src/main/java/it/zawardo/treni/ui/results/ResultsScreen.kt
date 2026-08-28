@@ -319,6 +319,27 @@ private fun JourneyCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    /*
+                     * Il prezzo compare solo quando c'e'.
+                     *
+                     * Lo pubblica il solo BFF Le Frecce, e nemmeno sempre: sulla
+                     * stessa tratta una ricerca su cinque torna senza. Riempire
+                     * il vuoto con un trattino o con "n.d." darebbe l'idea di un
+                     * dato mancante per colpa dell'app; non scrivere niente e'
+                     * piu' onesto e piu' pulito.
+                     */
+                    j.price?.let { p ->
+                        Text(
+                            if (p.saleable) p.formatted else "${p.formatted} · esaurito",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (p.saleable) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
             }
 

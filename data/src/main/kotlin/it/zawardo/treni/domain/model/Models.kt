@@ -1,8 +1,10 @@
 package it.zawardo.treni.domain.model
 
+import java.text.Collator
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.Locale
 
 /**
  * Una stazione.
@@ -19,6 +21,26 @@ data class Station(
     val longitude: Double = 0.0,
 ) {
     val trackable: Boolean get() = rfiCode != null
+}
+
+/** Una stazione vicina a un punto, con la distanza in linea d'aria in chilometri. */
+data class NearbyStation(
+    val station: Station,
+    val distanceKm: Double,
+)
+
+/**
+ * Ordinamento alfabetico dei nomi di stazione.
+ *
+ * Il [Collator] italiano serve davvero: i nomi arrivano dalle API come capita,
+ * alcuni tutti maiuscoli ("PASCAROSA") e altri accentati ("Chatillon"), e un
+ * confronto fra stringhe li spedirebbe in blocchi separati, lontani dalla lettera
+ * a cui l'utente li cerca. Con [Collator.PRIMARY] maiuscole e accenti non contano.
+ */
+fun List<Station>.sortedByName(): List<Station> = sortedWith(compareBy(STATION_COLLATOR) { it.name })
+
+private val STATION_COLLATOR: Collator = Collator.getInstance(Locale.ITALIAN).apply {
+    strength = Collator.PRIMARY
 }
 
 /**
@@ -51,12 +73,51 @@ data class Journey(
      */
     val partiallyCancelled: Boolean = false,
     val delayMinutes: Int? = null,
+    /**
+     * Il prezzo piu' basso di questa soluzione, quando la sorgente lo pubblica.
+     *
+     * Null non vuol dire gratis: vuol dire **non lo so**. Lo espone solo il BFF
+     * Le Frecce, che vende i biglietti; le altre sorgenti sono servizi di
+     * informazione e un prezzo non lo conoscono affatto. Trattare null come
+     * zero, o non distinguerlo da "esaurito", darebbe per certo qualcosa che
+     * nessuno ha detto.
+     */
+    val price: Price? = null,
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
     val isDirect: Boolean get() = legs.size <= 1
 
     /** Se nessuna tratta e' un treno, non c'e' alcun tempo reale da mostrare. */
     val hasTrain: Boolean get() = legs.any { it.isTrain }
+}
+
+/**
+ * Il prezzo di una soluzione, con quel tanto di contesto che serve a non mentire.
+ *
+ * L'app **non vende biglietti** e non ha alcun rapporto commerciale con i
+ * gestori: questa e' l'informazione che il servizio pubblica in quel momento,
+ * per una persona adulta senza riduzioni, ed e' destinata a orientare, non a
+ * impegnare nessuno. Il prezzo di un treno cambia con la disponibilita' anche
+ * di ora in ora.
+ *
+ * [amount] e' tenuto come stringa e non come numero apposta: viene da un
+ * decimale che ci e' stato dato gia' formattato, e passarlo per un `Double`
+ * significherebbe prendersi gli errori di arrotondamento del binario in cambio
+ * di nessun vantaggio, dato che qui non si fa un solo calcolo.
+ */
+data class Price(
+    /** Decimale come lo manda il servizio: `"52.00"`. */
+    val amount: String,
+    val currency: String = "EUR",
+    /** Falso quando quel prezzo esiste ma il biglietto non e' acquistabile ora. */
+    val saleable: Boolean = true,
+) {
+    /** `52,00 €`, con la virgola che si usa scrivendo in italiano. */
+    val formatted: String
+        get() = amount.replace('.', ',') + " " + when (currency.uppercase()) {
+            "EUR" -> "€"
+            else -> currency
+        }
 }
 
 /**
@@ -233,4 +294,18 @@ data class BoardEntry(
     val actualPlatform: String?,
     val state: TrainState,
     val inStation: Boolean,
+    /**
+     * Falso quando la riga viene da un orario e non da un tabellone.
+     *
+     * Non e' una sfumatura. Il resto del modello dice il ritardo con un intero,
+     * e zero significa "in orario": una corsa di cui **nessuno sa niente**
+     * arriverebbe qui con zero e verrebbe letta come confermata puntuale. Su
+     * ARST, che un tempo reale non lo pubblica affatto, sarebbe la totalita'
+     * delle righe.
+     *
+     * Chi mostra la riga deve dirlo. Il ritardo, il binario e la soppressione,
+     * quando questo e' falso, non sono "assenti": sono *inconoscibili*, ed e'
+     * un'informazione diversa che l'utente ha diritto di distinguere.
+     */
+    val realtime: Boolean = true,
 )

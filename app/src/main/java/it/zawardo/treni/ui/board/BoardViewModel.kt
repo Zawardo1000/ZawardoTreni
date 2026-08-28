@@ -5,10 +5,12 @@ import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.minutesFrom
+import it.zawardo.treni.domain.model.sortedByName
 import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.async
@@ -36,6 +38,8 @@ data class BoardUiState(
     val station: Station? = null,
     val query: String = "",
     val suggestions: List<Station> = emptyList(),
+    /** Le stazioni proposte dal mirino: si mostrano al posto dei suggerimenti. */
+    val nearby: List<NearbyStation> = emptyList(),
     /** Il campo stazione resta sempre visibile: si cambia senza tornare indietro. */
     val suggestionsOpen: Boolean = false,
     val mode: BoardMode = BoardMode.DEPARTURES,
@@ -56,6 +60,10 @@ class BoardViewModel : ViewModel() {
     private val trains = ServiceLocator.trainStatusRepository
     private val trenord = ServiceLocator.trenordRepository
     private val italo = ServiceLocator.italoRepository
+    private val fnb = ServiceLocator.fnbRepository
+    private val svizzera = ServiceLocator.svizzeraRepository
+    private val eav = ServiceLocator.eavRepository
+    private val arst = ServiceLocator.arstRepository
     private val store = ServiceLocator.searchStore
     private val preferite = ServiceLocator.stationFavorites
 
@@ -132,7 +140,7 @@ class BoardViewModel : ViewModel() {
     }
 
     fun onQueryChange(text: String) {
-        _state.update { it.copy(query = text, suggestionsOpen = true) }
+        _state.update { it.copy(query = text, suggestionsOpen = true, nearby = emptyList()) }
         queries.value = text
     }
 
@@ -141,12 +149,29 @@ class BoardViewModel : ViewModel() {
             _state.update { it.copy(suggestions = emptyList()) }
             return
         }
+        /*
+         * Le reti fuori da RFI si cercano in locale.
+         *
+         * Il loro elenco di fermate viaggia dentro l'app, quindi la ricerca non
+         * costa una chiamata e risponde anche senza rete. Vanno unite agli
+         * altri suggerimenti e non mostrate a parte: chi scrive "Andria" vuole
+         * Andria, e non deve sapere di chi sia la ferrovia per trovarla.
+         */
+        val locali = fnb.search(query) + svizzera.search(query) + eav.search(query) +
+            arst.search(query)
+
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
-        _state.update { it.copy(suggestions = offline) }
+        _state.update {
+            it.copy(suggestions = (locali + offline).distinctBy { s -> s.locationId }.sortedByName())
+        }
         val remote = runCatching { stationsRepo.search(query) }.getOrNull() ?: return
         runCatching { store.cacheAll(remote) }
         _state.update {
-            it.copy(suggestions = (remote + offline).distinctBy { s -> s.locationId })
+            it.copy(
+                suggestions = (locali + remote + offline)
+                    .distinctBy { s -> s.locationId }
+                    .sortedByName(),
+            )
         }
     }
 
@@ -159,6 +184,7 @@ class BoardViewModel : ViewModel() {
                     query = station.name,
                     suggestionsOpen = false,
                     suggestions = emptyList(),
+                    nearby = emptyList(),
                     entries = emptyList(),
                     message = "Per questa fermata non esiste un tabellone in tempo reale.",
                 )
@@ -171,6 +197,7 @@ class BoardViewModel : ViewModel() {
                 query = station.name,
                 suggestionsOpen = false,
                 suggestions = emptyList(),
+                nearby = emptyList(),
             )
         }
         viewModelScope.launch { runCatching { store.cache(station) } }
@@ -179,11 +206,15 @@ class BoardViewModel : ViewModel() {
 
     /** Svuota il campo per digitare un'altra stazione, senza perdere il tabellone. */
     fun clearQuery() {
-        _state.update { it.copy(query = "", suggestions = emptyList(), suggestionsOpen = true) }
+        _state.update {
+            it.copy(query = "", suggestions = emptyList(), nearby = emptyList(), suggestionsOpen = true)
+        }
     }
 
     fun closeSuggestions() {
-        _state.update { it.copy(suggestionsOpen = false, suggestions = emptyList()) }
+        _state.update {
+            it.copy(suggestionsOpen = false, suggestions = emptyList(), nearby = emptyList())
+        }
     }
 
     fun toggleFavorite() {
@@ -297,18 +328,40 @@ class BoardViewModel : ViewModel() {
     }
 
     /**
-     * Il tabellone ha una sola sorgente: ViaggiaTreno.
+     * Le sorgenti del tabellone, interrogate insieme.
      *
-     * Copre l'intera rete RFI, comprese le stazioni del Passante milanese, che
-     * popola appena la linea circola. Una seconda sorgente era stata aggiunta
-     * durante i lavori credendo a una lacuna permanente, e si e' rivelata
-     * ridondante.
+     * ViaggiaTreno copre l'intera rete RFI, comprese le stazioni del Passante
+     * milanese. Le altre tre esistono perche' quella rete non e' tutta la
+     * ferrovia italiana: Italo circola su RFI ma non viene pubblicato,
+     * Ferrotramviaria e la Vigezzina non ci circolano affatto.
+     *
+     * Ognuna sa dire da sola se la stazione la riguarda, e fuori dal proprio
+     * territorio non tocca la rete: a Roma Termini le tre aggiunte costano zero
+     * chiamate.
      */
     private suspend fun fetch(code: String, at: ZonedDateTime): List<BoardEntry> = coroutineScope {
         val arrivi = _state.value.mode == BoardMode.ARRIVALS
 
+        /*
+         * Sulle reti che non sono RFI non si chiede a ViaggiaTreno.
+         *
+         * Non e' solo una chiamata sprecata: quei codici — `FNB1110`, `VIG…` —
+         * non sono codici RFI, e mandarli a ViaggiaTreno significa interrogarlo
+         * per una stazione che per lui non esiste.
+         */
+        /*
+         * Per la Svizzera si guarda `soloSvizzera`, non `covers`.
+         *
+         * Chiasso e Bellinzona hanno anche un codice RFI: la stazione e' una
+         * sola e il suo tabellone si compone di due fonti. Trattarle come fuori
+         * rete spegnerebbe ViaggiaTreno proprio dove ha qualcosa da dire — a
+         * Chiasso quattordici corse verso l'Italia.
+         */
+        val fuoriRete = fnb.covers(code) || svizzera.soloSvizzera(code) || eav.covers(code) ||
+            arst.covers(code)
+
         val rfi = async {
-            if (DataSource.TRENITALIA !in sources) emptyList()
+            if (DataSource.TRENITALIA !in sources || fuoriRete) emptyList()
             else if (arrivi) trains.arrivals(code, at) else trains.departures(code, at)
         }
         /*
@@ -327,8 +380,83 @@ class BoardViewModel : ViewModel() {
             }
         }
 
+        /*
+         * Ferrotramviaria: la Bari - Barletta e il servizio per l'aeroporto.
+         *
+         * Bitonto, Terlizzi, Ruvo, Corato e Andria sulla rete nazionale non
+         * hanno stazione: quei treni non stanno in nessuna delle altre
+         * sorgenti. Fuori dalle sue 25 fermate [FnbRepository.covers] dice di no
+         * e non si chiede niente.
+         */
+        val nordBarese = async {
+            if (DataSource.FNB in sources && fnb.covers(code)) {
+                runCatching { fnb.board(code, arrivi) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
+        /*
+         * La Vigezzina, che sta nell'orario svizzero e non in quello italiano.
+         *
+         * Risponde solo alle partenze: l'orario svizzero, per gli arrivi, non
+         * pubblica l'origine della corsa. Vedi [SvizzeraRepository].
+         */
+        val vigezzina = async {
+            if (DataSource.SVIZZERA in sources && svizzera.covers(code)) {
+                runCatching { svizzera.board(code, arrivi) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
+        /*
+         * EAV: Circumvesuviana, Cumana, Circumflegrea e suburbane napoletane.
+         *
+         * Sorrento, Pompei Scavi ed Ercolano non sono su RFI: quelle corse non
+         * stanno in nessun'altra sorgente. Fuori dalle sue fermate
+         * [EavRepository.covers] dice di no e non si chiede niente.
+         *
+         * Riceve la data come ARST, e per lo stesso motivo: ha un orario oltre
+         * al tabellone, quindi sa rispondere anche per i giorni futuri e per le
+         * stazioni delle altre reti EAV, che un monitor non ce l'hanno. Quelle
+         * righe escono con `realtime = false`. Senza passargliela, il tabellone
+         * di domani mostrava le corse di oggi.
+         */
+        val vesuviana = async {
+            if (DataSource.EAV in sources && eav.covers(code)) {
+                runCatching { eav.board(code, arrivi, at.toLocalDate()) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
+        /*
+         * ARST: le ferrovie sarde, e l'unica sorgente che non sia in tempo reale.
+         *
+         * Non c'e' niente da interrogare — ARST non pubblica tabelloni — quindi
+         * qui non si tocca la rete: si legge l'orario imbarcato. Ne segue che e'
+         * anche l'unica a saper rispondere per un giorno diverso da oggi, ed e'
+         * il motivo per cui riceve la data invece di limitarsi ad "adesso".
+         *
+         * Le sue righe escono con `realtime = false`: il tabellone le mostra
+         * come orario previsto, non come corse confermate puntuali.
+         */
+        val sardegna = async {
+            if (DataSource.ARST in sources && arst.covers(code)) {
+                runCatching { arst.board(code, arrivi, at.toLocalDate()) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
         val ora = LocalTime.now()
-        (rfi.await() + ntv.await())
+        (
+            rfi.await() + ntv.await() + nordBarese.await() + vigezzina.await() +
+                vesuviana.await() + sardegna.await()
+            )
             .distinctBy { key(it) }
             .sortedBy { it.minutesFrom(ora) }
     }
@@ -487,16 +615,29 @@ class BoardViewModel : ViewModel() {
         const val MAX_SOSPETTE = 6
     }
 
-    /** Chiamata dopo che il permesso e' stato concesso: la posizione arriva dalla UI. */
-    fun useNearest(latitude: Double, longitude: Double) {
+    /**
+     * Propone le stazioni piu' vicine, senza aprirne nessuna.
+     *
+     * Chiamata dopo che il permesso e' stato concesso: la posizione arriva dalla
+     * UI. La piu' vicina in linea d'aria non e' sempre quella che serve: dentro
+     * un nodo urbano ce ne sono tre nel raggio di un chilometro, e quale sia la
+     * propria lo sa solo chi ci sta in mezzo.
+     */
+    fun proposeNearest(latitude: Double, longitude: Double) {
         viewModelScope.launch {
             _state.update { it.copy(locatingNearest = true, message = null) }
-            val nearest = runCatching { stationsRepo.closest(latitude, longitude) }.getOrNull()
+            val vicine = runCatching { stationsRepo.nearest(latitude, longitude) }
+                .getOrDefault(emptyList())
             _state.update { it.copy(locatingNearest = false) }
-            if (nearest == null) {
-                _state.update { it.copy(message = "Nessuna stazione trovata nei dintorni.") }
-            } else {
-                select(nearest)
+            when {
+                vicine.isEmpty() -> _state.update {
+                    it.copy(message = "Nessuna stazione trovata nei dintorni.")
+                }
+                // Con una sola candidata non c'e' niente da scegliere.
+                vicine.size == 1 -> select(vicine.first().station)
+                else -> _state.update {
+                    it.copy(nearby = vicine, suggestions = emptyList(), suggestionsOpen = true)
+                }
             }
         }
     }

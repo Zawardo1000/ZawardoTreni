@@ -16,22 +16,37 @@ App Android per orari e stato in tempo reale dei treni italiani.
 - Ricerca per numero treno
 - Tabellone partenze/arrivi di stazione
 - Stazione più vicina via GPS
+- Prezzo del biglietto, dove Trenitalia lo pubblica
+- Reti accendibili e spegnibili una per una, per non pagare chiamate che non servono
 - "Segui treno": notifica quando il ritardo cambia di oltre 3 minuti
 
 ## Fonti dati
 
-| Fonte | Uso |
-|---|---|
-| [Le Frecce BFF](https://app.lefrecce.it) | ricerca stazioni e itinerari A→B sulla rete nazionale |
-| [ViaggiaTreno](http://www.viaggiatreno.it) | stato realtime: ritardi, fermate, binari, posizione |
-| [Trenord](https://www.trenord.it) | regionale e suburbano lombardo, linee S del Passante, avvisi di servizio |
-| [Italo in viaggio](https://italoinviaggio.italotreno.com) | le corse Italo, che nessun'altra fonte pubblica: tabellone di stazione con ritardo e binario |
+Otto servizi, sette reti. Nessuno di questi è documentato, e nessuno è ufficiale.
 
-Sono tutte API **non ufficiali e non documentate**, ricostruite dal traffico dei siti
-in produzione. Possono cambiare o smettere di funzionare senza preavviso.
+| Fonte | Uso | Tempo reale |
+|---|---|---|
+| [Le Frecce BFF](https://app.lefrecce.it) | ricerca stazioni, itinerari A→B, **prezzi** | — |
+| [ViaggiaTreno](http://www.viaggiatreno.it) | ritardi, fermate, binari, posizione del treno | sì |
+| [Trenord](https://www.trenord.it) | regionale lombardo, linee S del Passante, avvisi | sì |
+| [Italo in viaggio](https://italoinviaggio.italotreno.com) | le corse NTV, assenti da ogni altra fonte | sì |
+| [EAV](https://orariotreni.eavsrl.it) | Circumvesuviana, Cumana, Circumflegrea | sì, dove c'è il monitor |
+| [GTFS EAV](https://www.eavsrl.it/open-data/) | orario EAV: giorni futuri e linee senza monitor | no |
+| [Ferrotramviaria](https://eticket.ferrovienordbarese.it) | Bari–Barletta e aeroporto di Bari | sì |
+| [Orario svizzero](https://transport.opendata.ch) | Vigezzina–Centovalli e linee S del Ticino | sì |
+| [GTFS ARST](https://www.arstspa.info) | ferrovie sarde a scartamento ridotto | no |
 
-**Il realtime esiste solo per la giornata corrente**: `andamentoTreno` risponde `204` per
-qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
+Sono API **non ufficiali e non documentate**, ricostruite dal traffico dei siti in
+produzione: possono cambiare o smettere di funzionare senza preavviso. Fanno eccezione i
+due GTFS, che sono open data pubblicati apposta, in Italian Open Data Licence.
+
+**Le corse senza tempo reale sono dichiarate come tali.** Dove l'orario è l'unica fonte —
+tutta ARST, EAV oltre oggi — la riga non porta un ritardo pari a zero: porta l'indicazione
+che il ritardo *non si conosce*, che è un'informazione diversa. Il modello lo distingue con
+`BoardEntry.realtime`.
+
+**Sulla rete nazionale il realtime esiste solo per la giornata corrente**: `andamentoTreno`
+risponde `204` per qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
 
 Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del modulo
 `:data`, accanto al codice che le aggira.

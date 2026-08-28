@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,6 +60,7 @@ import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.ui.common.SectionHeader
+import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.soppressione
@@ -127,16 +127,20 @@ fun BoardScreen(
                 if (loc == null) {
                     vm.onLocationUnavailable("Posizione non disponibile. Il GPS è attivo?")
                 } else {
-                    vm.useNearest(loc.latitude, loc.longitude)
+                    vm.proposeNearest(loc.latitude, loc.longitude)
                 }
             }
         }
     }
 
+    // La lista da cui si sceglie: i suggerimenti scritti, oppure le stazioni
+    // che il mirino ha appena proposto.
+    val listaAperta = state.suggestionsOpen &&
+        (state.suggestions.isNotEmpty() || state.nearby.isNotEmpty())
+
     // Svuotare il campo e' il gesto di chi vuole un'altra stazione: da li' le
     // preferite tornano a portata, senza doverne scrivere il nome.
-    val scegliendo = state.station == null ||
-        (state.suggestionsOpen && state.suggestions.isEmpty())
+    val scegliendo = state.station == null || (state.suggestionsOpen && !listaAperta)
 
     Scaffold(
         topBar = {
@@ -203,31 +207,20 @@ fun BoardScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (state.suggestionsOpen && state.suggestions.isNotEmpty()) {
-                LazyColumn(Modifier.heightIn(max = 300.dp)) {
-                    items(state.suggestions, key = { it.locationId }) { s ->
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    keyboard?.hide()
-                                    focus.clearFocus(force = true)
-                                    vm.select(s)
-                                }
-                                .padding(vertical = 12.dp),
-                        ) {
-                            Text(s.name, style = MaterialTheme.typography.bodyLarge)
-                            if (!s.trackable) {
-                                Text(
-                                    "Senza tabellone in tempo reale",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                    }
-                }
+            if (listaAperta) {
+                // Attaccata al campo, che qui sta gia' in cima: la lista resta
+                // sopra la tastiera invece di finirci sotto.
+                StationPicker(
+                    suggestions = state.suggestions,
+                    nearby = state.nearby,
+                    loading = false,
+                    untrackedNote = "Senza tabellone in tempo reale",
+                    onPick = { s ->
+                        keyboard?.hide()
+                        focus.clearFocus(force = true)
+                        vm.select(s)
+                    },
+                )
             } else if (scegliendo) {
                 /*
                  * Il momento in cui servono e' questo: nessun tabellone aperto,
@@ -385,7 +378,23 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!cancelled && entry.delayMinutes != 0) {
+                /*
+                 * Senza tempo reale non si scrive niente sul ritardo, e lo si
+                 * dice.
+                 *
+                 * La riga porta `delayMinutes = 0` perche' il modello vuole un
+                 * intero, ma quello zero non e' una misura: di quella corsa
+                 * nessuno sa se e' in ritardo. Tacere e basta la renderebbe
+                 * identica a un treno confermato puntuale, che e' la cosa
+                 * precisa da non far credere.
+                 */
+                if (!entry.realtime) {
+                    Text(
+                        "  orario previsto",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (!cancelled && entry.delayMinutes != 0) {
                     Text(
                         "  " + delayLabel(entry.delayMinutes),
                         style = MaterialTheme.typography.bodySmall,

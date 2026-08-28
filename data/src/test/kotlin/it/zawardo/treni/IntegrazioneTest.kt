@@ -24,6 +24,7 @@ import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.data.repository.TrenordRepository
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.JourneySource
@@ -132,7 +133,18 @@ class IntegrazioneTest {
         val soloLefrecce = runCatching { journeys.search(from, to, quando, limit = 10) }
             .getOrDefault(emptyList())
         val soloTrenord = runCatching { trenord.search(from, to, quando) }.getOrNull()
-        val fuse = journeys.searchAll(from, to, quando, limit = 10)
+        /*
+         * Le due reti si chiedono per nome invece di affidarsi al default.
+         *
+         * Questo test verifica la fusione, non le impostazioni: da quando le
+         * reti nascono quasi tutte spente, appoggiarsi al default significava
+         * interrogarne una sola e poi stupirsi che la fusione non fondesse
+         * niente.
+         */
+        val fuse = journeys.searchAll(
+            from, to, quando, limit = 10,
+            sources = setOf(DataSource.TRENITALIA, DataSource.TRENORD),
+        )
 
         println("\n=== RICERCA ${from.name} -> ${to.name} ===")
         println("  solo Le Frecce : ${soloLefrecce.size}")
