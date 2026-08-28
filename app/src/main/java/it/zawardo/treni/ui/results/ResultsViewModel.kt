@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
@@ -209,11 +210,10 @@ class ResultsViewModel(
 
     private fun cercaMisti(direttoMigliore: java.time.Duration?) {
         viewModelScope.launch {
-            // Un misto ha sempre un cambio: con "solo diretti" attivo non lo si
-            // vuole, e non ha senso spendere le chiamate per poi scartarlo.
-            if (directOnly) return@launch
-            val attivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
-            if (!attivo) return@launch
+            val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
+            // Un misto ha sempre un cambio: niente con "solo diretti", e solo con
+            // la beta accesa. La regola sta in FiltroFonti, cosi' e' sotto test.
+            if (!FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)) return@launch
 
             _state.update { it.copy(loadingMisti = true) }
             val trovati = runCatching { misti.cerca(from, to, departure, direttoMigliore, sources) }

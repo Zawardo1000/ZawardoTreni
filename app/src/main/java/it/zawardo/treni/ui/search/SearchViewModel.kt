@@ -6,9 +6,10 @@ import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.Station
-import it.zawardo.treni.domain.model.sortedByName
+import it.zawardo.treni.domain.model.SuggerimentiStazioni
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -56,10 +57,8 @@ data class SearchUiState(
 class SearchViewModel : ViewModel() {
 
     private val stations = ServiceLocator.stationRepository
-    private val eav = ServiceLocator.eavRepository
-    private val fnb = ServiceLocator.fnbRepository
-    private val svizzera = ServiceLocator.svizzeraRepository
-    private val arst = ServiceLocator.arstRepository
+    /** Il registro delle reti con stazioni proprie: la ricerca lo scorre, non le elenca. */
+    private val fonteLocali = ServiceLocator.fontiStazioniLocali
     private val store = ServiceLocator.searchStore
     private val settings = ServiceLocator.settings
 
@@ -196,19 +195,14 @@ class SearchViewModel : ViewModel() {
          * ha spente — proponendo partenze che poi non danno risultati. La rete
          * nazionale non si filtra: c'e' sempre.
          */
-        val acc = sourcesNow
-        val locali = buildList {
-            if (DataSource.EAV in acc) addAll(eav.search(query))
-            if (DataSource.FNB in acc) addAll(fnb.search(query))
-            if (DataSource.SVIZZERA in acc) addAll(svizzera.search(query))
-            if (DataSource.ARST in acc) addAll(arst.search(query))
-        }
+        val locali = FiltroFonti.fontiLocali(sourcesNow)
+            .flatMap { fonteLocali[it]?.suggerisci(query).orEmpty() }
 
         // Poi la cache locale: la lista compare subito, poi si arricchisce dalla rete.
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
         _state.update {
             it.copy(
-                suggestions = (locali + offline).distinctBy { s -> s.locationId }.sortedByName(),
+                suggestions = SuggerimentiStazioni.unisci(locali, offline),
                 loadingSuggestions = true,
             )
         }
@@ -216,7 +210,7 @@ class SearchViewModel : ViewModel() {
         val remote = runCatching { stations.search(query) }.getOrNull()
         if (remote != null) {
             runCatching { store.cacheAll(remote) }
-            val merged = (locali + remote + offline).distinctBy { it.locationId }.sortedByName()
+            val merged = SuggerimentiStazioni.unisci(locali, remote + offline)
             _state.update { it.copy(suggestions = merged, loadingSuggestions = false, error = null) }
         } else {
             _state.update {

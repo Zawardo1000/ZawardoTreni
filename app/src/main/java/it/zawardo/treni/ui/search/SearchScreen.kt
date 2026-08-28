@@ -369,7 +369,6 @@ private fun SearchCard(
                             suggestions = state.suggestions,
                             nearby = state.nearby,
                             loading = state.loadingSuggestions,
-                            untrackedNote = "Senza dati in tempo reale",
                             onPick = { onPickStation(SearchField.FROM, it) },
                         )
                     }
@@ -387,7 +386,6 @@ private fun SearchCard(
                             // c'e' mai niente di vicino da proporre.
                             nearby = emptyList(),
                             loading = state.loadingSuggestions,
-                            untrackedNote = "Senza dati in tempo reale",
                             onPick = { onPickStation(SearchField.TO, it) },
                         )
                     }

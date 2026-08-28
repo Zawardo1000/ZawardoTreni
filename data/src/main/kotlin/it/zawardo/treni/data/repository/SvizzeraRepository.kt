@@ -50,7 +50,10 @@ import java.time.LocalDate
  */
 class SvizzeraRepository(
     private val api: SvizzeraApi,
-) {
+) : FonteStazioniLocale {
+
+    override fun suggerisci(query: String): List<Station> = search(query)
+
     /** Vero se il codice indirizza una fermata servita da questa fonte. */
     fun covers(stationCode: String?): Boolean = SvizzeraStations.isSvizzera(stationCode)
 

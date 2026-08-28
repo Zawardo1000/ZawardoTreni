@@ -5,12 +5,13 @@ import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.SuggerimentiStazioni
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.minutesFrom
-import it.zawardo.treni.domain.model.sortedByName
 import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.async
@@ -64,6 +65,8 @@ class BoardViewModel : ViewModel() {
     private val svizzera = ServiceLocator.svizzeraRepository
     private val eav = ServiceLocator.eavRepository
     private val arst = ServiceLocator.arstRepository
+    /** Il registro delle reti con stazioni proprie, per i suggerimenti. */
+    private val fonteLocali = ServiceLocator.fontiStazioniLocali
     private val store = ServiceLocator.searchStore
     private val preferite = ServiceLocator.stationFavorites
 
@@ -159,25 +162,17 @@ class BoardViewModel : ViewModel() {
          */
         // Solo le reti accese: spegnerne una ne toglie le stazioni dai
         // suggerimenti, invece di proporre fermate che poi non danno tabellone.
-        val locali = buildList {
-            if (DataSource.FNB in sources) addAll(fnb.search(query))
-            if (DataSource.SVIZZERA in sources) addAll(svizzera.search(query))
-            if (DataSource.EAV in sources) addAll(eav.search(query))
-            if (DataSource.ARST in sources) addAll(arst.search(query))
-        }
+        val locali = FiltroFonti.fontiLocali(sources)
+            .flatMap { fonteLocali[it]?.suggerisci(query).orEmpty() }
 
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
         _state.update {
-            it.copy(suggestions = (locali + offline).distinctBy { s -> s.locationId }.sortedByName())
+            it.copy(suggestions = SuggerimentiStazioni.unisci(locali, offline))
         }
         val remote = runCatching { stationsRepo.search(query) }.getOrNull() ?: return
         runCatching { store.cacheAll(remote) }
         _state.update {
-            it.copy(
-                suggestions = (locali + remote + offline)
-                    .distinctBy { s -> s.locationId }
-                    .sortedByName(),
-            )
+            it.copy(suggestions = SuggerimentiStazioni.unisci(locali, remote + offline))
         }
     }
 

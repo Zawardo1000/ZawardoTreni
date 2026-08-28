@@ -52,7 +52,9 @@ import java.time.LocalDate
 class ArstRepository(
     /** Dove l'aggiornamento deposita l'orario. Null = si usa solo l'imbarcato. */
     private val cartella: File? = null,
-) {
+) : FonteStazioniLocale {
+
+    override fun suggerisci(query: String): List<Station> = search(query)
 
     /**
      * L'orario, letto una volta e tenuto.

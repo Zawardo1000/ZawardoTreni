@@ -31,6 +31,14 @@ enum class DataSource(
     val available: Boolean,
     val accesaDiDefault: Boolean = available,
     val opzionale: Boolean = true,
+    /**
+     * Ha un elenco di stazioni **proprio**, fuori dal registro RFI, che si puo'
+     * interrogare in locale per i suggerimenti. E' il flag che rende dinamico il
+     * filtro: [FiltroFonti.fontiLocali] deriva da qui, cosi' aggiungere una rete
+     * con stazioni sue non costringe a toccare nessun `when` sparso nei
+     * ViewModel — basta accendere questo e registrarne la ricerca in ServiceLocator.
+     */
+    val stazioniProprie: Boolean = false,
 ) {
     /**
      * Le Frecce per gli itinerari, ViaggiaTreno per il tempo reale.
@@ -54,7 +62,7 @@ enum class DataSource(
      */
     TRENORD("Trenord", "Regionale lombardo e linee S del Passante", available = true),
     ITALO("Italo", "Alta velocita' NTV", available = true, accesaDiDefault = false),
-    EAV("EAV", "Circumvesuviana e rete campana", available = true, accesaDiDefault = false),
+    EAV("EAV", "Circumvesuviana e rete campana", available = true, accesaDiDefault = false, stazioniProprie = true),
 
     /**
      * Le due reti che seguono costano poco anche accese: hanno un elenco di
@@ -65,6 +73,7 @@ enum class DataSource(
         "Bari - Barletta e aeroporto di Bari",
         available = true,
         accesaDiDefault = false,
+        stazioniProprie = true,
     ),
     /**
      * Le due ferrovie transfrontaliere che si chiedono all'orario svizzero.
@@ -79,6 +88,7 @@ enum class DataSource(
         "Vigezzina-Centovalli e linee S del Ticino",
         available = true,
         accesaDiDefault = false,
+        stazioniProprie = true,
     ),
 
     /**
@@ -100,6 +110,7 @@ enum class DataSource(
          * non ha nessun'altra fonte — ma dev'essere una sua scelta.
          */
         accesaDiDefault = false,
+        stazioniProprie = true,
     );
 
     companion object {

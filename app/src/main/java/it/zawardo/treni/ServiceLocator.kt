@@ -9,6 +9,7 @@ import it.zawardo.treni.data.repository.ArstRepository
 import it.zawardo.treni.data.repository.SvizzeraRepository
 import it.zawardo.treni.data.repository.EavRepository
 import it.zawardo.treni.data.repository.FnbRepository
+import it.zawardo.treni.data.repository.FonteStazioniLocale
 import it.zawardo.treni.data.repository.ItaloRepository
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.ViaggiMistiRepository
@@ -18,6 +19,7 @@ import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrainMemoryStore
 import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.data.repository.TrainStatusRepository
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Station
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -82,6 +84,33 @@ object ServiceLocator {
      * tabellone.
      */
     val arstRepository: ArstRepository by lazy { ArstRepository(cartellaOrari) }
+
+    /**
+     * Il registro delle reti con stazioni proprie, per interrogarle senza sapere
+     * quali siano.
+     *
+     * Chi propone i suggerimenti scorre questo, non un `when` scritto a mano:
+     * aggiungere una rete fuori-RFI significa segnare `stazioniProprie = true`
+     * sul suo [DataSource] e aggiungere qui la riga che la collega al suo
+     * repository — e i ViewModel non cambiano. Le chiavi sono esattamente le
+     * fonti con `stazioniProprie`; un controllo all'avvio lo verifica.
+     */
+    val fontiStazioniLocali: Map<DataSource, FonteStazioniLocale> by lazy {
+        mapOf(
+            DataSource.EAV to eavRepository,
+            DataSource.FNB to fnbRepository,
+            DataSource.SVIZZERA to svizzeraRepository,
+            DataSource.ARST to arstRepository,
+        ).also { registro ->
+            // Il flag sull'enum e questo registro devono coincidere: se domani si
+            // segna una rete con stazioni proprie ma si scorda di collegarla qui,
+            // meglio saperlo subito che vederla sparire dai suggerimenti in silenzio.
+            val attese = DataSource.entries.filterTo(HashSet()) { it.stazioniProprie }
+            require(registro.keys == attese) {
+                "Registro fonti locali disallineato: mancano ${attese - registro.keys}, di troppo ${registro.keys - attese}"
+            }
+        }
+    }
 
     /**
      * Tiene aggiornati gli orari imbarcati di EAV e ARST.

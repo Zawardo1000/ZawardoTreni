@@ -47,9 +47,12 @@ fun StationPicker(
     suggestions: List<Station>,
     nearby: List<NearbyStation>,
     loading: Boolean,
-    untrackedNote: String,
     onPick: (Station) -> Unit,
     modifier: Modifier = Modifier,
+    // Vuoto = nessun avviso: la ricerca tratta funziona con qualsiasi stazione
+    // (le basta il locationId), quindi li' non c'e' niente da segnalare. Il
+    // tabellone invece passa un testo, perche' senza codice RFI non ha partenze.
+    untrackedNote: String = "",
 ) {
     Card(
         modifier.fillMaxWidth(),
@@ -120,8 +123,9 @@ private fun StationRow(
                 // colpo d'occhio la Sorrento della Circumvesuviana dal resto.
                 reteFuoriRfi(station.rfiCode)?.let { sigla -> ReteBadge(sigla) }
             }
-            if (!station.trackable) {
+            if (!station.trackable && untrackedNote.isNotBlank()) {
                 // Senza codice RFI il treno non è tracciabile: meglio dirlo prima.
+                // Ma solo dove conta davvero — il tabellone — non nella ricerca.
                 Text(
                     untrackedNote,
                     style = MaterialTheme.typography.bodySmall,

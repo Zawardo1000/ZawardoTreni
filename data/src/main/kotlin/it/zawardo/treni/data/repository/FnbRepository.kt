@@ -32,7 +32,10 @@ import java.time.LocalDate
  */
 class FnbRepository(
     private val api: FnbApi,
-) {
+) : FonteStazioniLocale {
+
+    override fun suggerisci(query: String): List<Station> = search(query)
+
     /** Vero se il codice indirizza una fermata Ferrotramviaria. */
     fun covers(stationCode: String?): Boolean = FnbStations.isFnb(stationCode)
 
