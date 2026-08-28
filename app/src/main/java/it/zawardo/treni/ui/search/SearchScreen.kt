@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,7 +68,10 @@ import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.ui.common.ReteBadge
 import it.zawardo.treni.ui.common.StationPicker
+import it.zawardo.treni.ui.common.TrattaConBadge
+import it.zawardo.treni.ui.common.reteFuoriRfi
 import it.zawardo.treni.ui.common.TreniTopBar
 import androidx.compose.runtime.rememberCoroutineScope
 import it.zawardo.treni.ui.common.DatePickerModal
@@ -358,6 +362,7 @@ private fun SearchCard(
                         // sulla partenza, non sulla destinazione.
                         onUseLocation = onUseLocation,
                         locating = state.locating,
+                        selectedRfi = state.from?.rfiCode,
                     )
                     /*
                      * La lista sta attaccata al campo che si sta compilando, non
@@ -378,6 +383,7 @@ private fun SearchCard(
                         onValueChange = { onQueryChange(SearchField.TO, it) },
                         onFocused = { onFieldFocused(SearchField.TO) },
                         onClear = { onClearField(SearchField.TO) },
+                        selectedRfi = state.to?.rfiCode,
                     )
                     if (state.choosing && state.activeField == SearchField.TO) {
                         StationPicker(
@@ -560,6 +566,9 @@ private fun StationField(
     onClear: () -> Unit,
     onUseLocation: (() -> Unit)? = null,
     locating: Boolean = false,
+    // Il codice della stazione scelta, per il badge di rete nel campo. Null
+    // mentre si scrive (nessuna scelta ancora), valorizzato dopo la selezione.
+    selectedRfi: String? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -570,6 +579,11 @@ private fun StationField(
         label = { Text(label) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
+        // Scelta una stazione fuori-RFI, la sua sigla resta nel campo, come nei
+        // suggerimenti: cosi' si vede a colpo d'occhio da che rete si parte.
+        leadingIcon = reteFuoriRfi(selectedRfi)?.let { sigla ->
+            @Composable { ReteBadge(sigla) }
+        },
         trailingIcon = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (value.isNotEmpty()) {
@@ -630,11 +644,12 @@ private fun HistoryAndSaved(
                 LazyColumn {
                     items(history, key = { it.id }) { h ->
                         PairRow(
-                            title = "${h.from.name} → ${h.to.name}",
                             // La cronologia riparte sempre da adesso.
                             onClick = { onPick(h.from.toStation(), h.to.toStation(), null) },
                             onDelete = { onDeleteHistory(h.id) },
-                        )
+                        ) {
+                            TrattaConBadge(h.from.name, h.from.rfiCode, h.to.name, h.to.rfiCode)
+                        }
                     }
                     item {
                         TextButton(onClick = onClearHistory, modifier = Modifier.padding(8.dp)) {
@@ -650,12 +665,34 @@ private fun HistoryAndSaved(
                 LazyColumn {
                     items(saved, key = { it.id }) { s ->
                         PairRow(
-                            title = s.label,
                             // Le salvate conservano solo le stazioni: l'orario
                             // riparte sempre da adesso.
                             onClick = { onPick(s.from.toStation(), s.to.toStation(), null) },
                             onDelete = { onDeleteSaved(s.id) },
-                        )
+                        ) {
+                            // Etichetta di default = la tratta: la mostro coi badge.
+                            // Se l'utente l'ha rinominata, tengo il suo nome e metto
+                            // la tratta coi badge sotto, solo se c'e' una rete da segnare.
+                            val tratta = "${s.from.name} → ${s.to.name}"
+                            if (s.label == tratta) {
+                                TrattaConBadge(s.from.name, s.from.rfiCode, s.to.name, s.to.rfiCode)
+                            } else {
+                                Text(
+                                    s.label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                if (reteFuoriRfi(s.from.rfiCode) != null ||
+                                    reteFuoriRfi(s.to.rfiCode) != null
+                                ) {
+                                    TrattaConBadge(
+                                        s.from.name, s.from.rfiCode, s.to.name, s.to.rfiCode,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -665,10 +702,9 @@ private fun HistoryAndSaved(
 
 @Composable
 private fun PairRow(
-    title: String,
-    subtitle: String? = null,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Row(
         Modifier
@@ -681,21 +717,8 @@ private fun PairRow(
             Modifier
                 .weight(1f)
                 .padding(vertical = 10.dp),
-        ) {
-            Text(
-                title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            subtitle?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+            content = content,
+        )
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Filled.DeleteOutline,

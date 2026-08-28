@@ -60,6 +60,7 @@ import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.ui.common.NomeStazione
 import it.zawardo.treni.ui.common.SectionHeader
 import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TreniTopBar
@@ -474,12 +475,11 @@ private fun FavoriteStationRow(
             Modifier.padding(start = 16.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            NomeStazione(
                 station.name,
+                station.rfiCode,
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
             IconButton(onClick = onRemove) {
                 Icon(
