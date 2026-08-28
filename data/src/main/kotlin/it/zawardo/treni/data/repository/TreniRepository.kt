@@ -195,7 +195,11 @@ class JourneyRepository(
     ): SearchOutcome = withContext(Dispatchers.IO) {
         val lefrecceJob = async {
             if (DataSource.TRENITALIA in sources) {
-                runCatching { search(from, to, departure, limit) }.getOrDefault(emptyList())
+                // perNazionale(): una stazione fuori-RFI con gemello nazionale
+                // (Sorrento-EAV) va chiesta a Le Frecce col suo id nazionale,
+                // altrimenti il codice sintetico non instrada. Vedi Station.idNazionale.
+                runCatching { search(from.perNazionale(), to.perNazionale(), departure, limit) }
+                    .getOrDefault(emptyList())
             } else {
                 emptyList()
             }

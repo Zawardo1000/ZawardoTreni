@@ -34,13 +34,37 @@ object SuggerimentiStazioni {
 
         val tenute = mutableListOf<Station>()
         for (s in ordinate) {
-            if (tenute.none { coincidono(it, s, sogliaMetri) }) tenute.add(s)
+            val i = tenute.indexOfFirst { coincidono(it, s, sogliaMetri) }
+            if (i < 0) {
+                tenute.add(s)
+                continue
+            }
+            // s e' un doppione di una versione gia' tenuta (di qualita' >=). Non
+            // si butta del tutto: se la tenuta e' fuori-RFI e s e' la sua gemella
+            // nazionale, la tenuta ne eredita l'indirizzo, cosi' resta cercabile
+            // sul nazionale (il bus+Freccia da Sorrento). Vedi [Station.idNazionale].
+            val tenuta = tenute[i]
+            if (tenuta.idNazionale == null && sintetica(tenuta) && !sintetica(s)) {
+                tenute[i] = tenuta.copy(idNazionale = s.locationId)
+            }
         }
 
         return tenute
             .distinctBy { it.locationId }
             .sortedWith(compareByDescending<Station> { it.trackable }.thenBy { it.name.lowercase() })
     }
+
+    /**
+     * Il primo [Station.locationId] della fascia sintetica.
+     *
+     * Sotto questa soglia stanno gli id veri del nazionale (Le Frecce, RFI);
+     * da qui in su gli id inventati per le reti fuori-RFI, che Le Frecce non
+     * conosce. Vedi le `LOCATION_ID_BASE` dei repository fuori-RFI (9,0·10⁹ …).
+     */
+    private const val PRIMO_ID_SINTETICO = 9_000_000_000L
+
+    /** Vero se l'id e' inventato per una rete fuori-RFI, non un id del nazionale. */
+    private fun sintetica(s: Station): Boolean = s.locationId >= PRIMO_ID_SINTETICO
 
     /** Quanto e' "ricca" una versione della stazione: piu' alto, meglio e'. */
     private fun qualita(s: Station): Int = when {

@@ -112,6 +112,16 @@ data class ResultsRoute(
     val fromLon: Double = 0.0,
     val toLat: Double = 0.0,
     val toLon: Double = 0.0,
+    /**
+     * L'indirizzo nazionale delle due punte, `0` se non ce l'hanno.
+     *
+     * Serve alle stazioni fuori-RFI con gemello (Sorrento-EAV): senza, sulla
+     * schermata risultati Le Frecce non instraderebbe il codice sintetico e il
+     * bus+Freccia sparirebbe. Sentinella `0L` invece di `Long?` per non passare
+     * dai NavType nullable, come per le coordinate.
+     */
+    val fromIdNazionale: Long = 0L,
+    val toIdNazionale: Long = 0L,
 )
 
 /**
@@ -270,6 +280,8 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                                 fromLon = from.longitude,
                                 toLat = to.latitude,
                                 toLon = to.longitude,
+                                fromIdNazionale = from.idNazionale ?: 0L,
+                                toIdNazionale = to.idNazionale ?: 0L,
                             )
                         )
                     },
@@ -306,8 +318,14 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
             composable<ResultsRoute> { entry ->
                 val r = entry.toRoute<ResultsRoute>()
                 ResultsScreen(
-                    from = Station(r.fromRfi, r.fromId, r.fromName, r.fromLat, r.fromLon),
-                    to = Station(r.toRfi, r.toId, r.toName, r.toLat, r.toLon),
+                    from = Station(
+                        r.fromRfi, r.fromId, r.fromName, r.fromLat, r.fromLon,
+                        r.fromIdNazionale.takeIf { it != 0L },
+                    ),
+                    to = Station(
+                        r.toRfi, r.toId, r.toName, r.toLat, r.toLon,
+                        r.toIdNazionale.takeIf { it != 0L },
+                    ),
                     departure = LocalDateTime.ofEpochSecond(r.whenEpochSec, 0, ZoneOffset.UTC),
                     directOnly = r.directOnly,
                     onBack = { nav.popBackStack() },

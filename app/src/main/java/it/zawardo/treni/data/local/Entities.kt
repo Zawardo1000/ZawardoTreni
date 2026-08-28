@@ -24,11 +24,21 @@ data class StationRef(
     // senza questa dichiarazione la validazione fallirebbe all'avvio.
     @ColumnInfo(name = "latitude", defaultValue = "0.0") val latitude: Double = 0.0,
     @ColumnInfo(name = "longitude", defaultValue = "0.0") val longitude: Double = 0.0,
+    /**
+     * L'indirizzo nazionale della stazione, se fuori-RFI con gemello (Sorrento).
+     *
+     * Va conservato o una tratta salvata da Sorrento-EAV, riaperta, perderebbe il
+     * bus+Freccia: senza questo id Le Frecce non sa instradare il codice EAV.
+     * Nullable, quindi la migrazione 6→7 aggiunge la colonna senza `DEFAULT` e
+     * l'entita' non dichiara defaultValue. Vedi [Station.idNazionale].
+     */
+    @ColumnInfo(name = "id_nazionale") val idNazionale: Long? = null,
 ) {
-    fun toStation() = Station(rfiCode, locationId, name, latitude, longitude)
+    fun toStation() = Station(rfiCode, locationId, name, latitude, longitude, idNazionale)
 
     companion object {
-        fun of(s: Station) = StationRef(s.rfiCode, s.locationId, s.name, s.latitude, s.longitude)
+        fun of(s: Station) =
+            StationRef(s.rfiCode, s.locationId, s.name, s.latitude, s.longitude, s.idNazionale)
     }
 }
 

@@ -66,4 +66,24 @@ class MatriceFiltriTest {
         val on = sorrento(SuggerimentiStazioni.unisci(eav, bff))
         assertNotEquals("filtro on vs off deve cambiare la tracciabilita'", off.trackable, on.trackable)
     }
+
+    @Test
+    fun `EAV accesa - la Sorrento fusa eredita l'indirizzo nazionale`() {
+        val s = sorrento(SuggerimentiStazioni.unisci(eav, bff))
+        // Tiene EAV per tabellone/badge/misti...
+        assertEquals("EAV62", s.rfiCode)
+        // ...ma appunta l'id BFF, cosi' resta cercabile sul nazionale (bus+Freccia).
+        assertEquals("eredita l'id nazionale del gemello BFF", 830_013_838L, s.idNazionale)
+        assertEquals("per Le Frecce usa l'id nazionale", 830_013_838L, s.perNazionale().locationId)
+    }
+
+    @Test
+    fun `una stazione RFI non prende idNazionale, si instrada da se'`() {
+        val roma = SuggerimentiStazioni.unisci(
+            emptyList(),
+            listOf(Station("S08409", 830_008_409, "Roma Termini", 41.9010, 12.5015)),
+        ).first()
+        assertEquals("RFI non ha bisogno di un id nazionale a parte", null, roma.idNazionale)
+        assertEquals("perNazionale e' se stessa", roma.locationId, roma.perNazionale().locationId)
+    }
 }

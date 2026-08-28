@@ -19,8 +19,27 @@ data class Station(
     val name: String,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
+    /**
+     * L'id con cui **Le Frecce** conosce questo stesso posto, quando esiste.
+     *
+     * Serve alle stazioni fuori-RFI che hanno un gemello nazionale: Sorrento ha
+     * il suo tabellone su EAV (codice `EAV62`, [locationId] sintetico), ma il BFF
+     * la conosce anche come `830013838` e da li' sa venderci il bus+Freccia. La
+     * dedup fonde i due in questa stazione, tenendo EAV per tabellone, badge e
+     * misti, e appuntando qui l'indirizzo nazionale: senza, cercare una tratta da
+     * Sorrento-EAV non darebbe nulla, perche' Le Frecce non instrada `EAV62`.
+     * Nullo per le stazioni RFI (che gia' si instradano da se') e per le
+     * fuori-RFI senza gemello nazionale.
+     */
+    val idNazionale: Long? = null,
 ) {
     val trackable: Boolean get() = rfiCode != null
+
+    /**
+     * La stessa stazione vista dal nazionale: se ha un [idNazionale], il suo
+     * [locationId] diventa quello che Le Frecce sa instradare. Altrimenti se stessa.
+     */
+    fun perNazionale(): Station = idNazionale?.let { copy(locationId = it) } ?: this
 }
 
 /** Una stazione vicina a un punto, con la distanza in linea d'aria in chilometri. */

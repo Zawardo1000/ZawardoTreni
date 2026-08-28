@@ -17,7 +17,7 @@ import androidx.sqlite.execSQL
         RecentTrainEntity::class,
         FavoriteStationEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class TreniDatabase : RoomDatabase() {
@@ -123,6 +123,26 @@ abstract class TreniDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * L'indirizzo nazionale entra nella cronologia e nelle ricerche salvate.
+         *
+         * Serve alle stazioni fuori-RFI con gemello nazionale (Sorrento): senza,
+         * una tratta salvata da li' riaperta perderebbe il bus+Freccia, perche'
+         * Le Frecce non instrada il codice EAV. Colonna nullable, nessun `DEFAULT`
+         * — le righe esistenti restano a NULL e si ripopolano alla prima ricerca.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(connection: SQLiteConnection) {
+                for (tabella in listOf("search_history", "saved_searches")) {
+                    for (capo in listOf("from", "to")) {
+                        connection.execSQL(
+                            "ALTER TABLE `$tabella` ADD COLUMN `${capo}_id_nazionale` INTEGER",
+                        )
+                    }
+                }
+            }
+        }
+
         @Volatile private var instance: TreniDatabase? = null
 
         fun get(context: Context): TreniDatabase = instance ?: synchronized(this) {
@@ -130,7 +150,10 @@ abstract class TreniDatabase : RoomDatabase() {
                 context.applicationContext,
                 TreniDatabase::class.java,
                 "treni.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            ).addMigrations(
+                MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
                 .build()
                 .also { instance = it }
         }
