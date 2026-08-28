@@ -528,8 +528,8 @@ private fun SearchOptions(
             Column(Modifier.weight(1f)) {
                 Text("Soluzioni con più operatori · beta", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Combina reti diverse, es. Circumvesuviana e Italo. " +
-                        "Più lenta e senza prezzo Italo.",
+                    "Combina reti diverse, es. Circumvesuviana più Freccia o Italo. " +
+                        "Più lenta; Italo compare solo per oggi e senza prezzo.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
