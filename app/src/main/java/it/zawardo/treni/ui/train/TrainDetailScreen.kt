@@ -217,9 +217,16 @@ fun TrainDetailScreen(
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
 
                 state.realtimeUnavailable -> Message(
-                    "Nessun dato in tempo reale per questo treno.\n\n" +
-                        "ViaggiaTreno espone i ritardi solo per la giornata in corso: " +
-                        "per le altre date esiste soltanto l'orario previsto.",
+                    if (state.futureDate) {
+                        "Di questa corsa non c'è l'orario per il giorno scelto.\n\n" +
+                            "L'orario previsto si ricava dalla stessa corsa in circolazione " +
+                            "oggi, ma oggi questo treno non circola. Torna il giorno della " +
+                            "partenza, quando il servizio è attivo."
+                    } else {
+                        "Nessun dato in tempo reale per questo treno.\n\n" +
+                            "ViaggiaTreno espone i ritardi solo per la giornata in corso: " +
+                            "per le altre date esiste soltanto l'orario previsto."
+                    },
                     Modifier.align(Alignment.Center),
                 )
 

@@ -36,6 +36,12 @@ data class TrainDetailUiState(
     val status: TrainStatus? = null,
     /** Distinguere "non esiste" da "non c'e' il realtime" cambia il messaggio da mostrare. */
     val realtimeUnavailable: Boolean = false,
+    /**
+     * La data cercata e' futura: cambia il perche' di un dato mancante. Non e'
+     * un guasto ne' un "oggi non c'e' ancora", ma "quella corsa oggi non circola"
+     * — il tempo reale esiste solo per oggi, e da li' non si ricava il suo orario.
+     */
+    val futureDate: Boolean = false,
     val error: String? = null,
 )
 
@@ -252,6 +258,7 @@ class TrainDetailViewModel(
                     status = status ?: it.status,
                     // 204 su una data non odierna significa "dato inesistente", non "errore".
                     realtimeUnavailable = status == null && it.status == null,
+                    futureDate = date.isAfter(LocalDate.now()),
                 )
             }
         }
