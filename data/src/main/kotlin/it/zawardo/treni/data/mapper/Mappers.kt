@@ -76,9 +76,20 @@ fun SolutionDto.toJourney(): Journey? {
             val to = node.endLocation?.toStation() ?: return@mapNotNull null
             val mean = node.offeredTransportMeanDeparture
             val cls = mean?.classification
+            /*
+             * La sigla di linea dei suburbani.
+             *
+             * Un "SU 24237" da solo non dice niente: la linea — S1, S2, S13 — la
+             * gente la legge sui monitor e la cerca qui. Il BFF la nasconde in
+             * `trainDescription`, che per un suburbano e' "S2 TRENORD 24237" e per
+             * tutti gli altri e' il solo numero. Quando c'e', prende il posto della
+             * sigla generica "SU"; il numero resta, per aprire la corsa.
+             */
+            val linea = mean?.trainDescription?.trim()?.substringBefore(' ')
+                ?.takeIf { it.matches(Regex("S\\d+")) }
             Leg(
                 trainNumber = mean?.name?.takeIf { it.isNotBlank() },
-                category = cls?.acronym,
+                category = linea ?: cls?.acronym,
                 from = from,
                 to = to,
                 departure = node.departureTime.parseIso() ?: dep,

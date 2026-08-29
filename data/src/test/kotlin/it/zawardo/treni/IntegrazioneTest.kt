@@ -793,6 +793,41 @@ class IntegrazioneTest {
     }
 
     @Test
+    fun `il suburbano prende la sigla di linea, non SU`() {
+        fun luogo(nome: String, code: String) = LocationDto(locationId = 1, name = nome, bdoCode = code)
+        fun tratta(num: String, acr: String, desc: String?) = SolutionNodeDto(
+            type = "SOLUTION_SEGMENT",
+            departureTime = "2026-08-27T08:00:00.000+02:00",
+            arrivalTime = "2026-08-27T08:30:00.000+02:00",
+            startLocation = luogo("Milano Dateo", "S01665"),
+            endLocation = luogo("Milano Centrale", "S01700"),
+            offeredTransportMeanDeparture = TransportMeanDto(
+                name = num,
+                trainDescription = desc,
+                classification = ClassificationDto(acronym = acr, type = "TRAIN"),
+            ),
+        )
+        fun soluzione(nodo: SolutionNodeDto) = SolutionDto(
+            departureTime = "2026-08-27T08:00:00.000+02:00",
+            arrivalTime = "2026-08-27T08:30:00.000+02:00",
+            solutionNodes = listOf(nodo),
+        )
+
+        // "S2 TRENORD 24237" -> la linea S2 prende il posto di "SU".
+        val suburbano = soluzione(tratta("24237", "SU", "S2 TRENORD 24237"))
+        assertTrue(
+            "il suburbano deve mostrare S2, non SU",
+            suburbano.toJourney()?.legs?.firstOrNull()?.category == "S2",
+        )
+        // Un treno normale ha per descrizione il solo numero: tiene la sua sigla.
+        val freccia = soluzione(tratta("9535", "FR", "9535"))
+        assertTrue(
+            "un treno non suburbano tiene la sua sigla",
+            freccia.toJourney()?.legs?.firstOrNull()?.category == "FR",
+        )
+    }
+
+    @Test
     fun `una riga del tabellone Italo diventa una corsa del nostro`() {
         val riga = ItaloBoardTrainDto(
             direction = "NAPOLI CENTRALE",
