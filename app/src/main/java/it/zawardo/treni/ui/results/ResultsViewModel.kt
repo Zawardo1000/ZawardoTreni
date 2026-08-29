@@ -91,6 +91,7 @@ class ResultsViewModel(
     private val misti = ServiceLocator.viaggiMistiRepository
     private val eav = ServiceLocator.eavRepository
     private val arst = ServiceLocator.arstRepository
+    private val italo = ServiceLocator.italoRepository
     private val trains = ServiceLocator.trainStatusRepository
     private val settings = ServiceLocator.settings
 
@@ -175,19 +176,10 @@ class ResultsViewModel(
                 )
             }
             enrich(rows)
-            cercaMisti(direttoMigliore = list.minByOrNull { it.duration }?.duration)
+            cercaAltreSoluzioni(direttoMigliore = list.minByOrNull { it.duration }?.duration)
         }
     }
 
-    /**
-     * Cerca i viaggi misti (beta) e li aggiunge in coda, senza rallentare i diretti.
-     *
-     * Parte **dopo** che la lista principale e' gia' a schermo, in una coroutine
-     * sua, perche' la gamba Italo costa un paio di secondi e non deve pesare su
-     * chi cerca Milano-Roma e vuole solo la lista pulita. Silenzioso quando il
-     * flag e' spento o la tratta non e' del tipo giusto: nessun cartello, nessun
-     * indicatore, come se la funzione non esistesse.
-     */
     /**
      * I viaggi diretti quando partenza e arrivo sono della stessa rete fuori-RFI.
      *
@@ -208,26 +200,54 @@ class ResultsViewModel(
         }
     }
 
-    private fun cercaMisti(direttoMigliore: java.time.Duration?) {
+    /**
+     * Le soluzioni che la ricerca principale non copre, cercate **dopo** e in
+     * asincrono: sono lente (rete, spesso vuote) e i diretti Trenitalia/Trenord
+     * sono gia' a schermo.
+     *
+     *  - **Italo diretti** su una tratta tutta-Italo (es. Napoli→Roma): la ricerca
+     *    A→B interroga solo Le Frecce e Trenord, Italo no. Come i diretti EAV/ARST,
+     *    ma via rete e solo per oggi — il suo real-time non va oltre. Non serve la beta.
+     *  - **Viaggi misti** (beta): feeder fuori-RFI piu' alta velocita'.
+     *
+     * EAV e ARST diretti restano invece **sincroni** (orario imbarcato, istantaneo,
+     * e spesso sono l'unico risultato della tratta): vedi [direttiFuoriRfi].
+     */
+    private fun cercaAltreSoluzioni(direttoMigliore: java.time.Duration?) {
         viewModelScope.launch {
             val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
-            // Un misto ha sempre un cambio: niente con "solo diretti", e solo con
-            // la beta accesa. La regola sta in FiltroFonti, cosi' e' sotto test.
-            if (!FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)) return@launch
+            // Un misto ha sempre un cambio: niente con "solo diretti", e solo con la
+            // beta accesa (regola in FiltroFonti, sotto test). L'Italo diretto invece
+            // non dipende dalla beta: e' una fonte come le altre, solo asincrona.
+            val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
+            val vuoleItalo = DataSource.ITALO in sources &&
+                italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
+            if (!vuoleMisti && !vuoleItalo) return@launch
 
             _state.update { it.copy(loadingMisti = true) }
-            val trovati = runCatching { misti.cerca(from, to, departure, direttoMigliore, sources) }
-                .getOrDefault(emptyList())
+            val italoDiretti = if (vuoleItalo) {
+                runCatching { italo.itinerario(from.rfiCode!!, to.rfiCode!!, departure.toLocalDate()) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+            val mistiJ = if (vuoleMisti) {
+                runCatching { misti.cerca(from, to, departure, direttoMigliore, sources) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
 
             _state.update { s ->
                 val gia = s.journeys.map { it.key }.toHashSet()
-                // I misti non si arricchiscono col tempo reale aggregato: le loro
-                // gambe sono di reti diverse e il realtime si legge aprendo la
-                // singola corsa. Nascono quindi gia' "fermi" (loadingStatus = false),
-                // non "in aggiornamento". Si aggiungono evitando i doppioni con la
-                // lista, e si **riordina** per orario di partenza: un misto di sabato
-                // mattina non deve finire in fondo, dopo i diretti di domenica.
-                val nuove = trovati.map { it.toRow().copy(loadingStatus = false) }
+                // Ne' i misti ne' i diretti Italo si arricchiscono col tempo reale
+                // aggregato: le loro corse stanno fuori da ViaggiaTreno e il realtime
+                // si legge aprendo la singola corsa. Nascono quindi gia' "fermi"
+                // (loadingStatus = false), non "in aggiornamento". Si aggiungono
+                // evitando i doppioni, e si **riordina** per orario di partenza: un
+                // misto di sabato mattina non deve finire in fondo, dopo i diretti
+                // di domenica.
+                val nuove = (italoDiretti + mistiJ).map { it.toRow().copy(loadingStatus = false) }
                     .filter { it.key !in gia }
                 s.copy(
                     loadingMisti = false,

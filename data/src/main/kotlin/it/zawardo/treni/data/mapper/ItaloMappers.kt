@@ -75,15 +75,34 @@ fun ItaloBoardTrainDto.toBoardEntry(scheduledDate: LocalDate = LocalDate.now(ROM
  * separate ma numerate: `StationNumber` e' l'unico ordinamento di cui fidarsi.
  */
 private fun List<Pair<ItaloStopDto, Boolean>>.toStops(giorno: LocalDate): List<Stop> {
-    var ultimo: LocalDateTime? = null
+    // Il riferimento per il salto di mezzanotte lo danno **solo gli orari
+    // teorici**, che lungo una corsa crescono sempre. Gli orari reali no: un
+    // segnaposto ("01:00") su una fermata non ancora fatta, passato a `quando`,
+    // spingeva `ultimo` a domani, e da li' ogni orario teorico successivo
+    // risultava "prima" e slittava di un giorno — erano le corse Italo che
+    // uscivano con un arrivo "a 25 ore".
+    var ultimoTeorico: LocalDateTime? = null
 
-    /** Appoggia un orario sul giorno giusto: indietro vuol dire domani. */
-    fun quando(t: LocalTime?): LocalDateTime? {
+    /** Appoggia un orario teorico sul giorno giusto: indietro vuol dire domani. */
+    fun teorico(t: LocalTime?): LocalDateTime? {
         if (t == null) return null
         var d = giorno.atTime(t)
-        val prima = ultimo
+        val prima = ultimoTeorico
         if (prima != null && d.isBefore(prima)) d = d.plusDays(1)
-        ultimo = d
+        ultimoTeorico = d
+        return d
+    }
+
+    /**
+     * L'orario reale sta sul giorno del suo teorico — gli e' vicino — e non fa
+     * da riferimento a nessuno. Senza teorico ripiega sull'ultimo giorno noto.
+     */
+    fun reale(t: LocalTime?, rif: LocalDateTime?): LocalDateTime? {
+        if (t == null) return null
+        val base = (rif ?: ultimoTeorico)?.toLocalDate() ?: giorno
+        var d = base.atTime(t)
+        // Reale molto prima del teorico: e' scattata la mezzanotte fra i due.
+        if (rif != null && d.isBefore(rif.minusHours(6))) d = d.plusDays(1)
         return d
     }
 
@@ -93,10 +112,10 @@ private fun List<Pair<ItaloStopDto, Boolean>>.toStops(giorno: LocalDate): List<S
 
         // Al capolinea di partenza non esiste un arrivo, a quello finale non
         // esiste una partenza: Italo li riempie con un segnaposto ("01:00").
-        val arrivoTeorico = if (primo) null else quando(dto.scheduledArrival.toTime())
-        val arrivoReale = if (primo) null else quando(dto.actualArrival.toTime())
-        val partenzaTeorica = if (ultimoIndice) null else quando(dto.scheduledDeparture.toTime())
-        val partenzaReale = if (ultimoIndice) null else quando(dto.actualDeparture.toTime())
+        val arrivoTeorico = if (primo) null else teorico(dto.scheduledArrival.toTime())
+        val arrivoReale = if (primo) null else reale(dto.actualArrival.toTime(), arrivoTeorico)
+        val partenzaTeorica = if (ultimoIndice) null else teorico(dto.scheduledDeparture.toTime())
+        val partenzaReale = if (ultimoIndice) null else reale(dto.actualDeparture.toTime(), partenzaTeorica)
 
         Stop(
             index = dto.index,
