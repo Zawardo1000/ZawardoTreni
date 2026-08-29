@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.Handshake
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
@@ -40,8 +41,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import it.zawardo.treni.BuildConfig
@@ -202,11 +207,9 @@ fun AboutScreen(onBack: () -> Unit) {
                     "modo di non meritare fiducia. Ecco dove l'app sa meno, e perché.\n\n" +
                     "• Italo compare solo per le corse in circolazione in quel momento — " +
                     "in viaggio o in partenza a breve, non l'intera giornata — e senza " +
-                    "prezzo. L'orario completo, i giorni futuri e le tariffe, chi possiede " +
-                    "quei dati sceglie di non offrirli apertamente a un'app come questa. È " +
-                    "una sua decisione, legittima, e la rispetto: rispettarla vuol dire " +
-                    "non cercare il modo di averli comunque. Per la coincidenza veloce nei " +
-                    "giorni futuri c'è la Freccia, che l'orario completo lo pubblica.\n\n" +
+                    "prezzo. Orario completo, giorni futuri e tariffe mancano per una mia " +
+                    "scelta, spiegata qui sotto. Per la coincidenza veloce nei giorni " +
+                    "futuri c'è la Freccia, che l'orario completo lo pubblica.\n\n" +
                     "• I prezzi ci sono per Trenitalia e Trenord, non per Italo — stesso " +
                     "motivo. Su un viaggio con cambio il prezzo è dell'intera soluzione, " +
                     "dove chi lo espone lo dà, e mai della sola corsa Italo: mostrarne " +
@@ -220,6 +223,33 @@ fun AboutScreen(onBack: () -> Unit) {
                     "• Sono tutti servizi pubblici ma non documentati: nessuno garantisce " +
                     "che domani rispondano come oggi. Se una fonte si rompe, l'app te lo " +
                     "dice invece di inventare.",
+            )
+
+            Section(
+                icon = Icons.Outlined.Handshake,
+                title = "Su Italo: una scelta, non un limite tecnico",
+                body = buildAnnotatedString {
+                    append(
+                        "Il resto dei dati Italo si prenderebbe lo stesso: il modo " +
+                            "tecnico c'è, e altre app lo usano.\n\n" +
+                            "Io no. Chi quei dati li possiede ha scelto di non darli a " +
+                            "un'app come questa, ed è una scelta che ha il diritto di " +
+                            "fare. Aggirarla resterebbe un aggiramento anche riuscendo " +
+                            "benissimo: il rispetto di una scelta altrui vale poco se " +
+                            "dura solo finché costa niente.\n\n" +
+                            "Quindi di Italo trovi quello che Italo pubblica in chiaro: le " +
+                            "corse in circolazione, col ritardo e il binario. Il resto no.\n\n" +
+                            "Il codice però è aperto. Chi la pensa diversamente può " +
+                            "forkarlo, ",
+                    )
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append("rispettandone la licenza")
+                    }
+                    append(
+                        ", e aggiungere quei dati come preferisce: da lì in poi la " +
+                            "responsabilità è sua, non mia.",
+                    )
+                },
             )
 
             SourceLink(
@@ -332,7 +362,11 @@ private fun LicenseLink(onClick: () -> Unit) {
 }
 
 @Composable
-private fun Section(icon: ImageVector, title: String, body: String) {
+private fun Section(icon: ImageVector, title: String, body: String) =
+    Section(icon, title, AnnotatedString(body))
+
+@Composable
+private fun Section(icon: ImageVector, title: String, body: AnnotatedString) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SectionHeader(icon = icon, title = title)
         Text(

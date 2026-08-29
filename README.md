@@ -58,10 +58,9 @@ Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del 
 Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
 
 - **Italo**: solo le corse in circolazione in quel momento — in viaggio o in partenza
-  a breve, non l'intera giornata — e senza prezzo. L'orario completo, i giorni futuri
-  e le tariffe, chi possiede quei dati sceglie di non renderli disponibili apertamente
-  a un'app come questa: è una sua decisione legittima, e la si rispetta — non la si
-  aggira. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
+  a breve, non l'intera giornata — e senza prezzo. Orario completo, giorni futuri e
+  tariffe mancano per scelta: vedi [Su Italo](#su-italo-una-scelta-non-un-limite-tecnico)
+  qui sotto. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
   completo lo pubblica.
 - **Prezzi**: presenti per Trenitalia (Le Frecce) e Trenord, non per Italo — stesso
   motivo. Su un viaggio con cambio è il prezzo dell'intera soluzione, dove il gestore
@@ -70,6 +69,25 @@ Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
   tempo reale non lo pubblicano. In cambio è l'unica che risponda per i giorni futuri.
 - **Orari imbarcati (EAV, ARST)**: una fotografia, rinfrescata a soglie di qualche
   mese; un cambio d'orario appena entrato in vigore può non esserci ancora.
+
+### Su Italo: una scelta, non un limite tecnico
+
+Il resto dei dati Italo si prenderebbe lo stesso: dal sito, con un backend che si
+finge un browser e ne raccoglie le risposte. Non è nemmeno difficile, e altre app lo
+fanno.
+
+Qui non si fa. Quel sito è costruito apposta perché una cosa del genere non funzioni,
+e quella è già la risposta di chi i dati li possiede: così non li dà. È una risposta
+che ha il diritto di dare, e aggirarla per via tecnica resterebbe un aggiramento anche
+riuscendo benissimo. Il rispetto di una scelta altrui vale poco se dura solo finché
+costa niente.
+
+Quindi di Italo c'è quello che Italo pubblica in chiaro — le corse in circolazione,
+col ritardo e il binario — e nient'altro.
+
+Il codice però è aperto: chi la pensa diversamente può forkarlo, **rispettandone la
+licenza** (GPL v3: il derivato resta aperto e cita l'origine), e aggiungere quei dati
+come preferisce, assumendosene la responsabilità.
 
 ## Build
 
