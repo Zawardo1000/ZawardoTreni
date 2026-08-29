@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -155,7 +156,7 @@ fun SearchScreen(
                 .fillMaxSize()
                 .padding(inner)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SearchCard(
                 state = state,
@@ -341,7 +342,7 @@ private fun SearchCard(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
             // I due campi e il pulsante inverti condividono la stessa riga: il
             // pulsante sta in mezzo, fra partenza e arrivo.
@@ -453,7 +454,7 @@ private fun SearchOptions(
     onSave: () -> Unit,
     onSearch: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -538,7 +539,13 @@ private fun ToggleRow(
                 )
             }
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        // Un po' piu' piccoli dei canonici: sono tre, e ogni riga risparmiata la
+        // guadagna la cronologia qui sotto.
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            modifier = Modifier.scale(0.85f),
+        )
     }
 }
 

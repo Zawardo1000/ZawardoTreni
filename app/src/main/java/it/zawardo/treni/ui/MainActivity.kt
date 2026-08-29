@@ -239,9 +239,7 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
     Scaffold(
         bottomBar = {
             if (showBar) {
-                // Un filo piu' bassa dei canonici 80.dp: la barra sta sotto ogni
-                // schermata, e i pixel che le tolgo qui li guadagna la lista.
-                NavigationBar(Modifier.height(64.dp)) {
+                NavigationBar {
                     tabs.forEach { tab ->
                         val selected = destination?.hasRoute(tab.kClass) == true
                         NavigationBarItem(
