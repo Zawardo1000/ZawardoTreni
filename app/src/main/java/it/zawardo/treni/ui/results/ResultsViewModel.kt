@@ -220,13 +220,15 @@ class ResultsViewModel(
                 .getOrDefault(emptyList())
 
             _state.update { s ->
+                val gia = s.journeys.map { it.key }.toHashSet()
                 // I misti non si arricchiscono col tempo reale aggregato: le loro
                 // gambe sono di reti diverse e il realtime si legge aprendo la
-                // singola corsa. Si aggiungono evitando i doppioni con la lista,
-                // e si **riordina** per orario di partenza: un misto di sabato
+                // singola corsa. Nascono quindi gia' "fermi" (loadingStatus = false),
+                // non "in aggiornamento". Si aggiungono evitando i doppioni con la
+                // lista, e si **riordina** per orario di partenza: un misto di sabato
                 // mattina non deve finire in fondo, dopo i diretti di domenica.
-                val gia = s.journeys.map { it.key }.toHashSet()
-                val nuove = trovati.map { it.toRow() }.filter { it.key !in gia }
+                val nuove = trovati.map { it.toRow().copy(loadingStatus = false) }
+                    .filter { it.key !in gia }
                 s.copy(
                     loadingMisti = false,
                     journeys = (s.journeys + nuove).sortedBy { it.journey.departure },

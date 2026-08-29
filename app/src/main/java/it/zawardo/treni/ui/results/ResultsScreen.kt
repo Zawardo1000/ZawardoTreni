@@ -1,6 +1,8 @@
 package it.zawardo.treni.ui.results
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -257,19 +259,36 @@ fun ResultsScreen(
                         )
                     }
 
-                    if (state.loadingMisti) {
-                        item {
-                            // I misti arrivano dopo i diretti: la gamba Italo costa
-                            // un paio di secondi. Un rigo lo dice, senza bloccare.
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Text(
-                                    "  Cerco soluzioni con più operatori…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                }
+            }
+
+            // Mentre arrivano le soluzioni con piu' operatori (una manciata di
+            // secondi: feeder + alta velocita' + risoluzione dell'hub), un velo
+            // semitrasparente copre la lista e ne blocca il tocco. La ragione non
+            // e' estetica: i diretti sono gia' a schermo e un misto puo' essere
+            // migliore, quindi non si lascia scegliere su una lista incompleta.
+            if (state.loadingMisti) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(
+                            "Cerco soluzioni con più operatori…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
