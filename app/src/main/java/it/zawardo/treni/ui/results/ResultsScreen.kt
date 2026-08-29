@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.ui.TrainRoute
@@ -401,7 +402,7 @@ private fun JourneyCard(
                      * per colpa dell'app; non scrivere niente e' piu' onesto e
                      * piu' pulito.
                      */
-                    j.price?.let { p ->
+                    (j.price ?: j.partialPrice)?.let { p ->
                         Text(
                             if (p.saleable) p.formatted else "${p.formatted} · esaurito",
                             style = MaterialTheme.typography.bodyMedium,
@@ -413,14 +414,22 @@ private fun JourneyCard(
                             },
                         )
                         /*
-                         * Su un viaggio con cambio va detto che il prezzo e' del
-                         * viaggio intero, cambi compresi, non di una sola tratta.
-                         * Il BFF lo da' gia' come totale, ma da utente si e' in
-                         * dubbio: la riga toglie l'ambiguita'.
+                         * Sotto il prezzo, cosa copre.
+                         *
+                         * Su un viaggio con cambio interno alla rete e' del viaggio
+                         * intero, cambi compresi (il BFF lo da' gia' come totale, ma
+                         * da utente si e' in dubbio). Su un misto e' invece il solo
+                         * parziale di chi lo pubblica — la Freccia, o Trenord — e va
+                         * detto forte, o quella cifra sembrerebbe il costo di tutto.
                          */
-                        if (!j.isDirect) {
+                        val etichettaPrezzo = when {
+                            j.price != null && !j.isDirect -> "intero viaggio"
+                            j.partialPrice != null -> "solo " + operatoreParziale(j)
+                            else -> null
+                        }
+                        etichettaPrezzo?.let {
                             Text(
-                                "intero viaggio",
+                                it,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -477,11 +486,16 @@ private fun JourneyCard(
             }
 
             if (j.assembled) {
-                // Il prezzo di un misto e' parziale: la gamba Italo non lo
-                // pubblica. Dirlo qui evita che la sua assenza sembri un difetto.
+                // Italo si nomina solo se una gamba e' davvero Italo: su EAV piu'
+                // Freccia il prezzo c'e' (parziale, gia' etichettato sopra), e
+                // tirare in ballo Italo dove non c'entra confonderebbe.
+                val conItalo = j.legs.any { it.source == DataSource.ITALO }
                 Text(
-                    "Cambio fra operatori diversi. Il prezzo Italo non è " +
-                        "disponibile; verifica orari e biglietti sui siti dei gestori.",
+                    buildString {
+                        append("Cambio fra operatori diversi. ")
+                        if (conItalo) append("Il prezzo Italo non è disponibile. ")
+                        append("Verifica orari e biglietti sui siti dei gestori.")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -594,6 +608,16 @@ private fun formatDuration(minutes: Long): String {
     val m = minutes % 60
     return if (h > 0) "${h}h ${m.toString().padStart(2, '0')}" else "${m} min"
 }
+
+/**
+ * L'operatore che pubblica il prezzo parziale di un misto.
+ *
+ * E' la gamba che vende biglietti — Trenitalia (la Freccia) o Trenord — l'unica
+ * che possa avere un prezzo dentro un viaggio assemblato.
+ */
+private fun operatoreParziale(j: Journey): String =
+    j.legs.firstOrNull { it.source == DataSource.TRENITALIA || it.source == DataSource.TRENORD }
+        ?.source?.label ?: "un operatore"
 
 @Composable
 private fun Message(text: String, modifier: Modifier = Modifier) {

@@ -176,15 +176,20 @@ internal object MotoreViaggiMisti {
             cancelled = prima.cancelled || seconda.cancelled,
             partiallyCancelled = prima.partiallyCancelled || seconda.partiallyCancelled,
             /*
-             * Nessun prezzo sul viaggio assemblato.
+             * Nessun prezzo *intero* sul viaggio assemblato.
              *
              * Sommare i prezzi delle due meta' darebbe una cifra falsamente
-             * precisa: un misto quasi sempre ha una gamba Italo, di cui il
-             * prezzo non si conosce, e mostrare solo meta' del costo come se
-             * fosse il totale sarebbe peggio che tacere. Il prezzo delle singole
-             * gambe resta leggibile aprendo le corse.
+             * precisa: quasi sempre una gamba (Italo, o il feeder fuori-RFI) il
+             * prezzo non lo pubblica, e mostrare solo meta' del costo come se
+             * fosse il totale sarebbe peggio che tacere.
              */
             price = null,
+            /*
+             * Ma la meta' che un prezzo ce l'ha — la Freccia, o Trenord — si
+             * porta come parziale, etichettato per operatore: il feeder e Italo
+             * non lo espongono, quindi al piu' una sola gamba lo ha.
+             */
+            partialPrice = listOf(prima, seconda).firstNotNullOfOrNull { it.price },
             assembled = true,
         )
     }

@@ -106,6 +106,17 @@ data class Journey(
      */
     val price: Price? = null,
     /**
+     * Il prezzo di **una sola gamba** di un viaggio misto: quella che lo pubblica
+     * (la Freccia di Trenitalia, o Trenord) quando l'altra no (EAV, ARST, Italo).
+     *
+     * Non e' il costo del viaggio — quello resta ignoto, e per questo [price] su un
+     * misto e' null — ma dire la parte che si conosce, etichettata con l'operatore
+     * che la vende, e' piu' utile che tacere tutto. Distinto da [price] apposta:
+     * [price] e' il totale di una soluzione intera, questo e' un pezzo dichiarato
+     * come tale. Nullo quando nessuna gamba ha un prezzo (es. EAV piu' Italo).
+     */
+    val partialPrice: Price? = null,
+    /**
      * Vero quando questo viaggio l'abbiamo **costruito noi** concatenando piu'
      * operatori, invece di riceverlo gia' fatto da una sorgente.
      *

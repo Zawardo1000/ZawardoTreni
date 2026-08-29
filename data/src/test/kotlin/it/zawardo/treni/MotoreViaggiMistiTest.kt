@@ -4,6 +4,7 @@ import it.zawardo.treni.data.misti.MotoreViaggiMisti
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
+import it.zawardo.treni.domain.model.Price
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TransportKind
 import org.junit.Assert.assertEquals
@@ -83,6 +84,31 @@ class MotoreViaggiMistiTest {
         assertEquals("tre gambe: EAV, a piedi, Italo", 3, j.legs.size)
         assertEquals("la gamba di mezzo e' a piedi", TransportKind.WALK, j.legs[1].kind)
         assertTrue("il misto non porta prezzo", j.price == null)
+    }
+
+    @Test
+    fun `il parziale del misto e' il prezzo della gamba che lo pubblica`() {
+        // EAV Sorrento -> Garibaldi (senza prezzo), poi a piedi, poi la Freccia
+        // Napoli -> Roma, che un prezzo ce l'ha: quello si tiene, come parziale.
+        val eav = viaggio(leg(sorrento, garibaldi, "08:00", "09:10", "EAV-A", DataSource.EAV))
+        val freccia = viaggio(
+            leg(napoliC, roma, "09:40", "10:50", "9500", DataSource.TRENITALIA, "Frecciarossa"),
+        ).copy(price = Price("29.90"))
+
+        val out = MotoreViaggiMisti.assembla(prime = listOf(eav), seconde = listOf(freccia))
+        assertEquals(1, out.size)
+        val j = out.first()
+        assertTrue("il prezzo intero resta ignoto", j.price == null)
+        assertEquals("il parziale e' quello della Freccia", "29.90", j.partialPrice?.amount)
+    }
+
+    @Test
+    fun `con la sola gamba Italo il misto non ha nemmeno il parziale`() {
+        val eav = viaggio(leg(sorrento, garibaldi, "08:00", "09:10", "EAV-A", DataSource.EAV))
+        val italo = viaggio(leg(napoliC, roma, "09:40", "10:50", "9910", DataSource.ITALO))
+        val out = MotoreViaggiMisti.assembla(prime = listOf(eav), seconde = listOf(italo))
+        assertEquals(1, out.size)
+        assertTrue("Italo non pubblica prezzi", out.first().partialPrice == null)
     }
 
     @Test
