@@ -504,57 +504,41 @@ private fun SearchOptions(
 
         HorizontalDivider()
 
-        // I due interruttori condividono la stessa forma: sono entrambi
-        // preferenze che restano, non azioni della singola ricerca.
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Solo diretti", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Nasconde le soluzioni con cambi",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = state.directOnly, onCheckedChange = onToggleDirectOnly)
-        }
+        // Preferenze che restano, non azioni della singola ricerca. Tenute
+        // strette di proposito: qui sotto c'e' la cronologia, e ogni riga di
+        // troppo le porta via una voce dalla vista. La spiegazione lunga della
+        // beta vive nell'Info, non di fianco all'interruttore.
+        ToggleRow("Solo diretti", state.directOnly, onToggleDirectOnly)
+        ToggleRow(
+            "Più operatori · beta",
+            state.viaggiMisti,
+            onToggleViaggiMisti,
+            subtitle = "Combina reti diverse in un viaggio con cambi. Più lenta.",
+        )
+        ToggleRow("Ricorda ultima ricerca", state.rememberLast, onToggleRemember)
+    }
+}
 
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Soluzioni con più operatori · beta", style = MaterialTheme.typography.bodyMedium)
+/** Interruttore di preferenza: titolo, un eventuale rigo di aiuto, e lo switch. */
+@Composable
+private fun ToggleRow(
+    title: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    subtitle: String? = null,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            if (subtitle != null) {
                 Text(
-                    "Combina reti diverse, es. Circumvesuviana più Freccia o Italo. " +
-                        "Più lenta; di Italo solo i treni in circolazione ora, senza prezzo.",
+                    subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = state.viaggiMisti, onCheckedChange = onToggleViaggiMisti)
         }
-
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Ricorda ultima ricerca", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    if (state.rememberLast) {
-                        "All'apertura ripropone le stazioni, con l'orario di adesso"
-                    } else {
-                        "All'apertura i campi restano vuoti"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = state.rememberLast, onCheckedChange = onToggleRemember)
-        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
