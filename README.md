@@ -57,8 +57,9 @@ Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del 
 
 Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
 
-- **Italo**: solo la giornata corrente, e senza prezzo. L'orario dei giorni futuri e
-  le tariffe, chi possiede quei dati sceglie di non renderli disponibili apertamente
+- **Italo**: solo le corse in circolazione in quel momento — in viaggio o in partenza
+  a breve, non l'intera giornata — e senza prezzo. L'orario completo, i giorni futuri
+  e le tariffe, chi possiede quei dati sceglie di non renderli disponibili apertamente
   a un'app come questa: è una sua decisione legittima, e la si rispetta — non la si
   aggira. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
   completo lo pubblica.

@@ -200,12 +200,14 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = "Dove i dati sono limitati",
                 body = "Nessuna fonte è completa, e dirti il contrario sarebbe il primo " +
                     "modo di non meritare fiducia. Ecco dove l'app sa meno, e perché.\n\n" +
-                    "• Italo compare solo per oggi, e senza prezzo. L'orario dei giorni " +
-                    "futuri e le tariffe, chi possiede quei dati sceglie di non offrirli " +
-                    "apertamente a un'app come questa. È una sua decisione, legittima, e la " +
-                    "rispetto: non giro attorno a una porta che il proprietario ha deciso " +
-                    "di tenere chiusa. Per la coincidenza veloce nei giorni futuri c'è la " +
-                    "Freccia, che l'orario completo lo pubblica.\n\n" +
+                    "• Italo compare solo per le corse in circolazione in quel momento — " +
+                    "in viaggio o in partenza a breve, non l'intera giornata — e senza " +
+                    "prezzo. L'orario completo, i giorni futuri e le tariffe, chi possiede " +
+                    "quei dati sceglie di non offrirli apertamente a un'app come questa. È " +
+                    "una sua decisione, legittima, e la rispetto: non giro attorno a una " +
+                    "porta che il proprietario ha deciso di tenere chiusa. Per la " +
+                    "coincidenza veloce nei giorni futuri c'è la Freccia, che l'orario " +
+                    "completo lo pubblica.\n\n" +
                     "• I prezzi ci sono per Trenitalia e Trenord, non per Italo — stesso " +
                     "motivo. Su un viaggio con cambio il prezzo è dell'intera soluzione, " +
                     "dove chi lo espone lo dà, e mai della sola gamba Italo: mostrarne " +
