@@ -247,7 +247,13 @@ class ResultsViewModel(
                 // evitando i doppioni, e si **riordina** per orario di partenza: un
                 // misto di sabato mattina non deve finire in fondo, dopo i diretti
                 // di domenica.
-                val nuove = (italoDiretti + mistiJ).map { it.toRow().copy(loadingStatus = false) }
+                // Solo dall'ora cercata in avanti, come la ricerca principale.
+                // Italo traccia tutto il giorno (comprese le corse gia' partite) e
+                // un misto puo' avere un feeder mattutino: senza questo filtro la
+                // lista guiderebbe con orari che non si prendono piu'.
+                val nuove = (italoDiretti + mistiJ)
+                    .filter { !it.departure.isBefore(departure) }
+                    .map { it.toRow().copy(loadingStatus = false) }
                     .filter { it.key !in gia }
                 s.copy(
                     loadingMisti = false,
