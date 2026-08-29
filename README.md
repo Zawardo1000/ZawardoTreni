@@ -53,6 +53,23 @@ risponde `204` per qualsiasi altra data. Per le date future l'app mostra il solo
 Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del modulo
 `:data`, accanto al codice che le aggira.
 
+### Limiti dei dati
+
+Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
+
+- **Italo**: solo la giornata corrente, e senza prezzo. L'orario dei giorni futuri e
+  le tariffe, chi possiede quei dati sceglie di non renderli disponibili apertamente
+  a un'app come questa: è una sua decisione legittima, e la si rispetta — non la si
+  aggira. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
+  completo lo pubblica.
+- **Prezzi**: presenti per Trenitalia (Le Frecce) e Trenord, non per Italo — stesso
+  motivo. Su un viaggio con cambio è il prezzo dell'intera soluzione, dove il gestore
+  lo espone, e mai della sola gamba Italo.
+- **ARST**: solo orario previsto, mai il ritardo o il binario — quelle ferrovie un
+  tempo reale non lo pubblicano. In cambio è l'unica che risponda per i giorni futuri.
+- **Orari imbarcati (EAV, ARST)**: una fotografia, rinfrescata a soglie di qualche
+  mese; un cambio d'orario appena entrato in vigore può non esserci ancora.
+
 ## Build
 
 Il progetto non richiede Android Studio. La toolchain è portabile e vive in `.tools/`

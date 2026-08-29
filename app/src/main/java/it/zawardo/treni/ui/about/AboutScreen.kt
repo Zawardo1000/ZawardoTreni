@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoneyOff
 import androidx.compose.ui.Alignment
@@ -192,6 +193,32 @@ fun AboutScreen(onBack: () -> Unit) {
                     "Le coordinate delle fermate Ferrotramviaria vengono da " +
                     "OpenStreetMap, © i suoi contributori, con licenza ODbL: " +
                     "l'orario aperto dell'azienda non è più raggiungibile.",
+            )
+
+            Section(
+                icon = Icons.Outlined.Info,
+                title = "Dove i dati sono limitati",
+                body = "Nessuna fonte è completa, e dirti il contrario sarebbe il primo " +
+                    "modo di non meritare fiducia. Ecco dove l'app sa meno, e perché.\n\n" +
+                    "• Italo compare solo per oggi, e senza prezzo. L'orario dei giorni " +
+                    "futuri e le tariffe, chi possiede quei dati sceglie di non offrirli " +
+                    "apertamente a un'app come questa. È una sua decisione, legittima, e la " +
+                    "rispetto: non giro attorno a una porta che il proprietario ha deciso " +
+                    "di tenere chiusa. Per la coincidenza veloce nei giorni futuri c'è la " +
+                    "Freccia, che l'orario completo lo pubblica.\n\n" +
+                    "• I prezzi ci sono per Trenitalia e Trenord, non per Italo — stesso " +
+                    "motivo. Su un viaggio con cambio il prezzo è dell'intera soluzione, " +
+                    "dove chi lo espone lo dà, e mai della sola gamba Italo: mostrarne " +
+                    "metà come fosse il totale ingannerebbe.\n\n" +
+                    "• ARST, in Sardegna, dà l'orario previsto ma mai il ritardo o il " +
+                    "binario: quelle ferrovie un tempo reale non lo pubblicano affatto. In " +
+                    "cambio è l'unica che risponda anche per i giorni futuri.\n\n" +
+                    "• Gli orari di EAV e ARST viaggiano dentro l'app: sono una fotografia, " +
+                    "rinfrescata quando invecchia di qualche mese. Un cambiamento d'orario " +
+                    "appena entrato in vigore può non esserci ancora.\n\n" +
+                    "• Sono tutti servizi pubblici ma non documentati: nessuno garantisce " +
+                    "che domani rispondano come oggi. Se una fonte si rompe, l'app te lo " +
+                    "dice invece di inventare.",
             )
 
             SourceLink(
