@@ -65,7 +65,7 @@ Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
   completo lo pubblica.
 - **Prezzi**: presenti per Trenitalia (Le Frecce) e Trenord, non per Italo — stesso
   motivo. Su un viaggio con cambio è il prezzo dell'intera soluzione, dove il gestore
-  lo espone, e mai della sola gamba Italo.
+  lo espone, e mai della sola corsa Italo.
 - **ARST**: solo orario previsto, mai il ritardo o il binario — quelle ferrovie un
   tempo reale non lo pubblicano. In cambio è l'unica che risponda per i giorni futuri.
 - **Orari imbarcati (EAV, ARST)**: una fotografia, rinfrescata a soglie di qualche
