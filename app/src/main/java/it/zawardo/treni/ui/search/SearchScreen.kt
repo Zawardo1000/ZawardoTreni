@@ -186,7 +186,6 @@ fun SearchScreen(
                 onNow = vm::setNow,
                 onToggleRemember = vm::setRememberLast,
                 onToggleDirectOnly = vm::setDirectOnly,
-                onToggleViaggiMisti = vm::setViaggiMisti,
                 onSave = vm::saveCurrent,
                 onUseLocation = {
                     keyboard?.hide()
@@ -240,6 +239,8 @@ fun SearchScreen(
         SourcesDialog(
             enabled = sources,
             onToggle = vm::setSourceEnabled,
+            viaggiMisti = state.viaggiMisti,
+            onToggleViaggiMisti = vm::setViaggiMisti,
             onDismiss = { showSources = false },
         )
     }
@@ -257,6 +258,8 @@ fun SearchScreen(
 private fun SourcesDialog(
     enabled: Set<DataSource>,
     onToggle: (DataSource, Boolean) -> Unit,
+    viaggiMisti: Boolean,
+    onToggleViaggiMisti: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -315,6 +318,34 @@ private fun SourcesDialog(
                         )
                     }
                 }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+                /*
+                 * Il multi-operatore sta fra le fonti perche' e' proprio questo:
+                 * il permesso di combinarle in un viaggio con cambi che nessuna
+                 * da sola conosce. Qui c'e' lo spazio per dire cosa comporta, che
+                 * di fianco alla ricerca non c'era, e la lista respira senza.
+                 */
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleViaggiMisti(!viaggiMisti) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Più operatori · beta", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Combina reti diverse in un viaggio con cambi — es. " +
+                                "Circumvesuviana più Freccia o Italo. Più lenta; di Italo " +
+                                "solo i treni in circolazione ora, senza prezzo.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = viaggiMisti, onCheckedChange = onToggleViaggiMisti)
+                }
             }
         },
     )
@@ -333,7 +364,6 @@ private fun SearchCard(
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
     onToggleDirectOnly: (Boolean) -> Unit,
-    onToggleViaggiMisti: (Boolean) -> Unit,
     onSave: () -> Unit,
     onUseLocation: () -> Unit,
     onSearch: () -> Unit,
@@ -422,7 +452,6 @@ private fun SearchCard(
                     onNow = onNow,
                     onToggleRemember = onToggleRemember,
                     onToggleDirectOnly = onToggleDirectOnly,
-                    onToggleViaggiMisti = onToggleViaggiMisti,
                     onSave = onSave,
                     onSearch = onSearch,
                 )
@@ -450,7 +479,6 @@ private fun SearchOptions(
     onNow: () -> Unit,
     onToggleRemember: (Boolean) -> Unit,
     onToggleDirectOnly: (Boolean) -> Unit,
-    onToggleViaggiMisti: (Boolean) -> Unit,
     onSave: () -> Unit,
     onSearch: () -> Unit,
 ) {
@@ -507,15 +535,9 @@ private fun SearchOptions(
 
         // Preferenze che restano, non azioni della singola ricerca. Tenute
         // strette di proposito: qui sotto c'e' la cronologia, e ogni riga di
-        // troppo le porta via una voce dalla vista. La spiegazione lunga della
-        // beta vive nell'Info, non di fianco all'interruttore.
+        // troppo le porta via una voce dalla vista. Il multi-operatore beta e'
+        // migrato fra le Fonti dati, che e' esattamente cio' che decide.
         ToggleRow("Solo diretti", state.directOnly, onToggleDirectOnly)
-        ToggleRow(
-            "Più operatori · beta",
-            state.viaggiMisti,
-            onToggleViaggiMisti,
-            subtitle = "Combina reti diverse in un viaggio con cambi. Più lenta.",
-        )
         ToggleRow("Ricorda ultima ricerca", state.rememberLast, onToggleRemember)
     }
 }
