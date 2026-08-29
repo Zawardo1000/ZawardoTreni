@@ -222,12 +222,19 @@ class ResultsViewModel(
                 val gia = s.journeys.map { it.key }.toHashSet()
                 // Ne' i misti ne' i diretti Italo si arricchiscono col tempo reale
                 // aggregato: le loro corse stanno fuori da ViaggiaTreno e il realtime
-                // si legge aprendo la singola corsa. Nascono quindi gia' "fermi"
-                // (loadingStatus = false). Solo dall'ora cercata in avanti, come la
-                // ricerca principale: Italo traccia anche le corse gia' partite e un
-                // misto puo' avere un feeder mattutino, orari che non si prendono piu'.
+                // si legge aprendo la singola corsa. Nascono quindi gia' "fermi".
+                //
+                // Dall'ora cercata in avanti, come la ricerca principale — ma con
+                // una **grazia sui misti**. Un EAV+Italo e' raro, e le coincidenze
+                // Italo in tempo reale sono a singhiozzo: perderne una perche' il
+                // feeder e' partito cinque minuti fa la farebbe sparire del tutto,
+                // mentre vedere che *esiste* vale piu' del "l'hai persa per poco".
+                // Cosi' un misto resta fino a [GRAZIA_MISTI] prima dell'ora cercata;
+                // l'Italo diretto — corsa nazionale singola, di cui ce n'e' a bizzeffe
+                // — resta stretto.
+                val grazia = departure.minus(GRAZIA_MISTI)
                 val nuove = trovate
-                    .filter { !it.departure.isBefore(departure) }
+                    .filter { !it.departure.isBefore(if (it.assembled) grazia else departure) }
                     .map { it.toRow().copy(loadingStatus = false) }
                     .filter { it.key !in gia }
                 s.copy(
@@ -474,5 +481,13 @@ class ResultsViewModel(
 
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15
+
+        /**
+         * Grazia sui viaggi misti: si tengono anche se il feeder e' partito da
+         * poco. Le coincidenze Italo in tempo reale sono rare, e perderne una per
+         * una manciata di minuti la farebbe sparire del tutto. Non si applica ai
+         * diretti nazionali, di cui ce n'e' in abbondanza.
+         */
+        val GRAZIA_MISTI: java.time.Duration = java.time.Duration.ofMinutes(20)
     }
 }
