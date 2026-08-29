@@ -215,43 +215,18 @@ class ResultsViewModel(
      */
     private fun cercaAltreSoluzioni(direttoMigliore: java.time.Duration?) {
         viewModelScope.launch {
-            val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
-            // Un misto ha sempre un cambio: niente con "solo diretti", e solo con la
-            // beta accesa (regola in FiltroFonti, sotto test). L'Italo diretto invece
-            // non dipende dalla beta: e' una fonte come le altre, solo asincrona.
-            val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
-            val vuoleItalo = DataSource.ITALO in sources &&
-                italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
-            if (!vuoleMisti && !vuoleItalo) return@launch
-
+            if (!componeAltre()) return@launch
             _state.update { it.copy(loadingMisti = true) }
-            val italoDiretti = if (vuoleItalo) {
-                runCatching { italo.itinerario(from.rfiCode!!, to.rfiCode!!, departure.toLocalDate()) }
-                    .getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
-            val mistiJ = if (vuoleMisti) {
-                runCatching { misti.cerca(from, to, departure, direttoMigliore, sources) }
-                    .getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
-
+            val trovate = altreSoluzioni(departure, direttoMigliore)
             _state.update { s ->
                 val gia = s.journeys.map { it.key }.toHashSet()
                 // Ne' i misti ne' i diretti Italo si arricchiscono col tempo reale
                 // aggregato: le loro corse stanno fuori da ViaggiaTreno e il realtime
                 // si legge aprendo la singola corsa. Nascono quindi gia' "fermi"
-                // (loadingStatus = false), non "in aggiornamento". Si aggiungono
-                // evitando i doppioni, e si **riordina** per orario di partenza: un
-                // misto di sabato mattina non deve finire in fondo, dopo i diretti
-                // di domenica.
-                // Solo dall'ora cercata in avanti, come la ricerca principale.
-                // Italo traccia tutto il giorno (comprese le corse gia' partite) e
-                // un misto puo' avere un feeder mattutino: senza questo filtro la
-                // lista guiderebbe con orari che non si prendono piu'.
-                val nuove = (italoDiretti + mistiJ)
+                // (loadingStatus = false). Solo dall'ora cercata in avanti, come la
+                // ricerca principale: Italo traccia anche le corse gia' partite e un
+                // misto puo' avere un feeder mattutino, orari che non si prendono piu'.
+                val nuove = trovate
                     .filter { !it.departure.isBefore(departure) }
                     .map { it.toRow().copy(loadingStatus = false) }
                     .filter { it.key !in gia }
@@ -261,6 +236,47 @@ class ResultsViewModel(
                 )
             }
         }
+    }
+
+    /** Vero se la tratta puo' comporre misti o Italo diretti: decide il velo. */
+    private suspend fun componeAltre(): Boolean {
+        val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
+        val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
+        val vuoleItalo = DataSource.ITALO in sources &&
+            italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
+        return vuoleMisti || vuoleItalo
+    }
+
+    /**
+     * I misti (beta) e gli Italo diretti in partenza da [quando]; la finestra la
+     * ritaglia chi chiama (avanti o indietro).
+     *
+     * Self-gating: torna vuoto se la tratta non ne compone. La usano sia la prima
+     * ricerca sia la paginazione: su una tratta di soli misti — Sorrento-EAV, che
+     * il BFF non conosce e per cui `searchAll` e' muto — e' l'unico modo perche'
+     * «corse precedenti/successive» non restino vuote.
+     */
+    private suspend fun altreSoluzioni(
+        quando: LocalDateTime,
+        direttoMigliore: java.time.Duration?,
+    ): List<Journey> {
+        val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
+        val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
+        val vuoleItalo = DataSource.ITALO in sources &&
+            italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
+        val italoDiretti = if (vuoleItalo) {
+            runCatching { italo.itinerario(from.rfiCode!!, to.rfiCode!!, quando.toLocalDate()) }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val mistiJ = if (vuoleMisti) {
+            runCatching { misti.cerca(from, to, quando, direttoMigliore, sources) }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        return italoDiretti + mistiJ
     }
 
     /**
@@ -298,7 +314,25 @@ class ResultsViewModel(
             }
 
             if (found.isEmpty()) {
-                _state.update { it.copy(loadingEarlier = false, noMoreEarlier = true) }
+                // Tratta di soli misti (Sorrento-EAV: il BFF non la conosce):
+                // searchAll e' muto, ma feeder e Freccia girano anche prima. Si
+                // pesca la finestra precedente dei misti — gia' "fermi", come nella
+                // prima ricerca, e senza arricchimento in tempo reale.
+                val anchor = maxOf(first.minusHours(4), first.toLocalDate().atStartOfDay())
+                val existing = current.journeys.map { it.key }.toSet()
+                val rows = altreSoluzioni(anchor, null)
+                    .filter { it.departure.isBefore(first) }
+                    .map { it.toRow().copy(loadingStatus = false) }
+                    .filter { it.key !in existing }
+                    .sortedBy { it.journey.departure }
+                    .takeLast(PAGE)
+                _state.update { s ->
+                    s.copy(
+                        loadingEarlier = false,
+                        journeys = rows + s.journeys,
+                        noMoreEarlier = rows.isEmpty(),
+                    )
+                }
                 return@launch
             }
 
@@ -325,10 +359,26 @@ class ResultsViewModel(
             val batch = runCatching {
                 journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE, sources = sources)
             }.getOrNull()?.journeys.orEmpty().applyDirectFilter()
+                .filter { it.departure.isAfter(last) }
 
             val existing = current.journeys.map { it.key }.toSet()
+
+            if (batch.isEmpty()) {
+                // Tratta di soli misti: come per «corse precedenti», la finestra
+                // successiva la danno i misti — gia' "fermi", niente arricchimento.
+                val rows = altreSoluzioni(last.plusMinutes(1), null)
+                    .filter { it.departure.isAfter(last) }
+                    .map { it.toRow().copy(loadingStatus = false) }
+                    .filter { it.key !in existing }
+                    .sortedBy { it.journey.departure }
+                    .take(PAGE)
+                _state.update { s ->
+                    s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty())
+                }
+                return@launch
+            }
+
             val rows = batch
-                .filter { it.departure.isAfter(last) }
                 .map { it.toRow() }
                 .filter { it.key !in existing }
                 .take(PAGE)
