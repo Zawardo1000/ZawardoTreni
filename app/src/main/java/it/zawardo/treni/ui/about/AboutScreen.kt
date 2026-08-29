@@ -211,9 +211,13 @@ fun AboutScreen(onBack: () -> Unit) {
                     "scelta, spiegata qui sotto. Per la coincidenza veloce nei giorni " +
                     "futuri c'è la Freccia, che l'orario completo lo pubblica.\n\n" +
                     "• I prezzi ci sono per Trenitalia e Trenord, non per Italo — stesso " +
-                    "motivo. Su un viaggio con cambio il prezzo è dell'intera soluzione, " +
-                    "dove chi lo espone lo dà, e mai della sola corsa Italo: mostrarne " +
-                    "metà come fosse il totale ingannerebbe.\n\n" +
+                    "motivo. Su un viaggio con cambio interno alla stessa rete è il prezzo " +
+                    "dell'intera soluzione. Su un misto fra operatori diversi, dove una " +
+                    "tratta il prezzo lo pubblica — la Freccia, o Trenord — e l'altra no, " +
+                    "mostro il parziale che c'è, etichettato «solo Trenitalia» (o Trenord): " +
+                    "la parte che conosco, dichiarata per quella che è, vale più del " +
+                    "silenzio; sarebbe spacciarla per il totale, quello sì, a ingannare. " +
+                    "Se nessuna tratta ha un prezzo, come EAV più Italo, non mostro nulla.\n\n" +
                     "• ARST, in Sardegna, dà l'orario previsto ma mai il ritardo o il " +
                     "binario: quelle ferrovie un tempo reale non lo pubblicano affatto. In " +
                     "cambio è l'unica che risponda anche per i giorni futuri.\n\n" +

@@ -63,8 +63,11 @@ Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
   qui sotto. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
   completo lo pubblica.
 - **Prezzi**: presenti per Trenitalia (Le Frecce) e Trenord, non per Italo — stesso
-  motivo. Su un viaggio con cambio è il prezzo dell'intera soluzione, dove il gestore
-  lo espone, e mai della sola corsa Italo.
+  motivo. Su un cambio interno alla stessa rete è il prezzo dell'intera soluzione. Su un
+  misto fra operatori diversi, dove una tratta il prezzo lo pubblica (la Freccia, o
+  Trenord) e l'altra no, si mostra il **parziale** noto, etichettato «solo Trenitalia»
+  (o Trenord): dichiararlo per quello che è aiuta, spacciarlo per il totale
+  ingannerebbe. Se nessuna tratta ha un prezzo (EAV + Italo), non si mostra nulla.
 - **ARST**: solo orario previsto, mai il ritardo o il binario — quelle ferrovie un
   tempo reale non lo pubblicano. In cambio è l'unica che risponda per i giorni futuri.
 - **Orari imbarcati (EAV, ARST)**: una fotografia, rinfrescata a soglie di qualche
