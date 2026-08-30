@@ -312,6 +312,22 @@ data class TrainStatus(
     val lastDetectionTime: LocalDateTime?,
     val notice: String?,
     val stops: List<Stop>,
+    /**
+     * Falso quando questa corsa non viene da un tempo reale ma da un orario.
+     *
+     * Stessa distinzione di [BoardEntry.realtime], e per la stessa ragione:
+     * [delayMinutes] e' un intero, e uno zero che significa "nessuno lo sa"
+     * verrebbe letto come "confermato in orario". Succede su tre fronti — ARST,
+     * che il tempo reale non lo pubblica affatto; EAV fuori dal suo monitor; e
+     * qualunque rete per un **giorno diverso da oggi**, dove esiste solo
+     * l'orario di tabella.
+     *
+     * Quando e' falso, di questa corsa si conoscono le fermate e gli orari
+     * previsti e nient'altro: ritardo, binario reale e stato non sono assenti,
+     * sono inconoscibili, e chi la mostra deve dirlo invece di disegnare un
+     * treno puntuale.
+     */
+    val realtime: Boolean = true,
 ) {
     /** Indice dell'ultima fermata effettuata, -1 se non ancora partito. */
     val currentStopIndex: Int

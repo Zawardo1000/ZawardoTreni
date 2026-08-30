@@ -43,12 +43,20 @@ produzione: possono cambiare o smettere di funzionare senza preavviso. Fanno ecc
 due GTFS, che sono open data pubblicati apposta, in Italian Open Data Licence.
 
 **Le corse senza tempo reale sono dichiarate come tali.** Dove l'orario è l'unica fonte —
-tutta ARST, EAV oltre oggi — la riga non porta un ritardo pari a zero: porta l'indicazione
-che il ritardo *non si conosce*, che è un'informazione diversa. Il modello lo distingue con
-`BoardEntry.realtime`.
+tutta ARST, EAV oltre oggi, qualunque rete per un giorno che non è oggi — la riga non porta
+un ritardo pari a zero: porta l'indicazione che il ritardo *non si conosce*, che è
+un'informazione diversa. Il modello lo distingue con `BoardEntry.realtime` e
+`TrainStatus.realtime`.
 
 **Sulla rete nazionale il realtime esiste solo per la giornata corrente**: `andamentoTreno`
 risponde `204` per qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
+
+**Del giorno che non è oggi si tiene solo il tragitto.** Il percorso di domani si ricava dalla
+corsa odierna con lo stesso numero, ma di quella corsa si copiano le fermate e gli orari di
+tabella e nient'altro: ritardo, stato, ultimo rilevamento, orari reali e binari restano al
+giorno a cui appartengono. Vale per qualunque risposta arrivi per una data futura, anche da
+una fonte che a quella data risponde volentieri con i dati di oggi — vedi
+`domain/model/OrarioPrevisto.kt` e `OrarioPrevistoTest`.
 
 Le insidie di queste API — e ce ne sono parecchie — stanno nei commenti del modulo
 `:data`, accanto al codice che le aggira.

@@ -147,10 +147,11 @@ fun TrainDetailScreen(
                  * dopo: a meta' giornata ne circolano due con lo stesso numero, e
                  * senza la data non si sa quale si stia guardando.
                  */
-                subtitle = if (date != LocalDate.now()) {
-                    "partita il " + date.format(GIORNO)
-                } else {
-                    null
+                subtitle = when {
+                    // Di domani non si dice "partita": deve ancora partire.
+                    date.isAfter(LocalDate.now()) -> "in programma " + date.format(GIORNO)
+                    date != LocalDate.now() -> "partita il " + date.format(GIORNO)
+                    else -> null
                 },
                 onBack = onBack,
                 actions = {
@@ -165,8 +166,11 @@ fun TrainDetailScreen(
                             tint = if (isFavorite) TreniBrand.star else LocalContentColor.current,
                         )
                     }
-                    // "Segui" ha senso solo su un treno che sta ancora circolando oggi.
+                    // "Segui" ha senso solo su un treno che sta ancora circolando
+                    // oggi, e di cui qualcuno pubblichi il ritardo: su una corsa
+                    // presa dall'orario non ci sarebbe mai niente da notificare.
                     val followable = state.status != null &&
+                        state.status!!.realtime &&
                         state.status!!.state != TrainState.ARRIVED &&
                         date == LocalDate.now()
                     if (followable) {
@@ -294,13 +298,26 @@ private fun Header(status: TrainStatus) {
                 "${status.origin.orEmpty()} → ${status.destination.orEmpty()}",
                 style = MaterialTheme.typography.titleMedium,
             )
+            /*
+             * Senza tempo reale non si scrive niente sul ritardo, e lo si dice.
+             *
+             * La corsa porta `delayMinutes = 0` perche' il modello vuole un
+             * intero, ma quello zero non e' una misura: di un treno che non e'
+             * ancora partito nessuno sa se ritardera'. Scrivere "in orario" in
+             * verde, come si faceva, era la cosa precisa da non far credere —
+             * ed era il ritardo di **un altro giorno**, quello della corsa da
+             * cui il percorso e' stato ricavato. Stessa scelta e stesse parole
+             * del tabellone: vedi `BoardEntry.realtime`.
+             */
             Text(
-                stateLabel(status.state) ?: delayLabel(status.delayMinutes),
+                if (!status.realtime) "Orario previsto"
+                else stateLabel(status.state) ?: delayLabel(status.delayMinutes),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = stateColor(status.state, status.delayMinutes),
+                color = if (!status.realtime) MaterialTheme.colorScheme.onSurfaceVariant
+                else stateColor(status.state, status.delayMinutes),
             )
-            if (status.stops.any { it.isEstimate } && status.delayMinutes != 0) {
+            if (status.realtime && status.stops.any { it.isEstimate } && status.delayMinutes != 0) {
                 // La proiezione e' nostra, non di ViaggiaTreno: meglio dichiararlo.
                 Text(
                     "Gli orari delle fermate non ancora raggiunte sono ricalcolati su questo scarto.",
@@ -309,25 +326,34 @@ private fun Header(status: TrainStatus) {
                 )
             }
 
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            // La riga separa il ritardo da cio' che viene dopo: senza niente
+            // sotto sarebbe un taglio in fondo alla scheda.
+            if (status.realtime || status.notice != null) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            }
 
-            // "Dov'e' il treno": e' il dato che la gente cerca per primo.
-            if (status.lastDetectionStation != null) {
-                Text("Ultimo rilevamento", style = MaterialTheme.typography.labelMedium)
-                Text(
-                    "${status.lastDetectionStation} alle ${status.lastDetectionTime.hhmm()}",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            } else {
-                Text(
-                    if (status.state == TrainState.NOT_DEPARTED) {
-                        "Non ancora partito"
-                    } else {
-                        "Posizione non ancora rilevata"
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            // "Dov'e' il treno": e' il dato che la gente cerca per primo. Di una
+            // corsa senza tempo reale pero' non esiste, e "posizione non ancora
+            // rilevata" farebbe credere che stia per arrivare: il perche' vero
+            // e' scritto nel `notice` qui sotto.
+            if (status.realtime) {
+                if (status.lastDetectionStation != null) {
+                    Text("Ultimo rilevamento", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        "${status.lastDetectionStation} alle ${status.lastDetectionTime.hhmm()}",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                } else {
+                    Text(
+                        if (status.state == TrainState.NOT_DEPARTED) {
+                            "Non ancora partito"
+                        } else {
+                            "Posizione non ancora rilevata"
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             status.notice?.let {

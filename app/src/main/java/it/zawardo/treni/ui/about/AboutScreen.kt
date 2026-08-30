@@ -174,6 +174,12 @@ fun AboutScreen(onBack: () -> Unit) {
                     "• Italo — le corse NTV, che nessuna delle altre tre pubblica: " +
                     "su ViaggiaTreno un treno Italo non compare affatto. Dal loro " +
                     "tabellone arrivano ritardo e binario.\n\n" +
+                    "• EAV — la Circumvesuviana, la Cumana e la Circumflegrea: " +
+                    "Napoli, il Vesuvio, Sorrento e i Campi Flegrei. Quelle " +
+                    "stazioni sulla rete nazionale non esistono, quindi nessuna " +
+                    "delle fonti qui sopra sa dirti niente di quei treni. Il " +
+                    "ritardo c'è dove EAV tiene un monitor; per le linee che non " +
+                    "ne hanno, e per i giorni futuri, resta l'orario.\n\n" +
                     "• Ferrotramviaria — la Bari–Barletta e il collegamento con " +
                     "l'aeroporto di Bari. Bitonto, Terlizzi, Ruvo, Corato e Andria " +
                     "sulla rete nazionale non hanno stazione: quei treni non " +
@@ -221,6 +227,10 @@ fun AboutScreen(onBack: () -> Unit) {
                     "• ARST, in Sardegna, dà l'orario previsto ma mai il ritardo o il " +
                     "binario: quelle ferrovie un tempo reale non lo pubblicano affatto. In " +
                     "cambio è l'unica che risponda anche per i giorni futuri.\n\n" +
+                    "• Di un giorno che non è oggi si conosce l'orario e basta. Ritardo, " +
+                    "binario e stato esistono solo per la giornata in corso: sul treno di " +
+                    "domani l'app mostra fermate e orari previsti e dice che sono quelli, " +
+                    "invece di ripeterti il ritardo che quel numero ha avuto oggi.\n\n" +
                     "• Gli orari di EAV e ARST viaggiano dentro l'app: sono una fotografia, " +
                     "rinfrescata quando invecchia di qualche mese. Un cambiamento d'orario " +
                     "appena entrato in vigore può non esserci ancora.\n\n" +

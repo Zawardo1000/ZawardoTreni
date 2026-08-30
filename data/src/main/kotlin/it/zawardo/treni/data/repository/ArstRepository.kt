@@ -253,11 +253,15 @@ class ArstRepository(
             origin = stops.first().stationName,
             destination = c.destinazione.ifBlank { stops.last().stationName },
             delayMinutes = 0,
-            state = TrainState.REGULAR,
+            // Come su EAV: lo dicono le fermate, tutte future. Che il ritardo
+            // sia sconosciuto e non zero lo dice invece `realtime`.
+            state = TrainState.NOT_DEPARTED,
             lastDetectionStation = null,
             lastDetectionTime = null,
-            notice = "Orario previsto. ARST non pubblica il tempo reale.",
+            notice = "ARST non pubblica il tempo reale: fermate e orari sono " +
+                "quelli di tabella.",
             stops = stops,
+            realtime = false,
         )
     }
 

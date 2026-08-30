@@ -231,11 +231,15 @@ class EavRepository(
             origin = stops.first().stationName,
             destination = c.destinazione.ifBlank { stops.last().stationName },
             delayMinutes = 0,
-            state = TrainState.REGULAR,
+            // Nessuna fermata risulta effettuata: e' quel che dice l'orario, e
+            // non e' un giudizio sulla puntualita'. Quello lo nega `realtime`.
+            state = TrainState.NOT_DEPARTED,
             lastDetectionStation = null,
             lastDetectionTime = null,
-            notice = "Orario previsto. EAV non pubblica il tempo reale di questa corsa.",
+            notice = "EAV non pubblica il tempo reale di questa corsa: " +
+                "fermate e orari sono quelli di tabella.",
             stops = stops,
+            realtime = false,
         )
     }
 

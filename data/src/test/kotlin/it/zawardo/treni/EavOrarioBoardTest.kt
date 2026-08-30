@@ -45,12 +45,35 @@ class EavOrarioBoardTest {
 
     @Test
     fun `una stazione senza monitor risponde comunque dall'orario`() = runBlocking {
-        val righe = eav.board(piedimonte, date = LocalDate.now())
-        println("\n=== PIEDIMONTE MATESE OGGI: ${righe.size} corse ===")
+        /*
+         * Il giorno si cerca, non si da' per scontato.
+         *
+         * L'Alifana la domenica non circola, e un tabellone vuoto li' e' la
+         * risposta giusta: l'alternativa sarebbe inventare una corsa. Chiedendo
+         * sempre "oggi", pero', questo test diventava rosso una domenica su una
+         * — non per un difetto dell'app, ma perche' cadeva la sua premessa.
+         *
+         * Quel che deve dimostrare e' un'altra cosa: che dove il monitor non
+         * c'e' l'orario imbarcato risponde lo stesso. Per vederlo basta un
+         * giorno in cui quella linea sia in servizio, e in una settimana c'e'.
+         */
+        var giorno = LocalDate.now()
+        var righe = eav.board(piedimonte, date = giorno)
+        var avanti = 0L
+        while (righe.isEmpty() && avanti < 6) {
+            avanti++
+            giorno = LocalDate.now().plusDays(avanti)
+            righe = eav.board(piedimonte, date = giorno)
+        }
+
+        println("\n=== PIEDIMONTE MATESE $giorno (${giorno.dayOfWeek}): ${righe.size} corse ===")
         righe.take(6).forEach {
             println("  ${it.scheduledTime}  ${it.trainRef.number}  -> ${it.direction}  realtime=${it.realtime}")
         }
-        assertTrue("nessuna risposta per una stazione dell'orario", righe.isNotEmpty())
+        assertTrue(
+            "in nessun giorno della settimana l'orario risponde per questa stazione",
+            righe.isNotEmpty(),
+        )
         assertTrue("dovrebbe essere tutto non-realtime", righe.none { it.realtime })
         assertTrue("il tabellone non esiste qui", !eav.hasBoard(piedimonte))
         assertTrue("l'orario invece si'", eav.canPlan(piedimonte))

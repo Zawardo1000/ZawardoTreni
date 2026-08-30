@@ -3,11 +3,12 @@ package it.zawardo.treni.ui.train
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
-import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.soloOrarioPrevistoPer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -98,9 +100,20 @@ class TrainDetailViewModel(
         startAutoRefresh()
     }
 
+    /**
+     * La corsa gia' identificata, ma solo se e' del giorno che si sta guardando.
+     *
+     * Un riferimento porta con se' la sua data, ed e' quella a decidere quale
+     * corsa apre: chiedere `andamentoTreno` con la data di ieri e intestare la
+     * risposta a domani e' il modo piu' diretto per mostrare il ritardo di un
+     * giorno sopra il treno di un altro. Chi ci porta qui le tiene gia'
+     * d'accordo — tabellone ed elenco corse ricavano la data proprio dal
+     * riferimento — quindi qui non si perde niente: si chiude una strada.
+     */
     private fun exactRef(): TrainRef? {
         val origine = originCode?.takeIf { it.isNotBlank() } ?: return null
         val millis = departureMillis?.takeIf { it > 0 } ?: return null
+        if (Instant.ofEpochMilli(millis).atZone(ROME).toLocalDate() != date) return null
         return TrainRef(trainNumber, origine, millis)
     }
 
@@ -140,8 +153,9 @@ class TrainDetailViewModel(
      * Vale per **qualsiasi fonte in tempo reale** — Trenitalia, Trenord, Italo —
      * non solo per la rete nazionale: un treno che circola ogni giorno con lo
      * stesso numero ha lo stesso tragitto, e da chiunque lo pubblichi oggi si
-     * ricava il percorso di domani. Si ripuliscono i dati di oggi — che del
-     * giorno cercato non dicono nulla — e si ridatano le fermate.
+     * ricava il percorso di domani. Della corsa di oggi si tiene **solo** il
+     * tragitto: ritardo, stato, binari e orari reali restano a oggi, dove sono
+     * veri — vedi [soloOrarioPrevistoPer].
      *
      * Vale solo per una data futura: per oggi risponde gia' [realtime], e
      * ricopiare se stessi non avrebbe senso.
@@ -154,33 +168,40 @@ class TrainDetailViewModel(
         // treno con lo stesso numero: non lo si spaccia per quello cercato.
         if (boardingCode != null && oggi.stops.none { it.stationCode == boardingCode }) return null
 
-        val giorni = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), date)
-        fun sposta(t: LocalDateTime?) = t?.plusDays(giorni)
-
-        return oggi.copy(
-            delayMinutes = 0,
-            state = TrainState.REGULAR,
-            lastDetectionStation = null,
-            lastDetectionTime = null,
-            notice = "Orario previsto, dalla corsa di oggi con lo stesso numero. " +
-                "Ritardi e binari saranno disponibili il giorno della partenza.",
-            stops = oggi.stops.map { s ->
-                s.copy(
-                    scheduledArrival = sposta(s.scheduledArrival),
-                    scheduledDeparture = sposta(s.scheduledDeparture),
-                    actualArrival = null,
-                    actualDeparture = null,
-                    arrivalDelayMinutes = 0,
-                    departureDelayMinutes = 0,
-                    actualPlatform = null,
-                    projectedArrival = null,
-                    projectedDeparture = null,
-                    status = StopStatus.FUTURE,
-                    detected = true,
-                )
-            },
+        return oggi.soloOrarioPrevistoPer(
+            giorno = date,
+            notice = "Percorso e orari dalla corsa di oggi con lo stesso numero. " +
+                "Ritardo, binario e stato saranno disponibili il giorno della partenza.",
         )
     }
+
+    /**
+     * Cio' che si sa di una corsa di un **giorno futuro**, dichiarato per quel
+     * che e'.
+     *
+     * Del domani nessuna fonte conosce il tempo reale, ma qualcuna risponde lo
+     * stesso, e non a vuoto: il REG 2813 di domani si apriva come "Arrivato",
+     * ultimo rilevamento a Lecco alle 06:48, coi ritardi e i binari di ogni
+     * fermata. Erano i dati della corsa di stamattina, su un treno che deve
+     * ancora partire.
+     *
+     * Quale fonte l'abbia detto conta meno del fatto che possa capitare: la
+     * data queste API la accettano senza promettere di rispettarla, e nessuna
+     * avverte quando risponde per un giorno diverso da quello chiesto. Quindi
+     * per una data futura vale come orario **qualunque cosa arrivi**, da
+     * chiunque. Chi si e' gia' dichiarato senza tempo reale — EAV, ARST —
+     * resta com'e', notice compreso: l'ha gia' spiegato da se'.
+     */
+    private fun TrainStatus.perGiornoFuturo(): TrainStatus =
+        if (!realtime) {
+            this
+        } else {
+            soloOrarioPrevistoPer(
+                giorno = date,
+                notice = "Orario previsto per il giorno scelto. Ritardo, binario " +
+                    "e stato saranno disponibili il giorno della partenza.",
+            )
+        }
 
     private fun load(initial: Boolean, manual: Boolean = false) {
         viewModelScope.launch {
@@ -232,6 +253,12 @@ class TrainDetailViewModel(
                      */
                     ?: previstoDaOggi(sources)
             }
+                /*
+                 * Del futuro nessuno conosce il tempo reale, nemmeno le fonti
+                 * che per quel giorno rispondono: quel che torna e' orario, e
+                 * come tale va detto.
+                 */
+                .map { if (date.isAfter(LocalDate.now())) it?.perGiornoFuturo() else it }
                 .getOrElse { e ->
                     _state.update {
                         it.copy(
@@ -274,8 +301,10 @@ class TrainDetailViewModel(
             while (isActive) {
                 delay(60_000)
                 val s = _state.value.status
-                // Su un treno gia' arrivato non c'e' piu' niente da aggiornare.
-                if (s != null && s.state == TrainState.ARRIVED) break
+                // Su un treno gia' arrivato non c'e' piu' niente da aggiornare,
+                // e nemmeno su una corsa che viene dall'orario: li' non c'e'
+                // niente che possa cambiare fra un minuto e l'altro.
+                if (s != null && (s.state == TrainState.ARRIVED || !s.realtime)) break
                 load(initial = false)
             }
         }
