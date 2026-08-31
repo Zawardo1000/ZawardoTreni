@@ -2,6 +2,7 @@ package it.zawardo.treni.data.mapper
 
 import it.zawardo.treni.data.remote.trenord.TrenordActualDto
 import it.zawardo.treni.data.remote.trenord.TrenordJourneyDto
+import it.zawardo.treni.data.remote.trenord.TrenordProductDto
 import it.zawardo.treni.data.remote.trenord.TrenordSolutionDto
 import it.zawardo.treni.data.remote.trenord.TrenordStationDto
 import it.zawardo.treni.data.remote.trenord.TrenordStopDto
@@ -203,10 +204,10 @@ fun TrenordSolutionDto.toJourney(): Journey? {
 }
 
 /**
- * Il prezzo della corsa semplice, sommato su tutte le tratte del viaggio.
+ * Il prezzo della corsa semplice a tariffa intera, sommato su tutte le tratte.
  *
  * Trenord vende, e nella risposta di ricerca allega i titoli validi per ogni
- * tratta. Due scelte guidano questa funzione:
+ * tratta. Tre scelte guidano questa funzione:
  *
  *  - **solo i biglietti ordinari.** Fra i prodotti ci sono anche i giornalieri e
  *    gli altri titoli a tempo, che costano il triplo e valgono un giorno intero:
@@ -214,13 +215,25 @@ fun TrenordSolutionDto.toJourney(): Journey? {
  *    Milano Centrale - Porta Garibaldi l'ordinario e' 2,20 e il giornaliero
  *    7,60, e il prezzo giusto da mostrare accanto a una singola corsa e' il
  *    primo.
- *  - **la somma sulle tratte, non il minimo.** Un viaggio con cambio puo'
- *    richiedere due biglietti distinti, uno per tratta: `ticket_routes` ne ha
- *    una voce per ciascuna, e chi parte deve pagarle tutte. Prendere solo la
- *    piu' economica direbbe meta' del prezzo vero.
+ *  - **fra gli ordinari, la tariffa piena in seconda classe.** `ordinary` non
+ *    e' un prezzo solo: sulla corsa singola regionale torna sei volte,
+ *    `tariff_type` fra `adulto`, `ragazzo` e `anziano` per `class` 1 e 2.
+ *    Prendere il minimo, come si faceva, dava sempre il ridotto ragazzo in
+ *    seconda: su Calolziocorte - Milano Centrale usciva 2,60 al posto di 5,20,
+ *    e la stessa tratta cambiava prezzo a meta' lista appena le soluzioni
+ *    Trenord finivano e subentravano quelle di Le Frecce, che il prezzo intero
+ *    lo danno. Vedi [tariffaIntera] per l'altra famiglia, quella a zone.
+ *  - **la somma sulle tratte.** `ticket_routes` e' una lista perche' un viaggio
+ *    puo' richiedere piu' biglietti; nelle risposte viste ce n'e' sempre una
+ *    sola, che copre origine-destinazione cambi compresi. Finche' e' cosi' la
+ *    somma non cambia niente, e il giorno che ne arrivassero due sarebbero due
+ *    titoli da pagare entrambi.
  *
  * Null quando i titoli non ci sono — capita sulle tratte fuori dall'area
- * tariffaria integrata — che e' diverso da gratis.
+ * tariffaria integrata — che e' diverso da gratis. E null anche quando nessun
+ * titolo si dichiara a tariffa piena: un prezzo che non si sa piu' riconoscere
+ * e' peggio di un prezzo assente, e `PrezziLiveTest` diventa rosso se quei nomi
+ * cambiano.
  */
 private fun TrenordSolutionDto.toPrice(): Price? {
     if (ticketRoutes.isEmpty()) return null
@@ -228,6 +241,8 @@ private fun TrenordSolutionDto.toPrice(): Price? {
     val perTratta = ticketRoutes.mapNotNull { tratta ->
         tratta.products
             .filter { it.type.equals("ordinary", ignoreCase = true) }
+            .tariffaIntera()
+            .secondaClasse()
             .mapNotNull { it.price }
             .filter { it > 0.0 }
             .minOrNull()
@@ -245,6 +260,42 @@ private fun TrenordSolutionDto.toPrice(): Price? {
         saleable = saleability?.saleable != false,
     )
 }
+
+/** Le due tariffe che nessuno sconto ha gia' abbassato. Vedi [tariffaIntera]. */
+private val TARIFFE_INTERE = setOf("adulto", "standard")
+
+/**
+ * I titoli a tariffa piena.
+ *
+ * Le famiglie tariffarie sono due e si riconoscono da qui:
+ *
+ *  - **la corsa singola regionale** — `adulto`, `ragazzo`, `anziano` per due
+ *    classi. Piena e' la prima; le altre due sono riduzioni per eta'.
+ *  - **il biglietto a zone STIBM** dell'area milanese — un solo `standard`,
+ *    senza classe: li' la riduzione per eta' non esiste e quello e' il prezzo
+ *    che pagano tutti. Milano Dateo - Vignate sono 3,00 euro e basta.
+ *
+ * Si tiene un elenco di cio' che e' pieno invece di scartare cio' che e'
+ * ridotto. Le due liste oggi si equivalgono, ma sbagliano in modo diverso: se
+ * Trenord aggiunge una riduzione che qui non c'e', scartare farebbe passare uno
+ * sconto per il prezzo di tutti — mentre cosi' il prezzo sparisce e i test
+ * live diventano rossi, che e' come volersene accorgere.
+ *
+ * Chi non dichiara la tariffa resta comunque: campo assente non vuol dire
+ * sconto.
+ */
+private fun List<TrenordProductDto>.tariffaIntera(): List<TrenordProductDto> =
+    filter { it.tariffType.isNullOrBlank() || it.tariffType.lowercase() in TARIFFE_INTERE }
+
+/**
+ * La seconda classe, dove esiste.
+ *
+ * E' il prezzo di riferimento: la prima costa la meta' in piu' e la prende una
+ * minoranza. Se la classe non e' dichiarata non si scarta niente, e il minimo
+ * fra i sopravvissuti fa comunque la stessa scelta.
+ */
+private fun List<TrenordProductDto>.secondaClasse(): List<TrenordProductDto> =
+    filter { it.classe == "2" }.ifEmpty { this }
 
 // ------------------------------------------------------- dettaglio corsa
 

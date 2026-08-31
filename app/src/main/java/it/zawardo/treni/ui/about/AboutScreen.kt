@@ -217,13 +217,24 @@ fun AboutScreen(onBack: () -> Unit) {
                     "scelta, spiegata qui sotto. Per la coincidenza veloce nei giorni " +
                     "futuri c'è la Freccia, che l'orario completo lo pubblica.\n\n" +
                     "• I prezzi ci sono per Trenitalia e Trenord, non per Italo — stesso " +
-                    "motivo. Su un viaggio con cambio interno alla stessa rete è il prezzo " +
+                    "motivo. È sempre la corsa singola a tariffa intera, seconda classe: " +
+                    "le riduzioni per ragazzi e anziani esistono e le vedi al momento " +
+                    "dell'acquisto, ma scriverle qui farebbe sembrare il viaggio più " +
+                    "economico di quanto sia per quasi tutti. " +
+                    "Su un viaggio con cambio interno alla stessa rete è il prezzo " +
                     "dell'intera soluzione. Su un misto fra operatori diversi, dove una " +
                     "tratta il prezzo lo pubblica — la Freccia, o Trenord — e l'altra no, " +
                     "mostro il parziale che c'è, etichettato «solo Trenitalia» (o Trenord): " +
                     "la parte che conosco, dichiarata per quella che è, vale più del " +
                     "silenzio; sarebbe spacciarla per il totale, quello sì, a ingannare. " +
                     "Se nessuna tratta ha un prezzo, come EAV più Italo, non mostro nulla.\n\n" +
+                    "• Il ritardo è misurato all'ultimo rilevamento, e il punto di " +
+                    "rilevamento spesso non è una fermata: è un posto di controllo o un " +
+                    "bivio lungo la linea, dove il confronto è con un orario di transito. " +
+                    "Per questo il numero in cima al dettaglio corsa può non coincidere " +
+                    "col ritardo dell'ultima fermata effettuata — è più recente. La " +
+                    "scheda scrive sempre dove e quando è stato preso, e le fermate " +
+                    "ancora da fare riportano quello.\n\n" +
                     "• ARST, in Sardegna, dà l'orario previsto ma mai il ritardo o il " +
                     "binario: quelle ferrovie un tempo reale non lo pubblicano affatto. In " +
                     "cambio è l'unica che risponda anche per i giorni futuri.\n\n" +

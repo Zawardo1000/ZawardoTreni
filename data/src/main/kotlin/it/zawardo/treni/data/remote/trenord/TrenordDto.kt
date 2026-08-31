@@ -72,6 +72,10 @@ data class TrenordTicketRouteDto(
  * fratelli sono abbonamenti giornalieri e simili: costano di piu' e valgono di
  * piu', e metterli sulla stessa riga di un biglietto di corsa semplice farebbe
  * sembrare Trenord tre volte piu' cara di quanto sia.
+ *
+ * `ordinary` pero' non e' un prezzo solo: la stessa corsa singola torna fino a
+ * sei volte, una per combinazione di [tariffType] e [classe]. Servono tutte e
+ * due per riconoscere il prezzo che l'app deve mostrare — vedi `toPrice`.
  */
 @Serializable
 data class TrenordProductDto(
@@ -81,11 +85,29 @@ data class TrenordProductDto(
     /** Numero, non stringa: qui il prezzo arriva come `2.2`. */
     val price: Double? = null,
     @SerialName("localized_name") val localizedName: String? = null,
+    /**
+     * A chi e' intestata la tariffa.
+     *
+     * Sulla corsa singola regionale vale `adulto`, `ragazzo` o `anziano`: la
+     * piena e le due ridotte per eta'. Sul biglietto a zone dell'area milanese
+     * ce n'e' una sola, `standard`, che e' gia' il prezzo di tutti. Solo le
+     * tariffe piene si confrontano col totale che pubblica Le Frecce.
+     */
+    @SerialName("tariff_type") val tariffType: String? = null,
+    /** `"1"` o `"2"`. Il prezzo di riferimento e' la seconda. */
+    @SerialName("class") val classe: String? = null,
 )
 
 @Serializable
 data class TrenordSaleabilityDto(
-    val saleable: Boolean? = null,
+    /**
+     * Il campo si chiama `status`, non `saleable`: letto col nome sbagliato
+     * restava sempre null, cioe' "vendibile" per definizione, e le soluzioni
+     * che Trenord non vende — `OTHER_OPERATOR`, `NO_PRODUCTS`,
+     * `PAST_DEPARTURE_DATE` — passavano per acquistabili.
+     */
+    @SerialName("status") val saleable: Boolean? = null,
+    @SerialName("non_saleability_motivation") val reason: String? = null,
 )
 
 @Serializable

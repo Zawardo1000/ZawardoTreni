@@ -71,11 +71,21 @@ Nessuna fonte è completa, e l'app lo dichiara invece di far finta.
   qui sotto. Per la coincidenza veloce sulle date future c'è la Freccia, che l'orario
   completo lo pubblica.
 - **Prezzi**: presenti per Trenitalia (Le Frecce) e Trenord, non per Italo — stesso
-  motivo. Su un cambio interno alla stessa rete è il prezzo dell'intera soluzione. Su un
+  motivo. È sempre la **corsa singola a tariffa intera, seconda classe**: le riduzioni per
+  ragazzi e anziani esistono e si vedono al momento dell'acquisto, ma metterle in lista
+  farebbe sembrare il viaggio più economico di quanto sia per quasi tutti. Su un cambio
+  interno alla stessa rete è il prezzo dell'intera soluzione. Su un
   misto fra operatori diversi, dove una tratta il prezzo lo pubblica (la Freccia, o
   Trenord) e l'altra no, si mostra il **parziale** noto, etichettato «solo Trenitalia»
   (o Trenord): dichiararlo per quello che è aiuta, spacciarlo per il totale
   ingannerebbe. Se nessuna tratta ha un prezzo (EAV + Italo), non si mostra nulla.
+- **Ritardo e ultimo rilevamento**: il ritardo di una corsa è misurato dove il treno è
+  stato visto l'ultima volta, e quel punto spesso **non è una fermata** — un posto di
+  controllo, un bivio — dove il confronto è con un orario di transito. Su 22 corse in
+  circolazione il 31/08/2026, in 13 era così. Ne segue che il numero in cima al
+  dettaglio può non coincidere col ritardo dell'ultima fermata effettuata: è più
+  recente. La scheda dichiara sempre dove e quando è stato preso, e le fermate ancora
+  da fare riportano quello.
 - **ARST**: solo orario previsto, mai il ritardo o il binario — quelle ferrovie un
   tempo reale non lo pubblicano. In cambio è l'unica che risponda per i giorni futuri.
 - **Orari imbarcati (EAV, ARST)**: una fotografia, rinfrescata a soglie di qualche

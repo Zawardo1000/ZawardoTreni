@@ -317,43 +317,64 @@ private fun Header(status: TrainStatus) {
                 color = if (!status.realtime) MaterialTheme.colorScheme.onSurfaceVariant
                 else stateColor(status.state, status.delayMinutes),
             )
-            if (status.realtime && status.stops.any { it.isEstimate } && status.delayMinutes != 0) {
-                // La proiezione e' nostra, non di ViaggiaTreno: meglio dichiararlo.
-                Text(
-                    "Gli orari delle fermate non ancora raggiunte sono ricalcolati su questo scarto.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            // La riga separa il ritardo da cio' che viene dopo: senza niente
-            // sotto sarebbe un taglio in fondo alla scheda.
-            if (status.realtime || status.notice != null) {
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            }
-
-            // "Dov'e' il treno": e' il dato che la gente cerca per primo. Di una
-            // corsa senza tempo reale pero' non esiste, e "posizione non ancora
-            // rilevata" farebbe credere che stia per arrivare: il perche' vero
-            // e' scritto nel `notice` qui sotto.
+            /*
+             * Dove e' stato misurato quel numero, attaccato al numero.
+             *
+             * Il ritardo in cima e' quello dell'**ultimo rilevamento**, e finche'
+             * non si dice dove sia avvenuto resta una cifra che ogni tanto
+             * contraddice le fermate scritte sotto. Contate il 31/08/2026 su 22
+             * corse in circolazione: in tredici il punto di rilevamento non era
+             * una fermata della corsa ma un posto di controllo o un bivio —
+             * "PC RUBIERA", "1° BIVIO CHIUSI SUD", "BV/PC SETTEBAGNI" — e li' il
+             * confronto e' con un orario di transito, non con quello di una
+             * fermata. Di qui gli scarti che paiono assurdi: il REG 2813 del 31
+             * agosto era ripartito da Lecco a +1 mentre la corsa dava -3, e le
+             * fermate seguenti uscivano tutte "3 min in anticipo" senza che
+             * niente, sullo schermo, dicesse da dove venisse quel -3.
+             *
+             * Stava gia' nella scheda, ma in fondo, sotto la riga e sotto
+             * l'etichetta "Ultimo rilevamento": stessa informazione, lontana dal
+             * numero che spiega. Qui sopra vale il doppio e non si ripete due
+             * volte nella stessa scheda.
+             */
             if (status.realtime) {
-                if (status.lastDetectionStation != null) {
-                    Text("Ultimo rilevamento", style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        "${status.lastDetectionStation} alle ${status.lastDetectionTime.hhmm()}",
-                        style = MaterialTheme.typography.bodyLarge,
+                val rilevamento = status.lastDetectionStation
+                when {
+                    rilevamento != null -> Text(
+                        "Ultimo rilevamento: $rilevamento alle ${status.lastDetectionTime.hhmm()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
+                    // "Non ancora partito" lo dice gia' il titolo qui sopra:
+                    // ripeterlo era una riga che non aggiungeva niente.
+                    status.state != TrainState.NOT_DEPARTED -> Text(
+                        "Posizione non ancora rilevata",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> Unit
+                }
+
+                /*
+                 * La proiezione e' nostra, non di ViaggiaTreno, e va detto anche
+                 * da dove viene: e' quello scarto li', preso dal rilevamento
+                 * appena nominato, non una misura fatta sull'ultima fermata.
+                 */
+                if (rilevamento != null && status.stops.any { it.isEstimate } && status.delayMinutes != 0) {
                     Text(
-                        if (status.state == TrainState.NOT_DEPARTED) {
-                            "Non ancora partito"
-                        } else {
-                            "Posizione non ancora rilevata"
-                        },
-                        style = MaterialTheme.typography.bodyLarge,
+                        "Le fermate non ancora raggiunte riportano questo scarto. " +
+                            "Il punto di rilevamento spesso non è una fermata, quindi " +
+                            "può non coincidere col ritardo dell'ultima fermata fatta.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            // La riga separa il ritardo dall'avviso di servizio: senza niente
+            // sotto sarebbe un taglio in fondo alla scheda.
+            if (status.notice != null) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
             }
 
             status.notice?.let {
