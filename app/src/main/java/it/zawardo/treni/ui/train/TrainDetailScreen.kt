@@ -243,6 +243,12 @@ fun TrainDetailScreen(
                     Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 ) {
+                    // Dove parti tu: la fermata di salita, o il capolinea di
+                    // partenza quando nessuno ci ha detto dove sali.
+                    val partenzaTua = status.stops
+                        .indexOfFirst { it.stationCode?.equals(boardingRfi, true) == true }
+                        .takeIf { it >= 0 } ?: 0
+
                     item { Header(status) }
                     item { Box(Modifier.height(16.dp)) }
                     itemsIndexed(status.stops, key = { _, s -> "${s.index}-${s.stationName}" }) { i, stop ->
@@ -267,6 +273,17 @@ fun TrainDetailScreen(
                             // perche' l'evidenziazione sparisca in silenzio.
                             isBoarding = stop.stationCode?.equals(boardingRfi, true) == true,
                             isAlighting = stop.stationCode?.equals(alightingRfi, true) == true,
+                            /*
+                             * Il binario di dove sali e' l'unico di cui l'assenza
+                             * si nota: nelle stazioni grandi non sta in orario,
+                             * lo assegnano un quarto d'ora prima, e vedere
+                             * "bin. 4" su Monza e niente su Milano Centrale
+                             * sembra un dato perso invece di un dato che ancora
+                             * non esiste. Sulle altre fermate resta muto: venti
+                             * righe di "non assegnato" direbbero solo rumore.
+                             */
+                            binarioAtteso = i == partenzaTua && stop.status == StopStatus.FUTURE &&
+                                status.realtime,
                         )
                     }
                     state.error?.let {
@@ -397,6 +414,8 @@ private fun StopRow(
     isBoarding: Boolean = false,
     isAlighting: Boolean = false,
     trainCancelled: Boolean = false,
+    /** Qui il binario, se manca, manca perche' non l'hanno ancora assegnato. */
+    binarioAtteso: Boolean = false,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
     // Senza codice RFI non esiste un tabellone da aprire: la riga resta inerte
@@ -532,7 +551,7 @@ private fun StopRow(
                 )
             } else {
                 TimeLine(stop, isFirst, isLast, cancelled = trainCancelled)
-                PlatformLine(stop)
+                PlatformLine(stop, binarioAtteso)
                 if (!stop.detected) {
                     Text(
                         if (stop.effectiveArrival != null || stop.effectiveDeparture != null) {
@@ -632,24 +651,49 @@ private fun TimeCell(
     }
 }
 
+/**
+ * Il binario, con la stessa grammatica degli orari: quello annunciato resta
+ * scritto e barrato, quello vero gli sta accanto in evidenza.
+ *
+ * Prima il cambio si leggeva "7  (era 4)", che dice la stessa cosa ma con una
+ * forma tutta sua: qui sopra la riga degli orari fa gia' "18:01 18:09" col
+ * primo barrato, e due modi diversi di dire "era previsto cosi', invece e'
+ * cosi'" nella stessa fermata si leggono come due informazioni diverse.
+ */
 @Composable
-private fun PlatformLine(stop: Stop) {
-    val platform = stop.actualPlatform ?: stop.scheduledPlatform ?: return
+private fun PlatformLine(stop: Stop, atteso: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
+    val platform = stop.platform
+
+    if (platform == null) {
+        if (!atteso) return
+        Text(
+            "bin. non ancora assegnato",
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.onSurfaceVariant,
+        )
+        return
+    }
+
     Row {
         Text("bin. ", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+
+        // Il binario cambiato e' l'informazione che fa perdere i treni: quello
+        // di partenza resta leggibile, cosi' chi l'aveva memorizzato capisce
+        // che il numero nuovo riguarda proprio lui.
         Text(
-            platform,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (stop.platformChanged) FontWeight.Bold else FontWeight.Normal,
-            color = if (stop.platformChanged) scheme.tertiary else scheme.onSurfaceVariant,
+            if (stop.platformChanged) stop.scheduledPlatform.orEmpty() else platform,
+            style = MaterialTheme.typography.bodyMedium,
+            textDecoration = if (stop.platformChanged) TextDecoration.LineThrough else null,
+            color = if (stop.platformChanged) scheme.onSurfaceVariant else scheme.onSurface,
         )
+
         if (stop.platformChanged) {
-            // Il binario cambiato e' l'informazione che fa perdere i treni.
             Text(
-                "  (era ${stop.scheduledPlatform})",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
+                " ${stop.actualPlatform}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = scheme.tertiary,
             )
         }
     }

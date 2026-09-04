@@ -429,19 +429,32 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
             Modifier.width(52.dp),
             horizontalAlignment = Alignment.End,
         ) {
-            val platform = entry.actualPlatform ?: entry.scheduledPlatform
             Text(
-                platform ?: "–",
+                entry.platform ?: "–",
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
-                color = if (entry.actualPlatform != null && entry.scheduledPlatform != null &&
-                    entry.actualPlatform != entry.scheduledPlatform
-                ) {
+                color = if (entry.platformChanged) {
                     MaterialTheme.colorScheme.tertiary
                 } else {
                     MaterialTheme.colorScheme.onSurface
                 },
             )
+            if (entry.platformChanged) {
+                /*
+                 * Il binario annunciato resta scritto e barrato, come l'orario
+                 * superato nella colonna accanto. Il colore da solo diceva che
+                 * qualcosa era cambiato ma non da cosa: chi era andato al 3 e
+                 * legge 4 deve poter riconoscere il proprio treno, non chiedersi
+                 * se sta guardando la riga giusta.
+                 */
+                Text(
+                    entry.scheduledPlatform.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    textDecoration = TextDecoration.LineThrough,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (entry.inStation) {
                 Text(
                     "in arrivo",
