@@ -17,6 +17,7 @@ import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.matchesCategory
 import java.time.Duration
 import java.time.Instant
@@ -25,6 +26,7 @@ import java.time.LocalDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.cos
@@ -298,6 +300,23 @@ class TrainStatusRepository(
     private val boardFormat: DateTimeFormatter =
         DateTimeFormatter.ofPattern("EEE MMM dd yyyy HH:mm:ss 'GMT'Z", Locale.ENGLISH)
 
+    /**
+     * Le corse per cui Trenord ha risposto a vuoto, e quando.
+     *
+     * Serve a [completaBinari]: un numero fuori dalla Lombardia dara' sempre la
+     * stessa lista vuota, e continuare a chiederlo a ogni aggiornamento
+     * raddoppia il traffico della schermata per non aggiungere niente.
+     *
+     * Si riprova dopo [RICHIEDI_DOPO_MS] e non mai piu', perche' quel null puo'
+     * anche essere stata una rete caduta per un attimo: una dimenticanza
+     * definitiva trasformerebbe un intoppo di un secondo in una funzione spenta
+     * per tutta la sessione.
+     *
+     * Concorrente perche' il repository e' condiviso: la schermata del treno e
+     * il servizio «Segui treno» ci arrivano da coroutine diverse.
+     */
+    private val senzaTrenord = ConcurrentHashMap<String, Long>()
+
     /** Risolve un numero treno nelle corse odierne. Puo' restituirne piu' di una. */
     suspend fun resolve(trainNumber: String): List<TrainRef> = withContext(Dispatchers.IO) {
         val body = runCatching { viaggiaTreno.cercaNumeroTreno(trainNumber).string() }
@@ -320,6 +339,52 @@ class TrainStatusRepository(
         }.getOrElse { return@withContext null }
         if (!resp.isSuccessful || resp.code() == 204) return@withContext null
         resp.body()?.toTrainStatus()
+    }
+
+    /**
+     * Aggiunge a una corsa i binari che ViaggiaTreno non ha, chiedendoli a Trenord.
+     *
+     * ViaggiaTreno pubblica binario programmato ed effettivo, ma non dappertutto:
+     * fuori RFI non ne ha nessuno — sulla Milano-Malpensa lascia vuote otto
+     * fermate su undici — e su RFI capita che manchi anche il programmato,
+     * proprio dove serve. Il REG 2874 delle 17:50, il 04/09/2026, non aveva
+     * alcun binario a Milano Centrale mentre tutte le fermate minori ce
+     * l'avevano: il capolinea dove sali era l'unica riga senza.
+     *
+     * Trenord, sulle sue corse, riempie quei buchi. Non li riempie tutti — a
+     * Milano Centrale il binario esiste da quando viene assegnato, un quarto
+     * d'ora prima, non ore prima — ma quel che ha e' esattamente cio' che
+     * all'altra manca.
+     *
+     * **Si chiede solo se serve, e non si insiste.** Se ogni fermata ha gia' i
+     * suoi due binari non parte alcuna chiamata. E un numero che Trenord non
+     * conosce — un Frecciarossa per Napoli — non gli si richiede a ogni
+     * aggiornamento: senza questo, una schermata aperta mezz'ora avrebbe
+     * bussato trenta volte per sentirsi rispondere trenta volte la stessa lista
+     * vuota. Vedi [senzaTrenord].
+     *
+     * Il chiamante deve comunque rispettare l'interruttore della sorgente: qui
+     * non si leggono le impostazioni.
+     */
+    suspend fun completaBinari(status: TrainStatus, date: LocalDate): TrainStatus {
+        val trenord = trenord ?: return status
+        // Su una corsa che viene dall'orario i binari sono inconoscibili, non
+        // mancanti: riempirli con quelli di oggi sarebbe inventare.
+        if (!status.realtime) return status
+        val numero = status.number.takeIf { it.isNotBlank() } ?: return status
+        if (status.stops.none { it.scheduledPlatform == null || it.actualPlatform == null }) return status
+
+        val chiave = "$numero|$date"
+        val adesso = System.currentTimeMillis()
+        senzaTrenord[chiave]?.let { if (adesso - it < RICHIEDI_DOPO_MS) return status }
+
+        val altra = runCatching { trenord.trainStatus(numero, date) }.getOrNull()
+        if (altra == null) {
+            senzaTrenord[chiave] = adesso
+            return status
+        }
+        senzaTrenord.remove(chiave)
+        return status.conBinariDa(altra)
     }
 
     /**
@@ -496,4 +561,9 @@ class TrainStatusRepository(
                 .getOrDefault(emptyList())
                 .mapNotNull { it.toBoardEntry() }
         }
+
+    private companion object {
+        /** Quanto si aspetta prima di richiedere a Trenord una corsa che non conosceva. */
+        const val RICHIEDI_DOPO_MS = 15 * 60_000L
+    }
 }

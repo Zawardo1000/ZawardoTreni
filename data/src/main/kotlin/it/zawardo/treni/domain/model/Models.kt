@@ -375,6 +375,9 @@ data class Stop(
     val effectiveArrival: LocalDateTime? get() = actualArrival ?: projectedArrival
     val effectiveDeparture: LocalDateTime? get() = actualDeparture ?: projectedDeparture
 
+    /** Il binario da mostrare: quello vero se c'e', altrimenti quello di tabella. */
+    val platform: String? get() = actualPlatform ?: scheduledPlatform
+
     val platformChanged: Boolean
         get() = actualPlatform != null && scheduledPlatform != null && actualPlatform != scheduledPlatform
 }
@@ -406,4 +409,17 @@ data class BoardEntry(
      * un'informazione diversa che l'utente ha diritto di distinguere.
      */
     val realtime: Boolean = true,
-)
+) {
+    /** Come su [Stop]: il binario vero se c'e', altrimenti quello di tabella. */
+    val platform: String? get() = actualPlatform ?: scheduledPlatform
+
+    /**
+     * Il binario vero non e' quello annunciato.
+     *
+     * Vale solo dove esistono **entrambi** i valori: una fonte che ne pubblichi
+     * uno solo — Italo, EAV, Ferrotramviaria — non puo' dire "cambiato", puo'
+     * solo dire qual e'.
+     */
+    val platformChanged: Boolean
+        get() = actualPlatform != null && scheduledPlatform != null && actualPlatform != scheduledPlatform
+}

@@ -139,10 +139,26 @@ class TrainDetailViewModel(
      * la corsa gia' identificata, quindi solo sulla data originale.
      */
     private suspend fun realtime(giorno: LocalDate, sources: Set<DataSource>): TrainStatus? {
-        if (giorno == date) exactRef()?.let { trains.status(it) }?.let { return it }
         val at = if (giorno == date) boardingAt else null
-        return trains.statusByNumber(trainNumber, giorno, boardingCode, at)
-            ?: trenord.takeIf { DataSource.TRENORD in sources }?.trainStatus(trainNumber, giorno)
+        val nazionale = (if (giorno == date) exactRef()?.let { trains.status(it) } else null)
+            ?: trains.statusByNumber(trainNumber, giorno, boardingCode, at)
+
+        /*
+         * I binari che ViaggiaTreno non ha spesso li ha Trenord, e viceversa:
+         * vedi `completaBinari`. Non e' un ripiego ma un'aggiunta, quindi si fa
+         * anche quando la risposta nazionale c'e' ed e' completa di tutto il
+         * resto — ed e' l'unico modo perche' la fermata da cui sali abbia un
+         * binario invece di essere l'unica riga senza.
+         */
+        if (nazionale != null) {
+            return if (DataSource.TRENORD in sources) {
+                trains.completaBinari(nazionale, giorno)
+            } else {
+                nazionale
+            }
+        }
+
+        return trenord.takeIf { DataSource.TRENORD in sources }?.trainStatus(trainNumber, giorno)
             ?: italo.takeIf { DataSource.ITALO in sources }
                 ?.trainStatus(trainNumber, giorno, boardingCode, boardingName, alightingCode)
     }
