@@ -153,6 +153,30 @@ data class TrenordStopDto(
     val type: String? = null,
     val cancelled: Boolean = false,
     @SerialName("actual_data") val actual: TrenordActualDto? = null,
+    /**
+     * Il binario, quando Trenord lo pubblica. Uno solo, e [isActualPlatform]
+     * dice se e' quello di tabella o quello vero.
+     *
+     * Non e' un doppione di ViaggiaTreno: le due fonti si completano invece di
+     * sovrapporsi. Misurato il 04/09/2026 sul REG 2932 Milano Centrale -
+     * Gallarate, undici fermate: ViaggiaTreno dava il binario solo alle prime
+     * due, Trenord lo dava alle otto stazioni FNM che ViaggiaTreno lascia vuote
+     * — Saronno, Rescaldina, Castellanza, Busto Arsizio Nord, Ferno, i due
+     * terminal di Malpensa, Gallarate. Sulla rete RFI vale il contrario:
+     * Trenord non ha il binario programmato e pubblica solo quello vero,
+     * quando viene assegnato.
+     */
+    val platform: String? = null,
+    /**
+     * Vero se [platform] e' il binario **effettivo**, falso se e' quello di
+     * tabella.
+     *
+     * La distinzione conta perche' e' quella che permette di dire "cambiato":
+     * un binario vero letto come programmato non farebbe mai scattare l'avviso.
+     * Assente si tratta come tabella — un binario che nessuno dichiara reale
+     * non merita di far comparire un cambio che forse non c'e' stato.
+     */
+    @SerialName("is_actual_platform") val isActualPlatform: Boolean? = null,
 )
 
 /** Dati in tempo reale della singola fermata; tutti null finche' non c'e' rilevamento. */

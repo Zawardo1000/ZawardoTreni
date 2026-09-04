@@ -309,6 +309,7 @@ private fun TrenordStopDto.toStop(index: Int, date: LocalDate?, now: LocalDateTi
     val estDep = combine(date, a?.estimatedDeparture)
 
     val done = realArr != null || realDep != null
+    val binario = platform?.trim()?.takeIf { it.isNotBlank() }
     return Stop(
         index = index,
         stationName = station?.name.orEmpty(),
@@ -319,9 +320,14 @@ private fun TrenordStopDto.toStop(index: Int, date: LocalDate?, now: LocalDateTi
         scheduledDeparture = schedDep,
         actualDeparture = realDep,
         departureDelayMinutes = a?.departureDelay ?: 0,
-        // HAFAS non espone il binario in questa risposta.
-        scheduledPlatform = null,
-        actualPlatform = null,
+        /*
+         * Un solo campo per due significati, che `is_actual_platform` separa:
+         * vero e' il binario assegnato, falso quello di tabella. Chi non lo
+         * dichiara finisce fra i programmati, perche' spacciarlo per effettivo
+         * significherebbe annunciare cambi di binario mai avvenuti.
+         */
+        scheduledPlatform = binario?.takeIf { isActualPlatform != true },
+        actualPlatform = binario?.takeIf { isActualPlatform == true },
         status = when {
             cancelled -> StopStatus.CANCELLED
             done -> StopStatus.DONE
