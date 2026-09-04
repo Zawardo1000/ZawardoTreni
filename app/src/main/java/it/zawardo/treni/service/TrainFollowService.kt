@@ -16,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import it.zawardo.treni.R
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
@@ -29,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -73,6 +75,26 @@ class TrainFollowService : Service() {
     /** La soppressione si annuncia una volta sola, non a ogni giro. */
     private var alertedCancellation = false
 
+    /**
+     * Il binario dell'ultimo avviso sulla fermata di salita.
+     *
+     * Serve a distinguere le due cose che succedono al binario: la **prima
+     * assegnazione**, che nelle stazioni grandi arriva un quarto d'ora prima
+     * della partenza, e il **cambio**, che arriva quando sei gia' sul
+     * marciapiede sbagliato. La prima si annuncia perche' e' quello che stavi
+     * aspettando, il secondo perche' altrimenti perdi il treno.
+     */
+    private var lastAlertedPlatform: String? = null
+
+    /**
+     * Distingue "binario non ancora letto" da "binario che non c'e'".
+     *
+     * Senza, il primo giro senza binario e la prima assegnazione sarebbero
+     * indistinguibili, e l'avviso che serve davvero — quello che dice da dove
+     * parti — non partirebbe mai.
+     */
+    private var platformRead = false
+
     private var followedNumber: String? = null
     private var followedDate: LocalDate? = null
     private var boardingName: String? = null
@@ -112,6 +134,8 @@ class TrainFollowService : Service() {
         boardingName = intent.getStringExtra(EXTRA_BOARDING_NAME)
         lastAlertedDelay = null
         alertedCancellation = false
+        lastAlertedPlatform = null
+        platformRead = false
         lastPollAt = null
 
         startForegroundSafely(buildOngoing(number, "Ricerca dello stato in corso…", null))
@@ -151,6 +175,14 @@ class TrainFollowService : Service() {
             val trains = ServiceLocator.trainStatusRepository
 
             /*
+             * Letto una volta sola: e' un interruttore, non un dato che cambia
+             * durante la corsa, e questo giro deve costare il meno possibile.
+             */
+            val trenordAcceso = DataSource.TRENORD in runCatching {
+                ServiceLocator.settings.enabledSources.first()
+            }.getOrDefault(DataSource.defaultEnabled)
+
+            /*
              * La corsa si risolve UNA volta sola, all'avvio. Risolverla a ogni
              * giro costava una chiamata in piu' al minuto, ma soprattutto era
              * fragile: lo stesso numero puo' avere piu' corse, e la scelta poteva
@@ -160,7 +192,10 @@ class TrainFollowService : Service() {
 
             while (isActive) {
                 val status = runCatching {
-                    if (ref != null) trains.status(ref) else trains.statusByNumber(number, date)
+                    val letto = if (ref != null) trains.status(ref) else trains.statusByNumber(number, date)
+                    // Il binario e' la meta' del motivo per cui si segue un
+                    // treno, e ViaggiaTreno da solo spesso non ce l'ha.
+                    letto?.let { if (trenordAcceso) trains.completaBinari(it, date) else it }
                 }.getOrNull()
 
                 var boarding: Stop? = null
@@ -260,7 +295,17 @@ class TrainFollowService : Service() {
                 delay < 0 -> " (${delay})"
                 else -> ""
             }
-            if (time != null) return "Parte da $where alle $time$suffix"
+            /*
+             * Il binario nel testo fisso e non solo nell'avviso: chi ha
+             * silenziato il telefono, o e' arrivato in stazione dopo, trova
+             * comunque nella notifica permanente la cosa che deve sapere.
+             */
+            val binario = boarding.platform?.let {
+                if (boarding.platformChanged) " · bin. $it (era ${boarding.scheduledPlatform})"
+                else " · bin. $it"
+            }.orEmpty()
+
+            if (time != null) return "Parte da $where alle $time$suffix$binario"
         }
 
         return when {
@@ -294,6 +339,14 @@ class TrainFollowService : Service() {
             return
         }
 
+        /*
+         * Il binario prima del ritardo. Se cambiano insieme, quello che ti fa
+         * alzare e camminare e' il binario; il ritardo resta da dire e lo dira'
+         * il giro dopo, perche' uscendo di qui `lastAlertedDelay` non e' stato
+         * aggiornato e lo scarto risultera' ancora nuovo.
+         */
+        if (alertPlatform(number, status, boarding)) return
+
         val previous = lastAlertedDelay
         if (previous == null) {
             // Prima lettura: si stabilisce il riferimento, non si suona.
@@ -311,6 +364,52 @@ class TrainFollowService : Service() {
             status,
             "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail",
         )
+    }
+
+    /**
+     * Avvisa quando il binario da cui parti compare o cambia. Restituisce vero
+     * se ha suonato.
+     *
+     * Sono due eventi, non uno. Nelle stazioni grandi il binario **non esiste**
+     * fino a un quarto d'ora dalla partenza: il primo avviso e' quello che stavi
+     * aspettando, ed e' il motivo per cui sei rimasto seduto invece di piantarti
+     * sotto il tabellone. Il secondo, il cambio, e' quello che ti evita di
+     * correre da un capo all'altro dell'atrio.
+     *
+     * Solo la fermata di salita: il binario di una stazione dove non passi non
+     * e' un tuo problema. E solo finche' non sei partito, perche' dopo il
+     * monitoraggio si chiude comunque.
+     */
+    private fun alertPlatform(number: String, status: TrainStatus, boarding: Stop?): Boolean {
+        // Su una corsa soppressa il binario non e' piu' una notizia.
+        if (status.state == TrainState.CANCELLED) return false
+        val stop = boarding ?: return false
+        if (stop.status != StopStatus.FUTURE) return false
+
+        val current = stop.platform
+        if (!platformRead) {
+            // Prima lettura: come per il ritardo, si prende il riferimento e
+            // non si suona. Anche quando e' null, ed e' il caso interessante:
+            // e' da li' che si riconoscera' la prima assegnazione.
+            platformRead = true
+            lastAlertedPlatform = current
+            return false
+        }
+        if (current == null || current == lastAlertedPlatform) return false
+
+        val previous = lastAlertedPlatform
+        lastAlertedPlatform = current
+        val where = boardingName ?: stop.stationName
+        emitAlert(
+            number,
+            status,
+            if (previous == null) {
+                "Binario $current a $where."
+            } else {
+                "Cambio binario a $where: dal $previous al $current."
+            },
+        )
+        return true
     }
 
     private fun describeDelay(minutes: Int): String = when {
