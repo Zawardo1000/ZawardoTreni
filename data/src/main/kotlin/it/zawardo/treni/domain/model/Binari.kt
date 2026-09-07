@@ -86,3 +86,116 @@ fun TrainStatus.conBinariDa(altra: TrainStatus): TrainStatus {
         },
     )
 }
+
+/**
+ * Da I a XXXIX, che copre ogni stazione italiana. Solo I, V e X: le lettere
+ * oltre la X su una banchina non compaiono, e accettarle vorrebbe dire
+ * riscrivere come numeri delle sigle che numeri non sono.
+ */
+private val ROMANO = Regex("(X{0,3})(IX|IV|V?I{0,3})", RegexOption.IGNORE_CASE)
+
+private val SPAZI = Regex("""\s+""")
+
+/** Un numero con la sua qualifica attaccata: "IItr", "1Tr", "Iw". */
+private val NUMERO_E_CODA = Regex("""([IVX0-9]+)([A-Za-z]+)""", RegexOption.IGNORE_CASE)
+
+/**
+ * Le parole con cui una fonte qualifica un binario, ridotte a una grafia sola.
+ *
+ * Non e' pulizia per il gusto di pulire. Sondato `andamentoTreno` il
+ * 07/09/2026 su 22 corse fra Milano, Napoli, Roma e Treviglio, i binari tronchi
+ * di Milano Centrale uscivano scritti in **cinque modi diversi** — "1 Tronco
+ * OVEST", "2 Tronco Ovest", "2 TR Ovest", "IITR O", "IItr" — piu' un "Iw". Non
+ * sono cinque banchine: e' la stessa, e chi confronta il programmato con
+ * l'effettivo la leggeva come un cambio di binario.
+ *
+ * La "w" e' l'unica lettura dedotta e non vista scritta per esteso: sta dove
+ * gli altri valori della stessa stazione mettono "O" o "Ovest", e su un binario
+ * tronco di Milano Centrale non puo' voler dire altro. Se un giorno volesse
+ * dire altro, il danno sarebbe una parola sbagliata a schermo, non un binario
+ * sbagliato: "1 ovest" e "1" restano comunque due binari distinti.
+ */
+private val QUALIFICATORI = mapOf(
+    "TR" to "tronco",
+    "TRONCO" to "tronco",
+    "O" to "ovest",
+    "W" to "ovest",
+    "OVEST" to "ovest",
+    "E" to "est",
+    "EST" to "est",
+)
+
+private fun String.romanoInCifre(): String? {
+    val m = ROMANO.matchEntire(this) ?: return null
+    val decine = m.groupValues[1].length * 10
+    val unita = when (val u = m.groupValues[2].uppercase()) {
+        "IX" -> 9
+        "IV" -> 4
+        else -> (if (u.startsWith("V")) 5 else 0) + u.count { it == 'I' }
+    }
+    return (decine + unita).takeIf { it > 0 }?.toString()
+}
+
+/**
+ * Stacca la qualifica dal numero, ma **solo se e' una qualifica conosciuta**:
+ * "IItr" sono due parole, "1B" e' un binario che si chiama cosi' e resta
+ * intero.
+ */
+private fun spezza(token: String): List<String> {
+    val m = NUMERO_E_CODA.matchEntire(token) ?: return listOf(token)
+    val coda = m.groupValues[2]
+    if (coda.uppercase() !in QUALIFICATORI) return listOf(token)
+    return listOf(m.groupValues[1], coda)
+}
+
+private fun canonico(token: String): String =
+    token.romanoInCifre() ?: QUALIFICATORI[token.uppercase()] ?: token
+
+/**
+ * Il binario come lo scrive l'app, da qualunque fonte arrivi: in cifre arabe,
+ * con le qualifiche per esteso, e **null quando non c'e'**.
+ *
+ * **Le cifre romane non sono un vezzo di Trenord: le scrive anche
+ * ViaggiaTreno**, e nello stesso campo in cui altrove scrive in cifre arabe.
+ * Sondato il 07/09/2026, il tabellone di Napoli Centrale dava il binario
+ * programmato come "XV", "XIV", "XVI", "IX", "II" e quello effettivo della
+ * stessa corsa come "15", "3", "13": ogni treno di quella stazione, appena
+ * assegnato il binario, dichiarava un cambio che non era avvenuto. Lo stesso a
+ * Torino Porta Nuova, dove un "XVII" stava in mezzo a tredici numeri arabi. La
+ * segnalazione era arrivata da un caso piu' piccolo — il REG 24526 del
+ * 07/09/2026, "bin. 2" barrato e "II" in evidenza a Melzo — ma il fenomeno era
+ * molto piu' largo di quel treno.
+ *
+ * Si converte invece di limitarsi a confrontare, cosi' la cifra romana sparisce
+ * anche dallo schermo: la stessa banchina non si legge in due modi a seconda di
+ * chi l'abbia detta, e in stazione i cartelli sono in cifre arabe.
+ *
+ * Si converte il numero e le qualifiche di [QUALIFICATORI], nient'altro: "1"
+ * e "1 tronco" restano due binari diversi, come sono. Il prezzo e' che un
+ * ipotetico binario chiamato "V" uscirebbe come "5" — in Italia i binari si
+ * numerano, non si nominano.
+ */
+fun binarioPulito(raw: String?): String? {
+    val testo = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return testo.split(SPAZI).flatMap { spezza(it) }.joinToString(" ") { canonico(it) }
+}
+
+/** Vero se le due scritture indicano la stessa banchina: "2" e "II" lo sono. */
+fun stessoBinario(uno: String?, altro: String?): Boolean =
+    binarioPulito(uno).equals(binarioPulito(altro), ignoreCase = true)
+
+/** Il binario da mostrare: quello vero se c'e', altrimenti quello di tabella. */
+fun binarioDaMostrare(programmato: String?, effettivo: String?): String? =
+    binarioPulito(effettivo) ?: binarioPulito(programmato)
+
+/**
+ * Il binario vero non e' quello annunciato.
+ *
+ * Vale solo dove esistono **entrambi** i valori: una fonte che ne pubblichi uno
+ * solo — Italo, EAV, Ferrotramviaria — non puo' dire "cambiato", puo' solo dire
+ * qual e'.
+ */
+fun binarioCambiato(programmato: String?, effettivo: String?): Boolean =
+    binarioPulito(programmato) != null &&
+        binarioPulito(effettivo) != null &&
+        !stessoBinario(programmato, effettivo)

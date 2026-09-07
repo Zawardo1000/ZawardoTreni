@@ -11,6 +11,7 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.binarioPulito
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -62,7 +63,7 @@ fun ItaloBoardTrainDto.toBoardEntry(scheduledDate: LocalDate = LocalDate.now(ROM
         delayMinutes = delay,
         // Ne pubblicano uno solo, ed e' quello vero del momento.
         scheduledPlatform = null,
-        actualPlatform = platform?.trim()?.takeIf { it.isNotBlank() },
+        actualPlatform = binarioPulito(platform),
         state = if (delay > 0) TrainState.DELAYED else TrainState.REGULAR,
         inStation = false,
     )
@@ -131,7 +132,7 @@ private fun List<Pair<ItaloStopDto, Boolean>>.toStops(giorno: LocalDate): List<S
             actualDeparture = if (fatta) partenzaReale else null,
             departureDelayMinutes = scarto(partenzaTeorica, partenzaReale),
             scheduledPlatform = null,
-            actualPlatform = dto.platform?.trim()?.takeIf { it.isNotBlank() },
+            actualPlatform = binarioPulito(dto.platform),
             status = if (fatta) StopStatus.DONE else StopStatus.FUTURE,
             projectedArrival = if (fatta) null else arrivoReale,
             projectedDeparture = if (fatta) null else partenzaReale,

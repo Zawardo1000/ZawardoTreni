@@ -4,6 +4,7 @@ import it.zawardo.treni.data.remote.svizzera.SvizzeraJourneyDto
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.binarioPulito
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
@@ -123,12 +124,12 @@ fun SvizzeraJourneyDto.toBoardEntry(): BoardEntry? {
         direction = to?.let(::nomeItaliano)?.takeIf { it.isNotBlank() },
         scheduledTime = "%02d:%02d".format(quando.hour, quando.minute),
         delayMinutes = ritardo,
-        scheduledPlatform = stop.platform?.takeIf { it.isNotBlank() },
+        scheduledPlatform = binarioPulito(stop.platform),
         // Il binario vero e' quello della previsione quando c'e', altrimenti
         // resta quello di tabella: cosi' "binario cambiato" si accende solo
         // quando e' cambiato davvero.
-        actualPlatform = stop.prognosis?.platform?.takeIf { it.isNotBlank() }
-            ?: stop.platform?.takeIf { it.isNotBlank() },
+        actualPlatform = binarioPulito(stop.prognosis?.platform)
+            ?: binarioPulito(stop.platform),
         state = if (ritardo > 0) TrainState.DELAYED else TrainState.REGULAR,
         inStation = false,
     )

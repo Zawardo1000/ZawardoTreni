@@ -17,6 +17,7 @@ import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.binarioPulito
 import it.zawardo.treni.domain.model.consolidate
 import java.time.Duration
 import java.time.Instant
@@ -179,10 +180,14 @@ private fun FermataDto.toStop() = Stop(
     scheduledDeparture = partenzaTeorica.toRomeDateTime(),
     actualDeparture = partenzaReale.toRomeDateTime(),
     departureDelayMinutes = ritardoPartenza,
-    scheduledPlatform = binarioProgrammatoPartenzaDescrizione
-        ?: binarioProgrammatoArrivoDescrizione,
-    actualPlatform = binarioEffettivoPartenzaDescrizione
-        ?: binarioEffettivoArrivoDescrizione,
+    // La pulizia sta prima del ripiego, non dopo: cosi' un campo che c'e' ma non
+    // dice niente lascia il posto a quello dell'arrivo, che al capolinea e'
+    // l'unico esistente. Vedi `binarioPulito`, che spiega perche' non basti
+    // ricopiare la stringa.
+    scheduledPlatform = binarioPulito(binarioProgrammatoPartenzaDescrizione)
+        ?: binarioPulito(binarioProgrammatoArrivoDescrizione),
+    actualPlatform = binarioPulito(binarioEffettivoPartenzaDescrizione)
+        ?: binarioPulito(binarioEffettivoArrivoDescrizione),
     /*
      * `actualFermataType` dice se la fermata e' stata effettuata, non dove sia
      * il treno adesso. Il 2 significa "effettuata ma non rilevata": gli orari
@@ -257,10 +262,10 @@ fun TabelloneVoceDto.toBoardEntry(): BoardEntry? {
         direction = destinazione ?: origine,
         scheduledTime = compOrarioPartenza ?: compOrarioArrivo,
         delayMinutes = ritardo,
-        scheduledPlatform = binarioProgrammatoPartenzaDescrizione
-            ?: binarioProgrammatoArrivoDescrizione,
-        actualPlatform = binarioEffettivoPartenzaDescrizione
-            ?: binarioEffettivoArrivoDescrizione,
+        scheduledPlatform = binarioPulito(binarioProgrammatoPartenzaDescrizione)
+            ?: binarioPulito(binarioProgrammatoArrivoDescrizione),
+        actualPlatform = binarioPulito(binarioEffettivoPartenzaDescrizione)
+            ?: binarioPulito(binarioEffettivoArrivoDescrizione),
         state = when {
             provvedimento == 1 -> TrainState.CANCELLED
             provvedimento == 2 -> TrainState.DIVERTED

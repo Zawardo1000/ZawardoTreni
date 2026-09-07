@@ -21,6 +21,7 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.stessoBinario
 import it.zawardo.treni.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -395,7 +396,10 @@ class TrainFollowService : Service() {
             lastAlertedPlatform = current
             return false
         }
-        if (current == null || current == lastAlertedPlatform) return false
+        // La stessa banchina scritta in due modi non e' un cambio: ViaggiaTreno
+        // dice "2" dove Trenord dice "II", e le due letture si alternano a
+        // seconda di quale delle due fonti abbia risposto per prima.
+        if (current == null || stessoBinario(current, lastAlertedPlatform)) return false
 
         val previous = lastAlertedPlatform
         lastAlertedPlatform = current

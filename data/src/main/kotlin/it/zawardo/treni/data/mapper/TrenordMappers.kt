@@ -19,6 +19,7 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.binarioPulito
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -309,7 +310,7 @@ private fun TrenordStopDto.toStop(index: Int, date: LocalDate?, now: LocalDateTi
     val estDep = combine(date, a?.estimatedDeparture)
 
     val done = realArr != null || realDep != null
-    val binario = platform?.trim()?.takeIf { it.isNotBlank() }
+    val binario = binarioPulito(platform)
     return Stop(
         index = index,
         stationName = station?.name.orEmpty(),

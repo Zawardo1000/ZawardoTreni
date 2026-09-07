@@ -4,6 +4,7 @@ import it.zawardo.treni.data.remote.fnb.FnbCorsaDto
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.binarioPulito
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -73,7 +74,7 @@ fun FnbCorsaDto.toBoardEntry(arrivals: Boolean): BoardEntry? {
         delayMinutes = ritardo,
         // Un solo binario, quello vero: non c'e' il programmato da confrontare.
         scheduledPlatform = null,
-        actualPlatform = binarioEffettivo?.takeIf { it.isNotBlank() },
+        actualPlatform = binarioPulito(binarioEffettivo),
         state = when {
             soppressa.equals("Y", ignoreCase = true) -> TrainState.CANCELLED
             ritardo > 0 -> TrainState.DELAYED

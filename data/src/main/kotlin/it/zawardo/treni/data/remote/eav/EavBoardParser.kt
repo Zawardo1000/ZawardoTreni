@@ -3,6 +3,7 @@ package it.zawardo.treni.data.remote.eav
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.binarioPulito
 
 /**
  * Estrae le righe del tabellone dall'HTML di EAV.
@@ -94,7 +95,7 @@ internal object EavBoardParser {
         val ritardo = ritardoGrezzo.toIntOrNull()?.coerceAtLeast(0) ?: 0
 
         val categoria = testo(CATEGORIA, tr)?.takeIf { it.isNotBlank() }
-        val binario = testo(BINARIO, tr)?.takeIf { it.isNotBlank() }
+        val binario = binarioPulito(testo(BINARIO, tr))
 
         return BoardEntry(
             trainRef = TrainRef(
