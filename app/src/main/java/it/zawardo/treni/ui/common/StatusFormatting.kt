@@ -45,12 +45,19 @@ fun delayNumber(minutes: Int): String = when {
 }
 
 /**
- * Un ritardo negativo e' un anticipo: scriverlo come "-3 min di ritardo"
- * confonderebbe. Qui la parola cambia insieme al segno.
+ * Lo scarto in minuti, col segno davanti: "+8 min", "-3 min", "in orario".
+ *
+ * L'anticipo si scriveva "3 min in anticipo", e nella stessa riga della stessa
+ * fermata l'arrivo diceva gia' "-3" (vedi [delayNumber]): due grafie per la
+ * stessa cosa a due centimetri di distanza, e la piu' lunga delle due mandava
+ * la partenza a capo. Il segno lo dice in un carattere, e lo dice ovunque allo
+ * stesso modo — tabellone, risultati, dettaglio della corsa.
+ *
+ * Il colore continua a distinguerli senza doverli leggere: vedi [delayColor].
  */
 fun delayLabel(minutes: Int): String = when {
     minutes > 0 -> "+$minutes min"
-    minutes < 0 -> "${-minutes} min in anticipo"
+    minutes < 0 -> "$minutes min"
     else -> "in orario"
 }
 
