@@ -59,6 +59,7 @@ import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.ui.common.BinarioRiga
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.stateColor
@@ -437,6 +438,20 @@ private fun JourneyCard(
                     }
                 }
             }
+
+            /*
+             * Il binario di partenza, chiesto dagli utenti: e' l'ultima cosa che
+             * si guarda prima di muoversi, e finora costringeva ad aprire la
+             * corsa per averla. Su un viaggio con cambio e' quello del **primo**
+             * treno, l'unico che serva prima di partire.
+             *
+             * Compare solo quando c'e'. In una lista di otto corse, otto righe
+             * di "bin. non ancora assegnato" sarebbero rumore: li' l'assenza e'
+             * la norma, perche' nelle stazioni grandi il binario lo assegnano un
+             * quarto d'ora prima. Nel dettaglio della corsa, dove la fermata da
+             * cui sali e' una riga sola in mezzo a venti, invece si dice.
+             */
+            BinarioRiga(row.scheduledPlatform, row.actualPlatform)
 
             /*
              * Le tratte vanno a capo invece di stringersi.

@@ -6,9 +6,12 @@ import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
+import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.declaredState
 import it.zawardo.treni.domain.model.soppressione
 import kotlinx.coroutines.async
@@ -20,8 +23,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlin.math.abs
 
 /** Una soluzione più, se disponibile, il suo stato in tempo reale. */
 data class JourneyRow(
@@ -29,6 +34,16 @@ data class JourneyRow(
     val loadingStatus: Boolean = false,
     val state: TrainState? = null,
     val delayMinutes: Int? = null,
+    /**
+     * Il binario da cui parti: la fermata di salita del **primo** treno.
+     *
+     * Su un viaggio con cambio è l'unico che serva prima di uscire di casa —
+     * quello della coincidenza si guarda dopo, quando si è a bordo, e cambia
+     * comunque nel frattempo. Le due letture restano separate perché è dal loro
+     * confronto che nasce il "cambiato": vedi `binarioCambiato`.
+     */
+    val scheduledPlatform: String? = null,
+    val actualPlatform: String? = null,
 ) {
     /** Stabile fra un refresh e l'altro: evita che la lista salti sotto le dita. */
     val key: String
@@ -431,6 +446,7 @@ class ResultsViewModel(
                             ?: return@async row.copy(loadingStatus = false)
                         val number = leg.trainNumber
                             ?: return@async row.copy(loadingStatus = false)
+                        val giorno = row.journey.departure.toLocalDate()
                         val status = runCatching {
                             /*
                              * Data e stazione di salita sono della tratta, non
@@ -441,13 +457,16 @@ class ResultsViewModel(
                              */
                             trains.statusByNumber(
                                 trainNumber = number,
-                                date = row.journey.departure.toLocalDate(),
+                                date = giorno,
                                 boardingCode = leg.from.rfiCode,
                                 boardingAt = leg.departure,
                             )
-                        }.getOrNull()
+                        }.getOrNull()?.let { conBinarioDiSalita(it, leg, giorno) }
+                        val salita = status?.fermataDiSalita(leg)
                         row.copy(
                             loadingStatus = false,
+                            scheduledPlatform = salita?.scheduledPlatform,
+                            actualPlatform = salita?.actualPlatform,
                             /*
                              * La soppressione dichiarata dalla sorgente resta:
                              * di un treno soppresso ViaggiaTreno non ha nemmeno
@@ -465,6 +484,49 @@ class ResultsViewModel(
                 s.copy(journeys = s.journeys.map { byKey[it.key] ?: it })
             }
         }
+    }
+
+    /**
+     * La fermata da cui sali, dentro la corsa.
+     *
+     * Il codice RFI da solo non basta: una corsa puo' ripassare dalla stessa
+     * stazione, ed e' l'orario a dire di quale dei due passaggi si stia
+     * parlando. E' la stessa regola con cui si accoppiano le fermate di due
+     * letture diverse, in `conBinariDa`.
+     */
+    private fun TrainStatus.fermataDiSalita(leg: Leg): Stop? {
+        val codice = leg.from.rfiCode?.takeIf { it.isNotBlank() } ?: return null
+        return stops
+            .filter { it.stationCode?.equals(codice, ignoreCase = true) == true }
+            .minByOrNull { fermata ->
+                val quando = fermata.scheduledDeparture ?: fermata.scheduledArrival
+                if (quando == null) Long.MAX_VALUE
+                else abs(Duration.between(leg.departure, quando).toMinutes())
+            }
+    }
+
+    /**
+     * Il binario di dove sali, chiesto all'altra fonte solo quando manca.
+     *
+     * Non e' il caso raro ma quello normale: nelle stazioni grandi ViaggiaTreno
+     * il binario non ce l'ha finche' non lo assegnano, e su una corsa Trenord
+     * quel dato lo pubblica l'altra fonte — vedi `completaBinari`. Senza questo
+     * passo il binario comparirebbe su una riga si' e una no, che e' il modo
+     * peggiore di darlo.
+     *
+     * E' pero' una chiamata di rete per riga, quindi parte **solo** se a non
+     * avere il binario e' proprio la fermata di salita: su una corsa che ce
+     * l'ha gia' non parte niente, e su un numero che Trenord non conosce non si
+     * insiste, perche' il repository se ne ricorda per un quarto d'ora.
+     */
+    private suspend fun conBinarioDiSalita(
+        status: TrainStatus,
+        leg: Leg,
+        giorno: LocalDate,
+    ): TrainStatus {
+        if (DataSource.TRENORD !in sources) return status
+        if (status.fermataDiSalita(leg)?.platform != null) return status
+        return runCatching { trains.completaBinari(status, giorno) }.getOrDefault(status)
     }
 
     private fun List<Journey>.applyDirectFilter(): List<Journey> =

@@ -63,6 +63,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.service.TrainFollowService
+import it.zawardo.treni.ui.common.BinarioRiga
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.Stop
@@ -551,7 +552,7 @@ private fun StopRow(
                 )
             } else {
                 TimeLine(stop, isFirst, isLast, cancelled = trainCancelled)
-                PlatformLine(stop, binarioAtteso)
+                BinarioRiga(stop.scheduledPlatform, stop.actualPlatform, atteso = binarioAtteso)
                 if (!stop.detected) {
                     Text(
                         if (stop.effectiveArrival != null || stop.effectiveDeparture != null) {
@@ -646,54 +647,6 @@ private fun TimeCell(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = delayColor(delay),
-            )
-        }
-    }
-}
-
-/**
- * Il binario, con la stessa grammatica degli orari: quello annunciato resta
- * scritto e barrato, quello vero gli sta accanto in evidenza.
- *
- * Prima il cambio si leggeva "7  (era 4)", che dice la stessa cosa ma con una
- * forma tutta sua: qui sopra la riga degli orari fa gia' "18:01 18:09" col
- * primo barrato, e due modi diversi di dire "era previsto cosi', invece e'
- * cosi'" nella stessa fermata si leggono come due informazioni diverse.
- */
-@Composable
-private fun PlatformLine(stop: Stop, atteso: Boolean = false) {
-    val scheme = MaterialTheme.colorScheme
-    val platform = stop.platform
-
-    if (platform == null) {
-        if (!atteso) return
-        Text(
-            "bin. non ancora assegnato",
-            style = MaterialTheme.typography.bodySmall,
-            color = scheme.onSurfaceVariant,
-        )
-        return
-    }
-
-    Row {
-        Text("bin. ", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-
-        // Il binario cambiato e' l'informazione che fa perdere i treni: quello
-        // di partenza resta leggibile, cosi' chi l'aveva memorizzato capisce
-        // che il numero nuovo riguarda proprio lui.
-        Text(
-            if (stop.platformChanged) stop.scheduledPlatform.orEmpty() else platform,
-            style = MaterialTheme.typography.bodyMedium,
-            textDecoration = if (stop.platformChanged) TextDecoration.LineThrough else null,
-            color = if (stop.platformChanged) scheme.onSurfaceVariant else scheme.onSurface,
-        )
-
-        if (stop.platformChanged) {
-            Text(
-                " ${stop.actualPlatform}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = scheme.tertiary,
             )
         }
     }
