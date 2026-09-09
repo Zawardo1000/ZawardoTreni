@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import it.zawardo.treni.domain.model.binarioCambiato
+import it.zawardo.treni.domain.model.binarioConfermato
 import it.zawardo.treni.domain.model.binarioDaMostrare
 import it.zawardo.treni.domain.model.binarioPulito
 
@@ -57,6 +58,16 @@ fun BinarioRiga(
 
     val cambiato = binarioCambiato(programmato, effettivo)
 
+    /*
+     * Confermato: l'effettivo e' arrivato ed e' quello annunciato.
+     *
+     * E' l'altra meta' del cambio, e finora non si vedeva: "bin. 4" previsto e
+     * "bin. 4" assegnato uscivano identici, neri tutti e due, e chi aspettava
+     * proprio quella conferma per muoversi non aveva modo di sapere che era
+     * arrivata. Il verde e' quello dell'anticipo — la stessa cosa buona.
+     */
+    val confermato = binarioConfermato(programmato, effettivo)
+
     Row(modifier) {
         Text("bin. ", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
 
@@ -66,8 +77,13 @@ fun BinarioRiga(
         Text(
             if (cambiato) binarioPulito(programmato).orEmpty() else binario,
             style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (confermato) FontWeight.Medium else null,
             textDecoration = if (cambiato) TextDecoration.LineThrough else null,
-            color = if (cambiato) scheme.onSurfaceVariant else scheme.onSurface,
+            color = when {
+                cambiato -> scheme.onSurfaceVariant
+                confermato -> confirmedColor()
+                else -> scheme.onSurface
+            },
         )
 
         if (cambiato) {

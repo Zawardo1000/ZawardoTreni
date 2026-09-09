@@ -28,6 +28,18 @@ fun lateColor(): Color = if (isSystemInDarkTheme()) LateDark else LateLight
 @ReadOnlyComposable
 fun earlyColor(): Color = if (isSystemInDarkTheme()) EarlyDark else EarlyLight
 
+/**
+ * Il verde di "confermato", che e' lo stesso dell'anticipo.
+ *
+ * Serve al binario: due letture che dicono la stessa banchina sono una buona
+ * notizia — quella banchina si puo' raggiungere — e finora si leggeva nera,
+ * identica al binario ancora solo previsto. Il rosso del cambio ha gia' il suo
+ * posto; questo e' il caso opposto e merita lo stesso trattamento.
+ */
+@Composable
+@ReadOnlyComposable
+fun confirmedColor(): Color = earlyColor()
+
 /** Colore di un ritardo in minuti: negativo verde, positivo rosso, zero neutro. */
 @Composable
 @ReadOnlyComposable

@@ -199,3 +199,23 @@ fun binarioCambiato(programmato: String?, effettivo: String?): Boolean =
     binarioPulito(programmato) != null &&
         binarioPulito(effettivo) != null &&
         !stessoBinario(programmato, effettivo)
+
+/**
+ * Il binario annunciato e' stato confermato: l'effettivo e' arrivato ed e' lo
+ * stesso.
+ *
+ * E' l'altra meta' di [binarioCambiato], e vive alle stesse condizioni: servono
+ * **entrambe** le letture. Un binario che viene da una fonte sola non e'
+ * confermato, e' semplicemente l'unico che si conosce — Italo, EAV e
+ * Ferrotramviaria dicono qual e', non che sia stato riconfermato.
+ *
+ * Serve perche' "4" e "4 confermato" non sono la stessa notizia. Chi guarda lo
+ * schermo un quarto d'ora prima della partenza sta aspettando proprio quello, e
+ * finora il binario confermato si leggeva identico a quello ancora solo
+ * previsto: nero in tutti e due i casi, senza modo di sapere se ci si potesse
+ * gia' andare.
+ */
+fun binarioConfermato(programmato: String?, effettivo: String?): Boolean =
+    binarioPulito(programmato) != null &&
+        binarioPulito(effettivo) != null &&
+        stessoBinario(programmato, effettivo)

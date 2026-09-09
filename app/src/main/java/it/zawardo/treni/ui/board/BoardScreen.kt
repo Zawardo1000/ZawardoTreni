@@ -66,6 +66,7 @@ import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.soppressione
+import it.zawardo.treni.ui.common.confirmedColor
 import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
@@ -429,14 +430,21 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
             Modifier.width(52.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            /*
+             * Tre stati, tre colori: rosso il binario cambiato, verde quello
+             * confermato — l'effettivo e' arrivato ed e' quello annunciato —
+             * nero quello ancora soltanto previsto. Prima gli ultimi due si
+             * leggevano uguali, e la conferma, che e' il momento in cui ci si
+             * alza per andare in banchina, non si vedeva affatto.
+             */
             Text(
                 entry.platform ?: "–",
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
-                color = if (entry.platformChanged) {
-                    MaterialTheme.colorScheme.tertiary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
+                color = when {
+                    entry.platformChanged -> MaterialTheme.colorScheme.tertiary
+                    entry.platformConfirmed -> confirmedColor()
+                    else -> MaterialTheme.colorScheme.onSurface
                 },
             )
             if (entry.platformChanged) {

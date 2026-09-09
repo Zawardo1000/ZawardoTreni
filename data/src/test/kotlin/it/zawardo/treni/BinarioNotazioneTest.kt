@@ -8,6 +8,8 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.binarioCambiato
+import it.zawardo.treni.domain.model.binarioConfermato
 import it.zawardo.treni.domain.model.binarioPulito
 import it.zawardo.treni.domain.model.stessoBinario
 import org.junit.Assert.assertEquals
@@ -189,5 +191,47 @@ class BinarioNotazioneTest {
         val melzo = fermata(programmatoPartenza = "2")
         assertEquals("MELZO", melzo.stationName)
         assertEquals(StopStatus.FUTURE, melzo.status)
+    }
+
+    // ------------------------------------------------- il binario confermato
+
+    /**
+     * L'altra meta' del cambio di binario, e finora non si vedeva: "4" previsto
+     * e "4" assegnato si leggeva identico a "4" e basta.
+     */
+    @Test
+    fun `il binario confermato e' quello annunciato che si ripete`() {
+        assertTrue(binarioConfermato("4", "4"))
+        // "II" e "2" sono la stessa banchina, quindi una conferma e non un cambio.
+        assertTrue(binarioConfermato("II", "2"))
+        assertFalse(binarioCambiato("II", "2"))
+
+        assertTrue(fermata(programmatoPartenza = "2", effettivoPartenza = "II").platformConfirmed)
+    }
+
+    @Test
+    fun `un binario cambiato non e' confermato, e viceversa`() {
+        assertFalse(binarioConfermato("4", "7"))
+        assertTrue(binarioCambiato("4", "7"))
+
+        val cambio = fermata(programmatoPartenza = "4", effettivoPartenza = "7")
+        assertTrue(cambio.platformChanged)
+        assertFalse(cambio.platformConfirmed)
+    }
+
+    /**
+     * Serve la lettura di **due** fonti. Italo, EAV e Ferrotramviaria ne
+     * pubblicano una sola: dicono qual e' il binario, non che sia stato
+     * riconfermato, e dipingerlo di verde sarebbe una promessa che nessuno ha
+     * fatto.
+     */
+    @Test
+    fun `con una lettura sola non si conferma niente`() {
+        assertFalse(binarioConfermato(null, "4"))
+        assertFalse(binarioConfermato("4", null))
+        assertFalse(binarioConfermato("4", "  "))
+        assertFalse(binarioConfermato(null, null))
+
+        assertFalse(fermata(effettivoPartenza = "4").platformConfirmed)
     }
 }

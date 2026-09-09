@@ -379,6 +379,9 @@ data class Stop(
     val platform: String? get() = binarioDaMostrare(scheduledPlatform, actualPlatform)
 
     val platformChanged: Boolean get() = binarioCambiato(scheduledPlatform, actualPlatform)
+
+    /** L'altra meta' di [platformChanged]: vedi [binarioConfermato]. */
+    val platformConfirmed: Boolean get() = binarioConfermato(scheduledPlatform, actualPlatform)
 }
 
 /** Voce di tabellone partenze/arrivi. */
@@ -414,4 +417,7 @@ data class BoardEntry(
 
     /** Come su [Stop]: vedi [binarioCambiato], che ne spiega i limiti. */
     val platformChanged: Boolean get() = binarioCambiato(scheduledPlatform, actualPlatform)
+
+    /** Come su [Stop]: il binario annunciato e' stato confermato tale e quale. */
+    val platformConfirmed: Boolean get() = binarioConfermato(scheduledPlatform, actualPlatform)
 }
