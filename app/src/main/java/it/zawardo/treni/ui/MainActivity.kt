@@ -53,6 +53,7 @@ import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.ui.theme.ZawardoTreniTheme
 import it.zawardo.treni.ui.train.TrainDetailScreen
 import it.zawardo.treni.ui.train.TrainNumberScreen
+import it.zawardo.treni.ui.viaggio.ViaggioScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 import java.time.LocalDate
@@ -163,11 +164,18 @@ private data class TabItem(
 class MainActivity : ComponentActivity() {
 
     /**
-     * Treno da aprire su richiesta esterna, oggi solo dalla notifica di
+     * Corsa da aprire su richiesta esterna, oggi solo dalla notifica di
      * "segui treno". Toccare quella notifica deve portare alla corsa seguita,
      * non genericamente all'app.
      */
     private val pendingTrain = MutableStateFlow<TrainRoute?>(null)
+
+    /**
+     * Come [pendingTrain], ma per un viaggio con cambi: la notifica ne segue
+     * piu' d'uno insieme, e toccarla deve riportare alla pagina che li mostra
+     * in fila — non a uno solo dei treni, che sarebbe la meta' della risposta.
+     */
+    private val pendingViaggio = MutableStateFlow<ViaggioRoute?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         /*
@@ -181,7 +189,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         consume(intent)
-        setContent { ZawardoTreniTheme { TreniApp(pendingTrain) } }
+        setContent { ZawardoTreniTheme { TreniApp(pendingTrain, pendingViaggio) } }
     }
 
     /** L'activity e' singleTop: ad app gia' aperta l'Intent arriva di qui. */
@@ -192,6 +200,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consume(intent: Intent?) {
+        intent?.getStringExtra(TrainFollowService.EXTRA_OPEN_VIAGGIO)?.let { json ->
+            // Consumato una volta sola, come il treno singolo qui sotto.
+            intent.removeExtra(TrainFollowService.EXTRA_OPEN_VIAGGIO)
+            pendingViaggio.value = ViaggioRoute(json)
+            return
+        }
+
         val number = intent?.getStringExtra(TrainFollowService.EXTRA_OPEN_TRAIN) ?: return
         val day = intent.getLongExtra(
             TrainFollowService.EXTRA_OPEN_DATE,
@@ -205,7 +220,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateFlow(null)) {
+private fun TreniApp(
+    pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateFlow(null),
+    pendingViaggio: MutableStateFlow<ViaggioRoute?> = MutableStateFlow(null),
+) {
     val nav = rememberNavController()
 
     val requested by pendingTrain.collectAsState()
@@ -213,6 +231,14 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
         requested?.let {
             nav.navigate(it) { launchSingleTop = true }
             pendingTrain.value = null
+        }
+    }
+
+    val requestedViaggio by pendingViaggio.collectAsState()
+    LaunchedEffect(requestedViaggio) {
+        requestedViaggio?.let {
+            nav.navigate(it) { launchSingleTop = true }
+            pendingViaggio.value = null
         }
     }
 
@@ -330,6 +356,17 @@ private fun TreniApp(pendingTrain: MutableStateFlow<TrainRoute?> = MutableStateF
                     directOnly = r.directOnly,
                     onBack = { nav.popBackStack() },
                     onOpenTrain = { nav.navigate(it) },
+                    onOpenViaggio = { nav.navigate(it) },
+                )
+            }
+
+            composable<ViaggioRoute> { entry ->
+                val r = entry.toRoute<ViaggioRoute>()
+                ViaggioScreen(
+                    tratte = tratteDaJson(r.tratteJson),
+                    focus = r.focus,
+                    onBack = { nav.popBackStack() },
+                    onOpenStation = { rfi, name -> nav.navigate(StationBoardRoute(rfi, name)) },
                 )
             }
 

@@ -54,8 +54,10 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
-import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.ui.TrainRoute
+import it.zawardo.treni.ui.ViaggioRoute
+import it.zawardo.treni.ui.comeJson
+import it.zawardo.treni.ui.tratteDelViaggio
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
@@ -83,6 +85,12 @@ fun ResultsScreen(
     directOnly: Boolean = false,
     onBack: () -> Unit,
     onOpenTrain: (TrainRoute) -> Unit,
+    /**
+     * Un viaggio con cambio si apre tutto insieme: i treni in fila in una
+     * pagina sola, col cambio scritto in mezzo. Il dettaglio della singola
+     * corsa resta ai diretti, dove non c'e' niente da mettere in fila.
+     */
+    onOpenViaggio: (ViaggioRoute) -> Unit = {},
 ) {
     val vm: ResultsViewModel = viewModel(
         factory = viewModelFactory {
@@ -234,20 +242,8 @@ fun ResultsScreen(
                     }
 
                     items(state.journeys, key = { it.key }) { row ->
-                        JourneyCard(row, requestedDate = departure.toLocalDate()) { number, leg ->
-                            onOpenTrain(
-                                TrainRoute(
-                                    number = number,
-                                    dateEpochDay = row.journey.departure.toLocalDate().toEpochDay(),
-                                    boardingRfi = leg.from.rfiCode,
-                                    boardingName = leg.from.name,
-                                    alightingRfi = leg.to.rfiCode,
-                                    // Il BFF non da' la corsa, solo il numero:
-                                    // dove e quando si sale e' cio' che
-                                    // distingue due treni omonimi.
-                                    boardingEpochSec = leg.departure.toEpochSecond(ZoneOffset.UTC),
-                                ),
-                            )
+                        JourneyCard(row, requestedDate = departure.toLocalDate()) { tratta ->
+                            apri(row.journey, tratta, onOpenTrain, onOpenViaggio)
                         }
                     }
 
@@ -303,7 +299,8 @@ fun ResultsScreen(
 private fun JourneyCard(
     row: JourneyRow,
     requestedDate: LocalDate,
-    onOpenTrain: (String, Leg) -> Unit,
+    /** L'indice della tratta toccata; `0` quando si tocca la scheda altrove. */
+    onApri: (Int) -> Unit,
 ) {
     val j: Journey = row.journey
     val otherDay = j.departure.toLocalDate() != requestedDate
@@ -331,11 +328,13 @@ private fun JourneyCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                // Solo i treni hanno un dettaglio: aprirlo per un bus porterebbe
-                // a una schermata che dice "non trovato".
-                j.legs.firstOrNull { it.isTrain }?.let { leg ->
-                    leg.trainNumber?.let { onOpenTrain(it, leg) }
-                }
+                /*
+                 * Toccando la scheda fuori dai chip si apre dal principio: con
+                 * un cambio e' la pagina del viaggio col primo treno a fuoco,
+                 * su un diretto il dettaglio della corsa. Un bus sostitutivo da
+                 * solo non ha dettaglio da aprire, e la scheda resta inerte.
+                 */
+                onApri(0)
             },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -466,11 +465,17 @@ private fun JourneyCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                j.legs.forEach { leg ->
+                j.legs.forEachIndexed { indice, leg ->
                     AssistChip(
-                        // Un bus non ha dettaglio da aprire: il chip resta inerte.
-                        enabled = leg.isTrain,
-                        onClick = { leg.trainNumber?.let { onOpenTrain(it, leg) } },
+                        /*
+                         * Dentro un viaggio con cambio ogni chip porta alla sua
+                         * tratta, bus e trasferimenti a piedi compresi: la
+                         * pagina li mostra comunque, in fila con gli altri. Su
+                         * un diretto invece un bus non ha niente da aprire e il
+                         * chip resta inerte.
+                         */
+                        enabled = leg.isTrain || !j.isDirect,
+                        onClick = { onApri(indice) },
                         label = { Text(leg.label, style = MaterialTheme.typography.labelMedium) },
                         leadingIcon = when {
                             leg.isTrain -> null
@@ -560,6 +565,48 @@ private fun JourneyCard(
             }
         }
     }
+}
+
+/**
+ * Dove porta il tocco su una soluzione.
+ *
+ * Con un cambio si va alla pagina del viaggio, che le corse le tiene tutte in
+ * fila, aperta sulla tratta toccata. Su un diretto resta il dettaglio della
+ * singola corsa: non c'e' nessuna sequenza da mostrare, e la pagina del viaggio
+ * sarebbe la stessa cosa con un giro in piu'.
+ */
+private fun apri(
+    journey: Journey,
+    tratta: Int,
+    onOpenTrain: (TrainRoute) -> Unit,
+    onOpenViaggio: (ViaggioRoute) -> Unit,
+) {
+    if (!journey.isDirect) {
+        onOpenViaggio(
+            ViaggioRoute(
+                tratteJson = journey.tratteDelViaggio().comeJson(),
+                focus = tratta.coerceIn(0, journey.legs.lastIndex),
+            ),
+        )
+        return
+    }
+
+    // Solo i treni hanno un dettaglio: aprirlo per un bus porterebbe a una
+    // schermata che dice "non trovato".
+    val leg = journey.legs.firstOrNull { it.isTrain } ?: return
+    val number = leg.trainNumber ?: return
+    onOpenTrain(
+        TrainRoute(
+            number = number,
+            dateEpochDay = journey.departure.toLocalDate().toEpochDay(),
+            boardingRfi = leg.from.rfiCode,
+            boardingName = leg.from.name,
+            alightingRfi = leg.to.rfiCode,
+            // Il BFF non da' la corsa, solo il numero: dove e quando si sale e'
+            // cio' che distingue due treni omonimi.
+            boardingEpochSec = leg.departure.toEpochSecond(ZoneOffset.UTC),
+        ),
+    )
 }
 
 /**

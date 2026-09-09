@@ -1,5 +1,9 @@
 package it.zawardo.treni.domain.model
 
+import java.time.Duration
+import java.time.LocalDateTime
+import kotlin.math.abs
+
 /**
  * Rende coerente la lista delle fermate.
  *
@@ -75,3 +79,54 @@ fun TrainStatus.terminus(arrivals: Boolean = false): String? =
         .let { if (arrivals) it.firstOrNull() else it.lastOrNull() }
         ?.stationName
         ?.takeIf { it.isNotBlank() }
+
+/**
+ * Dove sta, dentro questa corsa, la fermata di una stazione precisa. `-1` se la
+ * corsa non ci passa.
+ *
+ * Il codice di stazione da solo non basta: una corsa puo' ripassare dalla stessa
+ * stazione — le circolari lo fanno per mestiere — ed e' l'orario a dire di quale
+ * dei due passaggi si stia parlando. Stessa regola con cui si accoppiano le
+ * fermate di due letture diverse in `conBinariDa`, qui applicata a una lettura
+ * sola.
+ */
+fun TrainStatus.indiceFermata(codice: String?, quando: LocalDateTime? = null): Int {
+    val cercato = codice?.trim()?.takeIf { it.isNotEmpty() } ?: return -1
+    val candidate = stops.withIndex()
+        .filter { it.value.stationCode?.trim().equals(cercato, ignoreCase = true) }
+    if (candidate.isEmpty()) return -1
+    if (candidate.size == 1 || quando == null) return candidate.first().index
+    return candidate.minByOrNull { (_, fermata) ->
+        val ora = fermata.scheduledArrival ?: fermata.scheduledDeparture
+        if (ora == null) Long.MAX_VALUE else abs(Duration.between(quando, ora).toMinutes())
+    }!!.index
+}
+
+/**
+ * Le fermate che, dopo la discesa, non riguardano piu' chi scende li'.
+ *
+ * Su un viaggio con cambio ogni treno tranne l'ultimo prosegue senza di te,
+ * spesso per un'altra mezz'ora di fermate che finiscono per seppellire quella
+ * che conta. Restano fuori dal taglio i due capi che si guardano davvero: la
+ * discesa, e il **capolinea**, che dice dove va quel treno e senza il quale la
+ * corsa perderebbe il suo nome.
+ *
+ * Null quando non c'e' niente da guadagnare: se le fermate da nascondere sono
+ * meno di [FERMATE_MINIME_DA_NASCONDERE], il comando per riaprirle occuperebbe
+ * lo stesso posto che occupano loro.
+ */
+fun List<Stop>.dopoLaDiscesa(discesa: Int): IntRange? {
+    if (discesa < 0) return null
+    val prima = discesa + 1
+    // L'ultima resta sempre: e' il capolinea, la coda che chiude il percorso.
+    val ultima = lastIndex - 1
+    if (ultima - prima + 1 < FERMATE_MINIME_DA_NASCONDERE) return null
+    return prima..ultima
+}
+
+/**
+ * Sotto le due fermate non si comprime niente: i tre puntini per riaprirle
+ * costerebbero la riga che fanno risparmiare, e in cambio nasconderebbero un
+ * dato per il gusto di nasconderlo.
+ */
+private const val FERMATE_MINIME_DA_NASCONDERE = 2
