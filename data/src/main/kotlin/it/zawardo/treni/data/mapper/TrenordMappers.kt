@@ -20,6 +20,7 @@ import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.binarioPulito
+import it.zawardo.treni.domain.model.nomeLeggibile
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -65,7 +66,8 @@ private fun TrenordStationDto.toStation() = Station(
      * risultati plausibili e sbagliati.
      */
     locationId = 0L,
-    name = name.orEmpty().lowercase().replaceFirstChar { it.uppercase() },
+    // Prima solo la prima lettera: «Calolziocorte olginate». Vedi `nomeLeggibile`.
+    name = nomeLeggibile(name.orEmpty()),
 )
 
 private fun TrenordTrainDto.kind(): TransportKind = when {
@@ -313,7 +315,7 @@ private fun TrenordStopDto.toStop(index: Int, date: LocalDate?, now: LocalDateTi
     val binario = binarioPulito(platform)
     return Stop(
         index = index,
-        stationName = station?.name.orEmpty(),
+        stationName = nomeLeggibile(station?.name.orEmpty()),
         stationCode = station?.stationId,
         scheduledArrival = schedArr,
         actualArrival = realArr,

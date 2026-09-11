@@ -19,6 +19,7 @@ import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.binarioPulito
 import it.zawardo.treni.domain.model.consolidate
+import it.zawardo.treni.domain.model.nomeLeggibile
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -42,7 +43,8 @@ fun LocationDto.toStation() = Station(
     // Solo le stazioni RFI hanno bdoCode: senza, il realtime non e' interrogabile.
     rfiCode = bdoCode?.takeIf { it.isNotBlank() && it != "S00000" },
     locationId = locationId,
-    name = name,
+    // Di solito arriva gia' scritto, ma non sempre: «BRESCIA POLIAMBULANZA».
+    name = nomeLeggibile(name),
     latitude = geographicCoordinates?.latitude ?: 0.0,
     longitude = geographicCoordinates?.longitude ?: 0.0,
 )
@@ -139,6 +141,14 @@ fun SolutionDto.toJourney(): Journey? {
  * da aspettare ne' una chiamata da ripetere: quella sessione di ricerca i
  * prezzi non li ha e basta. Ne segue che la UI deve reggere l'assenza come
  * caso normale, non come errore.
+ *
+ * **Rimisurato l'11/09/2026 su 36 ricerche, e la forma e' cambiata.** Non piu'
+ * `totalPrice` null, ma `totalAmount = {amount: "0.00", showPrice: false}` su
+ * tutte le soluzioni della ricerca, Frecce comprese. E' capitato in 12 ricerche
+ * su 36, quasi tutte su tratte regionali lombarde (Varese-Brescia 4 su 6,
+ * Milano-Bergamo 5 su 6), mai su Milano-Roma o Napoli-Salerno. La stessa
+ * sessione richiamata da' lo stesso esito, ma una ricerca **nuova** puo'
+ * riportare i prezzi. Il filtro qui regge entrambe le forme.
  */
 private fun SolutionDto.toPrice(): Price? {
     val cifra = (totalAmount?.amount ?: totalPrice)?.trim()?.takeIf { it.isNotBlank() } ?: return null
@@ -172,7 +182,8 @@ private fun AndamentoTrenoDto.deriveState(): TrainState = when {
 
 private fun FermataDto.toStop() = Stop(
     index = progressivo,
-    stationName = stazione.orEmpty(),
+    // ViaggiaTreno scrive tutto in maiuscolo: vedi `nomeLeggibile`.
+    stationName = nomeLeggibile(stazione.orEmpty()),
     stationCode = id,
     scheduledArrival = arrivoTeorico.toRomeDateTime(),
     actualArrival = arrivoReale.toRomeDateTime(),
@@ -231,11 +242,11 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
         category = categoria?.takeIf { it.isNotBlank() },
         label = compNumeroTreno?.takeIf { it.isNotBlank() }
             ?: listOfNotNull(categoria, numeroTreno.toString()).joinToString(" "),
-        origin = origine,
-        destination = destinazione,
+        origin = origine?.let(::nomeLeggibile),
+        destination = destinazione?.let(::nomeLeggibile),
         delayMinutes = ritardo,
         state = deriveState(),
-        lastDetectionStation = detected,
+        lastDetectionStation = detected?.let(::nomeLeggibile),
         lastDetectionTime = oraUltimoRilevamento.toRomeDateTime(),
         notice = subTitle?.takeIf { it.isNotBlank() },
         // Le soppresse non sono in `fermate`: vanno riunite e riordinate.
@@ -254,12 +265,12 @@ fun TabelloneVoceDto.toBoardEntry(): BoardEntry? {
             number = numeroTreno.toString(),
             originCode = origin,
             departureDateMillis = millis,
-            originName = origine,
+            originName = origine?.let(::nomeLeggibile),
         ),
         label = compNumeroTreno?.takeIf { it.isNotBlank() }
             ?: listOfNotNull(categoria, numeroTreno.toString()).joinToString(" "),
         category = categoria?.takeIf { it.isNotBlank() },
-        direction = destinazione ?: origine,
+        direction = (destinazione ?: origine)?.let(::nomeLeggibile),
         scheduledTime = compOrarioPartenza ?: compOrarioArrivo,
         delayMinutes = ritardo,
         scheduledPlatform = binarioPulito(binarioProgrammatoPartenzaDescrizione)
@@ -290,7 +301,7 @@ fun parseTrainRefLine(line: String): TrainRef? {
     val rhs = parts[1].split('-')
     if (rhs.size != 3) return null
     val millis = rhs[2].toLongOrNull() ?: return null
-    val originName = parts[0].split(" - ").getOrNull(1)?.trim()
+    val originName = parts[0].split(" - ").getOrNull(1)?.trim()?.let(::nomeLeggibile)
     return TrainRef(
         number = rhs[0].trim(),
         originCode = rhs[1].trim(),

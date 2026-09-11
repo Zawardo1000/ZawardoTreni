@@ -24,13 +24,11 @@ import java.time.LocalDate
 /**
  * Un tratto di percorso che si puo' chiudere dietro i tre punti.
  *
- * Oggi ne esiste uno solo: le fermate **dopo la discesa**, quelle che il treno
- * fa senza di te. L'altro e' previsto e non ancora acceso — dal secondo treno in
- * poi anche le fermate *prima* della salita sono percorso che non ti riguarda —
- * e sta qui scritto perche' accenderlo sia una riga: una funzione di dominio
- * come `dopoLaDiscesa` e una voce in piu' nell'elenco dei blocchi. Tutto il
- * resto — lo stato di apertura, la riga coi punti, il conteggio — non distingue
- * fra i due.
+ * Sono due: le fermate **dopo la discesa**, quelle che il treno fa senza di te,
+ * e dal secondo treno in poi quelle **prima della salita**, la strada che il
+ * treno ha fatto prima di arrivare da te (accese l'11/09/2026, vedi
+ * `primaDellaSalita`). Tutto il resto — lo stato di apertura, la riga coi punti,
+ * il conteggio — non distingue fra i due.
  */
 enum class BloccoNascosto {
     DOPO_LA_DISCESA,

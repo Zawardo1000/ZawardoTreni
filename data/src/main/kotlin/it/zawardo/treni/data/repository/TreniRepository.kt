@@ -152,6 +152,11 @@ private const val EARTH_RADIUS_KM = 6371.0
 data class SearchOutcome(
     val journeys: List<Journey> = emptyList(),
     val alerts: List<ServiceAlert> = emptyList(),
+    /**
+     * Le Frecce ha risposto senza alcun prezzo. E' intermittente, e una ricerca
+     * nuova puo' riportarli: vedi [JourneyRepository.prezziLeFrecce].
+     */
+    val prezziAssenti: Boolean = false,
 )
 
 /**
@@ -200,10 +205,10 @@ class JourneyRepository(
                 // perNazionale(): una stazione fuori-RFI con gemello nazionale
                 // (Sorrento-EAV) va chiesta a Le Frecce col suo id nazionale,
                 // altrimenti il codice sintetico non instrada. Vedi Station.idNazionale.
-                runCatching { search(from.perNazionale(), to.perNazionale(), departure, limit) }
-                    .getOrDefault(emptyList())
+                runCatching { cercaLeFrecce(from.perNazionale(), to.perNazionale(), departure, limit) }
+                    .getOrDefault(RisultatoLeFrecce())
             } else {
-                emptyList()
+                RisultatoLeFrecce()
             }
         }
         val trenordJob = async {
@@ -218,49 +223,59 @@ class JourneyRepository(
         val fromTrenord = trenordJob.await()
 
         SearchOutcome(
-            journeys = merge(fromLefrecce, fromTrenord?.journeys.orEmpty(), departure, limit),
+            journeys = merge(fromLefrecce.journeys, fromTrenord?.journeys.orEmpty(), departure, limit),
             alerts = fromTrenord?.alerts.orEmpty(),
+            prezziAssenti = fromLefrecce.senzaPrezzi,
         )
     }
 
-    /**
-     * Unisce le due liste eliminando i doppioni.
-     *
-     * La stessa corsa puo' arrivare da entrambe: si riconosce dall'orario di
-     * partenza e dai numeri dei treni. A parita', vince Trenord, che espone
-     * ritardo e soppressione mentre il BFF no.
-     */
+    /** Vedi [unisciSoluzioni]: sta fuori dalla classe perche' i test la raggiungano. */
     private fun merge(
         lefrecce: List<Journey>,
         trenord: List<Journey>,
         departure: LocalDateTime,
         limit: Int,
-    ): List<Journey> {
-        fun key(j: Journey) = j.departure.withSecond(0).withNano(0).toString() + "|" +
-            j.legs.mapNotNull { it.trainNumber }.sorted().joinToString(",")
-
-        val byKey = LinkedHashMap<String, Journey>()
-        trenord.forEach { byKey[key(it)] = it }
-        lefrecce.forEach { byKey.putIfAbsent(key(it), it) }
-
-        return byKey.values
-            .filter { !it.arrival.isBefore(departure.minusHours(1)) }
-            .sortedBy { it.departure }
-            .take(limit)
-    }
+    ): List<Journey> = unisciSoluzioni(lefrecce, trenord, departure, limit)
 
     suspend fun search(
         from: Station,
         to: Station,
         departure: LocalDateTime,
         limit: Int = 10,
-    ): List<Journey> = withContext(Dispatchers.IO) {
+    ): List<Journey> = cercaLeFrecce(from, to, departure, limit).journeys
+
+    /**
+     * Una ricerca **nuova** su Le Frecce, per i soli prezzi, per chiave di
+     * soluzione (vedi [chiaveSoluzione]).
+     *
+     * Serve quando la prima e' tornata tutta senza prezzi
+     * ([SearchOutcome.prezziAssenti]). La stessa sessione richiamata da' lo
+     * stesso esito; una sessione nuova invece puo' riportarli. Misurato
+     * l'11/09/2026 su Varese-Brescia: la stessa ricerca ripetuta ha dato 8
+     * prezzi, poi 0, poi 0; per il giorno dopo 0, 8, 0.
+     */
+    suspend fun prezziLeFrecce(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        limit: Int = 10,
+    ): Map<String, it.zawardo.treni.domain.model.Price> =
+        cercaLeFrecce(from.perNazionale(), to.perNazionale(), departure, limit).journeys
+            .mapNotNull { j -> j.price?.let { chiaveSoluzione(j) to it } }
+            .toMap()
+
+    private suspend fun cercaLeFrecce(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        limit: Int,
+    ): RisultatoLeFrecce = withContext(Dispatchers.IO) {
         val session = lefrecce.search(
             startLocationId = from.locationId,
             endLocationId = to.locationId,
             departureTime = departure.atZone(ROME).format(bffFormat),
         )
-        if (session.searchId.isBlank()) return@withContext emptyList()
+        if (session.searchId.isBlank()) return@withContext RisultatoLeFrecce()
 
         /*
          * Si chiede piu' del necessario e si tronca dopo il filtro.
@@ -271,15 +286,89 @@ class JourneyRepository(
          * trovasse nulla, e bastava spostare l'orario di un minuto perche'
          * tornassero soluzioni diverse e "funzionasse".
          */
-        lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit * OVERFETCH)
+        val soluzioni = lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit * OVERFETCH)
+        val viaggi = soluzioni
             .mapNotNull { it.toJourney() }
             .filter { it.legs.isNotEmpty() }
             .take(limit)
+        RisultatoLeFrecce(
+            journeys = viaggi,
+            /*
+             * La ricerca senza prezzi ha una firma precisa: `showPrice` falso su
+             * **ogni** soluzione, Frecce comprese, e nessun prezzo rimasto. Una
+             * soluzione sola a falso e' invece un biglietto non in vendita, e
+             * rifare la ricerca non la cambierebbe.
+             */
+            senzaPrezzi = viaggi.isNotEmpty() &&
+                viaggi.none { it.price != null } &&
+                soluzioni.all { it.totalAmount?.showPrice == false },
+        )
     }
+
+    /** Le soluzioni di Le Frecce, e se sono arrivate tutte senza prezzo. */
+    private data class RisultatoLeFrecce(
+        val journeys: List<Journey> = emptyList(),
+        val senzaPrezzi: Boolean = false,
+    )
 
     private companion object {
         const val OVERFETCH = 3
     }
+}
+
+/**
+ * Come la stessa soluzione si riconosce in due sorgenti: l'orario di partenza al
+ * minuto e i numeri dei treni.
+ */
+fun chiaveSoluzione(j: Journey): String =
+    j.departure.withSecond(0).withNano(0).toString() + "|" +
+        j.legs.mapNotNull { it.trainNumber }.sorted().joinToString(",")
+
+/**
+ * Unisce le soluzioni di Le Frecce e di Trenord eliminando i doppioni.
+ *
+ * La stessa corsa puo' arrivare da entrambe: si riconosce con [chiaveSoluzione].
+ * A parita', vince Trenord, che espone ritardo e soppressione mentre il BFF no.
+ *
+ * **Ma il prezzo non si perde.** Trenord risponde anche fuori dalla Lombardia,
+ * dove non vende biglietti, e la sua copia senza prezzo prendeva il posto di
+ * quella di Le Frecce che il prezzo ce l'aveva. Misurato l'11/09/2026: l'ICN
+ * 797 Napoli-Salerno a 9,50 € usciva senza cifra, e cosi' due RV Torino-Milano.
+ * Ora la copia Trenord vince ancora, ma eredita il prezzo. Se il prezzo ce l'ha
+ * gia', resta il suo.
+ */
+internal fun unisciSoluzioni(
+    lefrecce: List<Journey>,
+    trenord: List<Journey>,
+    departure: LocalDateTime,
+    limit: Int,
+): List<Journey> {
+    val byKey = LinkedHashMap<String, Journey>()
+    trenord.forEach { byKey[chiaveSoluzione(it)] = it }
+    lefrecce.forEach { lf ->
+        val chiave = chiaveSoluzione(lf)
+        val tn = byKey[chiave]
+        when {
+            tn == null -> byKey[chiave] = lf
+            tn.price == null && lf.price != null -> byKey[chiave] = tn.copy(price = lf.price)
+        }
+    }
+
+    /*
+     * Dall'ora cercata in avanti, al minuto.
+     *
+     * Il filtro teneva tutto cio' che *arrivava* non prima di un'ora fa: un
+     * treno gia' partito ma non ancora arrivato passava, e cercando «adesso»
+     * Dateo-Vignate l'11/09/2026 in cima alla lista usciva una S5 gia' partita.
+     * Le corse di prima restano raggiungibili con «Corse precedenti», che cerca
+     * partendo da ore prima. Al minuto, perche' «adesso» porta anche i secondi:
+     * un treno che parte alle 11:45 non va scartato alle 11:45:31.
+     */
+    val daQuando = departure.withSecond(0).withNano(0)
+    return byKey.values
+        .filter { !it.departure.isBefore(daQuando) }
+        .sortedBy { it.departure }
+        .take(limit)
 }
 
 /** Stato realtime delle corse, da ViaggiaTreno. */

@@ -3,6 +3,7 @@ package it.zawardo.treni.ui.results
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.data.repository.chiaveSoluzione
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.Journey
@@ -192,6 +193,7 @@ class ResultsViewModel(
             }
             enrich(rows)
             cercaAltreSoluzioni(direttoMigliore = list.minByOrNull { it.duration }?.duration)
+            if (outcome.prezziAssenti) riprovaPrezzi(departure, PAGE)
         }
     }
 
@@ -260,6 +262,32 @@ class ResultsViewModel(
         }
     }
 
+    /**
+     * Una ricerca tornata tutta senza prezzi si rifa' una volta, in sottofondo.
+     *
+     * Le Frecce a volte risponde senza alcun prezzo, Frecce comprese: misurato
+     * l'11/09/2026 in 12 ricerche su 36, quasi tutte su tratte regionali
+     * lombarde. Richiamare la stessa sessione non cambia niente, una ricerca
+     * nuova si'. La lista resta a schermo com'e': i prezzi, se arrivano, si
+     * aggiungono alle righe che ne sono senza, e nient'altro si muove.
+     */
+    private fun riprovaPrezzi(quando: LocalDateTime, limite: Int) {
+        viewModelScope.launch {
+            val prezzi = runCatching { journeys.prezziLeFrecce(from, to, quando, limite) }
+                .getOrDefault(emptyMap())
+            if (prezzi.isEmpty()) return@launch
+            _state.update { s ->
+                s.copy(
+                    journeys = s.journeys.map { riga ->
+                        if (riga.journey.price != null) return@map riga
+                        val prezzo = prezzi[chiaveSoluzione(riga.journey)] ?: return@map riga
+                        riga.copy(journey = riga.journey.copy(price = prezzo))
+                    },
+                )
+            }
+        }
+    }
+
     /** Vero se la tratta puo' comporre misti o Italo diretti: decide il velo. */
     private suspend fun componeAltre(): Boolean {
         val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
@@ -318,18 +346,22 @@ class ResultsViewModel(
             _state.update { it.copy(loadingEarlier = true) }
 
             var found = emptyList<Journey>()
+            // Da dove rifare la ricerca, se questa finestra torna tutta senza prezzi.
+            var riprovaDa: LocalDateTime? = null
             for (hoursBack in intArrayOf(3, 8)) {
                 val start = first.minusHours(hoursBack.toLong())
                 // Prima dell'inizio del giorno non c'e' niente da cercare.
                 val clamped = maxOf(start, first.toLocalDate().atStartOfDay())
                 // searchAll e non search: anche andando indietro le corse Trenord
                 // devono comparire, altrimenti la lista cambia natura scorrendo.
-                val batch = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE, sources = sources) }
-                    .getOrNull()?.journeys.orEmpty()
+                val esito = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE, sources = sources) }
+                    .getOrNull()
+                val batch = esito?.journeys.orEmpty()
                     .applyDirectFilter()
                     .filter { it.departure.isBefore(first) }
                 if (batch.isNotEmpty()) {
                     found = batch.takeLast(PAGE)
+                    if (esito?.prezziAssenti == true) riprovaDa = clamped
                     break
                 }
                 if (clamped == first.toLocalDate().atStartOfDay()) break
@@ -366,6 +398,7 @@ class ResultsViewModel(
                 s.copy(loadingEarlier = false, journeys = rows + s.journeys, noMoreEarlier = rows.isEmpty())
             }
             enrich(rows)
+            riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE) }
         }
     }
 
@@ -378,9 +411,10 @@ class ResultsViewModel(
         viewModelScope.launch {
             _state.update { it.copy(loadingLater = true) }
 
-            val batch = runCatching {
+            val esito = runCatching {
                 journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE, sources = sources)
-            }.getOrNull()?.journeys.orEmpty().applyDirectFilter()
+            }.getOrNull()
+            val batch = esito?.journeys.orEmpty().applyDirectFilter()
                 .filter { it.departure.isAfter(last) }
 
             val existing = current.journeys.map { it.key }.toSet()
@@ -409,6 +443,7 @@ class ResultsViewModel(
                 s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty())
             }
             enrich(rows)
+            if (esito?.prezziAssenti == true) riprovaPrezzi(last.plusMinutes(1), WIDE_PAGE)
         }
     }
 

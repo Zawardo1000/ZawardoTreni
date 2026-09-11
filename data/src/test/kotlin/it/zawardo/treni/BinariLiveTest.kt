@@ -109,6 +109,17 @@ class BinariLiveTest {
      */
     private val paroleAmmesse = setOf("tronco", "ovest", "est")
 
+    /**
+     * Grafie viste e lasciate cosi' di proposito.
+     *
+     * "I'" e' comparso nelle risposte di ViaggiaTreno l'11/09/2026. Deciso con
+     * l'utente di non ridurlo a "1": e' un binario diverso dall'"I", e tale
+     * resta. `binarioPulito` lo lascia gia' intatto, perche' l'apice gli impedisce
+     * di passare per cifra romana; qui va solo detto al test che non e' una
+     * grafia sconosciuta. Vedi `BinarioNotazioneTest`.
+     */
+    private val binariAmmessi = setOf("I'")
+
     @Test
     fun `il binario arriva in una grammatica sola`() = runBlocking {
         val quando = ZonedDateTime.now().format(boardFormat)
@@ -155,7 +166,7 @@ class BinariLiveTest {
             .forEach { println("      '${it.key}'".padEnd(28) + " -> ${it.value}") }
 
         val sconosciute = puliti.values.filterNotNull().filter { valore ->
-            valore.split(" ").any { it.toIntOrNull() == null && it !in paroleAmmesse }
+            valore.split(" ").any { it.toIntOrNull() == null && it !in paroleAmmesse && it !in binariAmmessi }
         }
         assertTrue(
             "grafie del binario che `binarioPulito` non sa ridurre: " +

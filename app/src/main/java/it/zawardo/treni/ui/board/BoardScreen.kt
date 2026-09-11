@@ -50,7 +50,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,7 +65,9 @@ import it.zawardo.treni.ui.common.StationPicker
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.soppressione
-import it.zawardo.treni.ui.common.confirmedColor
+import it.zawardo.treni.ui.common.BinarioPillola
+import it.zawardo.treni.ui.theme.Cifre
+import androidx.compose.ui.unit.sp
 import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
@@ -364,11 +365,12 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
             .padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Monospace sull'orario: incolonna le cifre come un tabellone vero.
+        // Cifre tabulari e semicondensate: incolonnano come un tabellone vero,
+        // senza l'aria da terminale che dava il monospace.
         Text(
             entry.scheduledTime ?: "--:--",
-            style = MaterialTheme.typography.titleMedium,
-            fontFamily = FontFamily.Monospace,
+            style = Cifre.riga.copy(fontSize = 19.sp, lineHeight = 22.sp),
+            fontWeight = FontWeight.SemiBold,
             textDecoration = if (cancelled) TextDecoration.LineThrough else null,
         )
 
@@ -437,32 +439,15 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
              * leggevano uguali, e la conferma, che e' il momento in cui ci si
              * alza per andare in banchina, non si vedeva affatto.
              */
-            Text(
-                entry.platform ?: "–",
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                color = when {
-                    entry.platformChanged -> MaterialTheme.colorScheme.tertiary
-                    entry.platformConfirmed -> confirmedColor()
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+            // La stessa pillola dell'elenco e del dettaglio: il binario vecchio
+            // barrato sotto quello nuovo lo disegna lei, perche' chi era andato
+            // al 3 e legge 4 deve poter riconoscere il proprio treno.
+            BinarioPillola(
+                entry.scheduledPlatform,
+                entry.actualPlatform,
+                piccola = true,
+                segnaposto = true,
             )
-            if (entry.platformChanged) {
-                /*
-                 * Il binario annunciato resta scritto e barrato, come l'orario
-                 * superato nella colonna accanto. Il colore da solo diceva che
-                 * qualcosa era cambiato ma non da cosa: chi era andato al 3 e
-                 * legge 4 deve poter riconoscere il proprio treno, non chiedersi
-                 * se sta guardando la riga giusta.
-                 */
-                Text(
-                    entry.scheduledPlatform.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    textDecoration = TextDecoration.LineThrough,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             if (entry.inStation) {
                 Text(
                     "in arrivo",

@@ -183,8 +183,10 @@ class BinariTest {
     fun `le fermate si accoppiano sul codice, non sul nome`() {
         // "MALPENSA AEROPORTO TERMINAL 1" e "MALPENSA AEROPORTO T1" sono la
         // stessa stazione solo per il codice: S01139.
+        // Resta il nome di ViaggiaTreno, per esteso; solo le maiuscole sono
+        // quelle di `nomeLeggibile`.
         val malpensa = unite.stops[5]
-        assertEquals("MALPENSA AEROPORTO TERMINAL 1", malpensa.stationName)
+        assertEquals("Malpensa Aeroporto Terminal 1", malpensa.stationName)
         assertEquals("3", malpensa.scheduledPlatform)
     }
 

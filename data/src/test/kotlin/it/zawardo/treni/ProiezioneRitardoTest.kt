@@ -100,7 +100,8 @@ class ProiezioneRitardoTest {
         )
         assertEquals(
             "il rilevamento va nominato, o quel -3 resta senza spiegazione",
-            "LECCO MAGGIANICO",
+            // Il nome passa per `nomeLeggibile`: cambiano solo le maiuscole.
+            "Lecco Maggianico",
             stato.lastDetectionStation,
         )
         assertEquals(giorno.atTime(6, 56), stato.lastDetectionTime)
@@ -109,7 +110,7 @@ class ProiezioneRitardoTest {
     @Test
     fun `sulle fermate gia' fatte restano le misure loro`() {
         val stato = duemilaOttocentoTredici(ritardo = -3).toTrainStatus()
-        val lecco = stato.stops.first { it.stationName == "LECCO" }
+        val lecco = stato.stops.first { it.stationName == "Lecco" }
 
         assertEquals("Lecco e' arrivata a -5 e quello resta", -5, lecco.arrivalDelayMinutes)
         assertEquals("e ne e' ripartita a +1, che pure resta", 1, lecco.departureDelayMinutes)

@@ -6,6 +6,7 @@ import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.dopoLaDiscesa
 import it.zawardo.treni.domain.model.indiceFermata
+import it.zawardo.treni.domain.model.primaDellaSalita
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -128,5 +129,26 @@ class FermateRidotteTest {
     @Test
     fun `una fermata sola resta scritta`() {
         assertNull(corsa.stops.dopoLaDiscesa(3))
+    }
+
+    // ------------------------------------------------ prima della salita
+
+    @Test
+    fun `prima della salita si chiude tutto tranne il capolinea di partenza`() {
+        // Sali a Calolziocorte (4): si chiudono Monza, Arcore e Carnate; Milano
+        // Centrale resta, perche' dice da dove viene quel treno.
+        assertEquals(1..3, corsa.stops.primaDellaSalita(4))
+    }
+
+    @Test
+    fun `salendo al capolinea, o subito dopo, non c'e' niente da chiudere`() {
+        assertNull(corsa.stops.primaDellaSalita(0))
+        assertNull(corsa.stops.primaDellaSalita(1))
+        assertNull(corsa.stops.primaDellaSalita(-1))
+    }
+
+    @Test
+    fun `prima della salita una fermata sola resta scritta`() {
+        assertNull(corsa.stops.primaDellaSalita(2))
     }
 }

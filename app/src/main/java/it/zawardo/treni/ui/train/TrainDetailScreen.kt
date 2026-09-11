@@ -5,9 +5,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,7 +60,7 @@ import java.util.Locale
 
 private val GIORNO = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TrainDetailScreen(
     trainNumber: String,
@@ -213,79 +215,108 @@ fun TrainDetailScreen(
                     Modifier.align(Alignment.Center),
                 )
 
-                else -> LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                ) {
+                else -> Column(Modifier.fillMaxSize()) {
+                    // Lo scarto fisso sotto la barra, fuori dalla lista: vedi [StatoCorsa].
+                    StatoCorsa(status)
+
+                    // Dove sali e dove scendi. Senza la salita la corsa si legge
+                    // dall'inizio; senza la discesa non c'e' un tratto da
+                    // evidenziare, solo la fermata da cui parti.
+                    val salita = status.stops
+                        .indexOfFirst { it.stationCode?.equals(boardingRfi, true) == true }
+                        .takeIf { it >= 0 }
+                    val discesa = status.stops
+                        .indexOfFirst { it.stationCode?.equals(alightingRfi, true) == true }
+                        .takeIf { it >= 0 && (salita == null || it > salita) }
                     // Dove parti tu: la fermata di salita, o il capolinea di
                     // partenza quando nessuno ci ha detto dove sali.
-                    val partenzaTua = status.stops
-                        .indexOfFirst { it.stationCode?.equals(boardingRfi, true) == true }
-                        .takeIf { it >= 0 } ?: 0
+                    val partenzaTua = salita ?: 0
 
-                    item { Header(status) }
-                    item { Box(Modifier.height(16.dp)) }
-                    itemsIndexed(status.stops, key = { _, s -> "${s.index}-${s.stationName}" }) { i, stop ->
-                        FermataRiga(
-                            stop = stop,
-                            isFirst = i == 0,
-                            isLast = i == status.stops.lastIndex,
-                            // Corsa soppressa per intero: barrata tutta, non solo
-                            // le fermate che ViaggiaTreno elenca come soppresse.
-                            trainCancelled = status.state == TrainState.CANCELLED,
-                            onOpenStation = onOpenStation,
-                            /*
-                             * I due capi del tuo viaggio dentro questa corsa.
-                             *
-                             * Sono le uniche due righe che stai cercando in un
-                             * elenco che puo' averne venti, e con un cambio la
-                             * discesa conta piu' della salita: e' li' che devi
-                             * scendere per prendere l'altro treno.
-                             */
-                            // Senza guardare le maiuscole: i codici arrivano da
-                            // quattro sorgenti diverse e basta una minuscola
-                            // perche' l'evidenziazione sparisca in silenzio.
-                            isBoarding = stop.stationCode?.equals(boardingRfi, true) == true,
-                            isAlighting = stop.stationCode?.equals(alightingRfi, true) == true,
-                            /*
-                             * Il binario di dove sali e' l'unico di cui l'assenza
-                             * si nota: nelle stazioni grandi non sta in orario,
-                             * lo assegnano un quarto d'ora prima, e vedere
-                             * "bin. 4" su Monza e niente su Milano Centrale
-                             * sembra un dato perso invece di un dato che ancora
-                             * non esiste. Sulle altre fermate resta muto: venti
-                             * righe di "non assegnato" direbbero solo rumore.
-                             */
-                            binarioAtteso = i == partenzaTua && stop.status == StopStatus.FUTURE &&
-                                status.realtime,
-                        )
-                    }
-                    state.error?.let {
+                    /*
+                     * Il treno fra due fermate, dove e' stato visto l'ultima volta.
+                     *
+                     * `currentStopIndex` e' l'ultima fermata fatta: il treno sta
+                     * dopo, sul tratto verso la prossima. Solo mentre viaggia: prima
+                     * della partenza e dopo l'arrivo non c'e' niente da mettere sulla
+                     * linea.
+                     */
+                    val posizione = status.posizioneInViaggio()
+
+                    LazyColumn(Modifier.fillMaxSize()) {
                         item {
-                            Text(
-                                it,
-                                Modifier.padding(top = 16.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                            Column(
+                                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                // Il rilevamento, quando il treno e' in viaggio, lo
+                                // dice la riga sul percorso: qui sarebbe un doppione.
+                                DettagliCorsa(status, conStato = false, conRilevamento = posizione == null)
+                            }
                         }
+                        stickyHeader { IntestazioneColonne() }
+                        status.stops.forEachIndexed { i, stop ->
+                            item(key = "${stop.index}-${stop.stationName}") {
+                                FermataRiga(
+                                    stop = stop,
+                                    isFirst = i == 0,
+                                    isLast = i == status.stops.lastIndex,
+                                    // Corsa soppressa per intero: barrata tutta, non solo
+                                    // le fermate che ViaggiaTreno elenca come soppresse.
+                                    trainCancelled = status.state == TrainState.CANCELLED,
+                                    onOpenStation = onOpenStation,
+                                    /*
+                                     * I due capi del tuo viaggio dentro questa corsa.
+                                     *
+                                     * Sono le uniche due righe che stai cercando in un
+                                     * elenco che puo' averne venti, e con un cambio la
+                                     * discesa conta piu' della salita: e' li' che devi
+                                     * scendere per prendere l'altro treno.
+                                     */
+                                    isBoarding = i == salita,
+                                    isAlighting = i == discesa,
+                                    /*
+                                     * Il binario di dove sali e' l'unico di cui l'assenza
+                                     * si nota: nelle stazioni grandi non sta in orario,
+                                     * lo assegnano un quarto d'ora prima, e vedere "4" su
+                                     * Monza e niente su Milano Centrale sembra un dato
+                                     * perso invece di un dato che ancora non esiste.
+                                     * Sulle altre fermate resta muto.
+                                     */
+                                    binarioAtteso = i == partenzaTua && stop.status == StopStatus.FUTURE &&
+                                        status.realtime,
+                                    tratto = nelTratto(i, salita, discesa),
+                                    trenoDopo = posizione != null && i == posizione.fermata && !posizione.inStazione,
+                                    trenoInStazione = posizione != null && i == posizione.fermata && posizione.inStazione,
+                                    rilevatoAlle = status.lastDetectionTime,
+                                    realtime = status.realtime,
+                                    zebra = i % 2 == 1,
+                                )
+                            }
+                            if (posizione != null && i == posizione.fermata && !posizione.inStazione) {
+                                item(key = "posizione-treno") {
+                                    PosizioneTreno(
+                                        dove = status.lastDetectionStation,
+                                        quando = status.lastDetectionTime,
+                                        nelTuoTratto = salita != null && discesa != null &&
+                                            i >= salita && i < discesa,
+                                    )
+                                }
+                            }
+                        }
+                        state.error?.let {
+                            item {
+                                Text(
+                                    it,
+                                    Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                        item { Spacer(Modifier.height(24.dp)) }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun Header(status: TrainStatus) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            DettagliCorsa(status)
         }
     }
 }

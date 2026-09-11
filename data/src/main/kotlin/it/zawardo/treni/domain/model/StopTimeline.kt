@@ -125,6 +125,25 @@ fun List<Stop>.dopoLaDiscesa(discesa: Int): IntRange? {
 }
 
 /**
+ * Le fermate prima della salita, che su un treno preso al cambio non ti
+ * riguardano: e' la strada che il treno ha fatto prima di arrivare da te.
+ *
+ * E' lo specchio di [dopoLaDiscesa] e ne segue le regole. Resta fuori dal taglio
+ * il **capolinea di partenza**, che dice da dove viene quel treno, oltre alla
+ * salita. Chi chiama lo applica dal secondo treno di un viaggio in poi: sul
+ * primo, o sull'unico, da dove arriva il treno che aspetti e' proprio cio' che
+ * si guarda. Chiesto dall'utente l'11/09/2026.
+ */
+fun List<Stop>.primaDellaSalita(salita: Int): IntRange? {
+    if (salita < 0) return null
+    // La prima resta sempre: e' il capolinea di partenza, la testa del percorso.
+    val prima = 1
+    val ultima = salita - 1
+    if (ultima - prima + 1 < FERMATE_MINIME_DA_NASCONDERE) return null
+    return prima..ultima
+}
+
+/**
  * Sotto le due fermate non si comprime niente: i tre puntini per riaprirle
  * costerebbero la riga che fanno risparmiare, e in cambio nasconderebbero un
  * dato per il gusto di nasconderlo.

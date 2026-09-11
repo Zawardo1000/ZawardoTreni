@@ -189,7 +189,8 @@ class BinarioNotazioneTest {
     fun `la fermata resta quella che era`() {
         // Il resto del mapping non lo tocca nessuno: qui si guarda solo il binario.
         val melzo = fermata(programmatoPartenza = "2")
-        assertEquals("MELZO", melzo.stationName)
+        // Il nome passa per `nomeLeggibile`: ViaggiaTreno lo manda in maiuscolo.
+        assertEquals("Melzo", melzo.stationName)
         assertEquals(StopStatus.FUTURE, melzo.status)
     }
 
@@ -220,18 +221,38 @@ class BinarioNotazioneTest {
     }
 
     /**
-     * Serve la lettura di **due** fonti. Italo, EAV e Ferrotramviaria ne
-     * pubblicano una sola: dicono qual e' il binario, non che sia stato
-     * riconfermato, e dipingerlo di verde sarebbe una promessa che nessuno ha
-     * fatto.
+     * L'effettivo basta anche da solo: Italo, EAV, Ferrotramviaria e Trenord
+     * sulle FNM ne pubblicano uno senza programmato. Deciso l'11/09/2026: prima
+     * servivano due letture, e quel binario restava nero come uno solo previsto.
+     *
+     * Il programmato da solo invece resta una previsione, e non si conferma.
      */
     @Test
-    fun `con una lettura sola non si conferma niente`() {
-        assertFalse(binarioConfermato(null, "4"))
+    fun `l'effettivo da solo e' confermato, il programmato da solo no`() {
+        assertTrue(binarioConfermato(null, "4"))
+        assertTrue(fermata(effettivoPartenza = "4").platformConfirmed)
+
         assertFalse(binarioConfermato("4", null))
         assertFalse(binarioConfermato("4", "  "))
         assertFalse(binarioConfermato(null, null))
+    }
 
-        assertFalse(fermata(effettivoPartenza = "4").platformConfirmed)
+    // ------------------------------------------------------- l'I con l'apice
+
+    /**
+     * "I'" non e' "I", e quindi nemmeno "1".
+     *
+     * Comparso nelle risposte di ViaggiaTreno l'11/09/2026; deciso con l'utente
+     * che resta un binario a se'. L'apice gli impedisce di passare per cifra
+     * romana, e questo test tiene ferma la scelta: se un giorno `binarioPulito`
+     * lo riducesse a "1", l'I' e l'I diventerebbero la stessa banchina senza che
+     * nessuno l'abbia deciso.
+     */
+    @Test
+    fun `l'I con l'apice resta un binario a se'`() {
+        assertEquals("I'", binarioPulito("I'"))
+        assertEquals("1", binarioPulito("I"))
+        assertFalse(stessoBinario("I", "I'"))
+        assertFalse(stessoBinario("1", "I'"))
     }
 }

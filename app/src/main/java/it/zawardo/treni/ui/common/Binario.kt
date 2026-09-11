@@ -1,97 +1,181 @@
 package it.zawardo.treni.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import it.zawardo.treni.domain.model.binarioCambiato
 import it.zawardo.treni.domain.model.binarioConfermato
 import it.zawardo.treni.domain.model.binarioDaMostrare
 import it.zawardo.treni.domain.model.binarioPulito
+import it.zawardo.treni.ui.theme.Cifre
 
 /**
- * Il binario, con la stessa grammatica degli orari: quello annunciato resta
- * scritto e barrato, quello vero gli sta accanto in evidenza.
+ * Il binario come oggetto: una pillola col numero, sempre nello stesso posto.
  *
- * Prima il cambio si leggeva "7  (era 4)", che dice la stessa cosa ma con una
- * forma tutta sua: la riga degli orari, subito sopra, fa gia' "18:01 18:09" col
- * primo barrato, e due modi diversi di dire "era previsto cosi', invece e'
- * cosi'" nella stessa fermata si leggono come due informazioni diverse.
+ * Prima era una riga di testo, «bin. 7» in corpo piccolo sotto gli orari, che
+ * compariva solo quando c'era: senza un posto fisso l'occhio non sapeva dove
+ * cercarlo. Sui tabelloni veri il binario e' una colonna, e qui lo diventa in
+ * tutte le schermate: elenco delle soluzioni, dettaglio della corsa, viaggio con
+ * cambi, tabellone. La grandezza cambia, la grammatica no:
  *
- * Sta qui e non dentro una schermata perche' il binario di partenza si scrive
- * in tre posti — il dettaglio della corsa, l'elenco dei risultati, la notifica
- * di «Segui treno» — e prima ognuno se lo scriveva da se'. Il tabellone fa
- * eccezione e resta con la sua: li' il binario e' una colonna incolonnata a
- * destra, non una riga di testo.
+ *  - **previsto**: contorno e numero neri. Una sola lettura, dall'orario.
+ *  - **confermato**: verde. L'effettivo e' arrivato e coincide con l'annunciato,
+ *    oppure e' l'unico che esista (vedi `binarioConfermato`). Ci si puo' avviare.
+ *  - **cambiato**: rosso pieno, con il binario vecchio barrato sotto. Chi era
+ *    andato al 5 e legge 7 deve riconoscere il proprio treno, e il barrato fa si'
+ *    che l'informazione non stia soltanto nel colore.
+ *  - **da assegnare**: contorno tratteggiato e un trattino. Solo dove l'assenza
+ *    si nota ([segnaposto]): tiene il posto invece di far saltare la colonna.
+ *
+ * Il binario di tabella di un'altra fonte a volte e' scritto in cifre romane o
+ * con le qualifiche abbreviate: qui arriva gia' passato per `binarioPulito`.
  */
 @Composable
-fun BinarioRiga(
+fun BinarioPillola(
     programmato: String?,
     effettivo: String?,
     modifier: Modifier = Modifier,
+    /** Nel dettaglio della corsa e sul tabellone, dove la colonna e' stretta. */
+    piccola: Boolean = false,
+    /** Se vero, quando il binario manca tiene il posto invece di sparire. */
+    segnaposto: Boolean = false,
     /**
-     * Se vero, quando il binario manca lo dice invece di tacere.
-     *
-     * Serve dove l'assenza si nota: nelle stazioni grandi il binario non sta in
-     * orario, lo assegnano un quarto d'ora prima, e vedere "bin. 4" sulla
-     * fermata dopo e niente su quella da cui sali sembra un dato perso invece
-     * di un dato che ancora non esiste.
+     * La sigla «bin» davanti al numero. Serve dove non c'e' un'intestazione di
+     * colonna a dire che quel numero e' un binario, cioe' nell'elenco.
      */
-    atteso: Boolean = false,
+    conSigla: Boolean = false,
 ) {
-    val scheme = MaterialTheme.colorScheme
     val binario = binarioDaMostrare(programmato, effettivo)
-
-    if (binario == null) {
-        if (!atteso) return
-        Text(
-            "bin. non ancora assegnato",
-            modifier,
-            style = MaterialTheme.typography.bodySmall,
-            color = scheme.onSurfaceVariant,
-        )
-        return
-    }
+    if (binario == null && !segnaposto) return
 
     val cambiato = binarioCambiato(programmato, effettivo)
-
-    /*
-     * Confermato: l'effettivo e' arrivato ed e' quello annunciato.
-     *
-     * E' l'altra meta' del cambio, e finora non si vedeva: "bin. 4" previsto e
-     * "bin. 4" assegnato uscivano identici, neri tutti e due, e chi aspettava
-     * proprio quella conferma per muoversi non aveva modo di sapere che era
-     * arrivata. Il verde e' quello dell'anticipo — la stessa cosa buona.
-     */
     val confermato = binarioConfermato(programmato, effettivo)
+    val scheme = MaterialTheme.colorScheme
+    val raggio = if (piccola) 7.dp else 8.dp
+    val forma = RoundedCornerShape(raggio)
 
-    Row(modifier) {
-        Text("bin. ", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+    val fondo: Color
+    val tratto: Color
+    val inchiostro: Color
+    when {
+        binario == null -> {
+            fondo = Color.Transparent
+            tratto = scheme.outline
+            inchiostro = scheme.onSurfaceVariant
+        }
+        cambiato -> {
+            fondo = lateColor()
+            tratto = lateColor()
+            inchiostro = onLateColor()
+        }
+        confermato -> {
+            fondo = confirmedBackground()
+            tratto = confirmedColor()
+            inchiostro = confirmedColor()
+        }
+        else -> {
+            fondo = Color.Transparent
+            tratto = scheme.onSurface
+            inchiostro = scheme.onSurface
+        }
+    }
 
-        // Il binario cambiato e' l'informazione che fa perdere i treni: quello
-        // di partenza resta leggibile, cosi' chi l'aveva memorizzato capisce
-        // che il numero nuovo riguarda proprio lui.
-        Text(
-            if (cambiato) binarioPulito(programmato).orEmpty() else binario,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (confermato) FontWeight.Medium else null,
-            textDecoration = if (cambiato) TextDecoration.LineThrough else null,
-            color = when {
-                cambiato -> scheme.onSurfaceVariant
-                confermato -> confirmedColor()
-                else -> scheme.onSurface
-            },
-        )
+    // Come SBB: chi non vede il colore sente la parola «nuovo».
+    val descrizione = when {
+        binario == null -> "Binario non ancora assegnato"
+        cambiato -> "Binario $binario, nuovo: era ${binarioPulito(programmato)}"
+        confermato -> "Binario $binario, confermato"
+        else -> "Binario $binario, previsto"
+    }
 
+    val bordo = if (binario == null) {
+        Modifier.drawBehind {
+            val w = 1.5.dp.toPx()
+            drawRoundRect(
+                color = tratto,
+                topLeft = Offset(w / 2, w / 2),
+                size = Size(size.width - w, size.height - w),
+                cornerRadius = CornerRadius(raggio.toPx()),
+                style = Stroke(
+                    width = w,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+                ),
+            )
+        }
+    } else {
+        Modifier.border(1.5.dp, tratto, forma)
+    }
+
+    Column(
+        modifier.clearAndSetSemantics { contentDescription = descrizione },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        /*
+         * Il numero al centro della pillola, anche in verticale.
+         *
+         * Il Box centra, la riga dentro allinea sigla e numero sulla linea di
+         * base. Con l'allineamento sulla linea di base nella riga esterna,
+         * Compose metteva il gruppo in cima e il numero stava schiacciato contro
+         * il bordo superiore: si notava a colpo d'occhio (11/09/2026).
+         */
+        Box(
+            Modifier
+                .defaultMinSize(
+                    minWidth = if (piccola) 36.dp else 44.dp,
+                    minHeight = if (piccola) 28.dp else 32.dp,
+                )
+                .background(fondo, forma)
+                .then(bordo)
+                .padding(horizontal = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row {
+                if (conSigla) {
+                    Text(
+                        "bin ",
+                        Modifier.alignByBaseline(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = inchiostro.copy(alpha = 0.75f),
+                    )
+                }
+                Text(
+                    binario ?: "–",
+                    Modifier.alignByBaseline(),
+                    style = if (piccola) Cifre.binario.copy(fontSize = 16.sp, lineHeight = 20.sp) else Cifre.binario,
+                    color = inchiostro,
+                )
+            }
+        }
         if (cambiato) {
             Text(
-                " $binario",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = scheme.tertiary,
+                binarioPulito(programmato).orEmpty(),
+                style = Cifre.riga.copy(fontSize = 12.sp, lineHeight = 14.sp),
+                color = scheme.onSurfaceVariant,
+                textDecoration = TextDecoration.LineThrough,
             )
         }
     }

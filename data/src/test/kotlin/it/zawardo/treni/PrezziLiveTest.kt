@@ -74,7 +74,16 @@ class PrezziLiveTest {
 
     @Test
     fun `un prezzo pubblicato e' una cifra sensata`() = runBlocking {
-        val res = cerca("Roma Termini", "Firenze S. M. Novella")
+        /*
+         * Fino a tre ricerche, come per l'alta velocita' qui sopra. Una ricerca
+         * intera senza prezzi capita — l'11/09/2026 in 12 casi su 36 — e con un
+         * tentativo solo il test falliva per l'intermittenza del servizio, non
+         * per un cambio nei campi.
+         */
+        var res = cerca("Roma Termini", "Firenze S. M. Novella")
+        repeat(2) {
+            if (res.none { it.price != null }) res = cerca("Roma Termini", "Firenze S. M. Novella")
+        }
         val prezzi = res.mapNotNull { it.price }
         println("\n=== ROMA -> FIRENZE: ${prezzi.size} prezzi su ${res.size} soluzioni ===")
         prezzi.forEach { println("  ${it.formatted}  vendibile=${it.saleable}") }

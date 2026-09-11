@@ -61,7 +61,30 @@ import it.zawardo.treni.ui.tratteDelViaggio
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
-import it.zawardo.treni.ui.common.BinarioRiga
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import it.zawardo.treni.ui.common.BinarioPillola
+import it.zawardo.treni.ui.common.earlyColor
+import it.zawardo.treni.ui.common.lateColor
+import it.zawardo.treni.ui.common.onLateColor
+import it.zawardo.treni.ui.common.scartoColor
+import it.zawardo.treni.ui.theme.Cifre
+import java.time.Duration
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.stateColor
@@ -121,6 +144,8 @@ fun ResultsScreen(
     }
 
     Scaffold(
+        // Le schede bianche poggiano su un fondo appena azzurrato.
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         topBar = {
             TreniTopBar(
                 title = "${from.name} → ${to.name}",
@@ -306,209 +331,153 @@ private fun JourneyCard(
     val otherDay = j.departure.toLocalDate() != requestedDate
     // Barrato come su un tabellone: la corsa c'e' in orario, ma non si fa.
     val cancelled = row.state == TrainState.CANCELLED
+    val scheme = MaterialTheme.colorScheme
 
     /*
-     * Sfondo tenue quando non c'e' tempo reale.
+     * Fondo piu' tenue quando non c'e' tempo reale.
      *
      * Due casi, entrambi da distinguere a colpo d'occhio dai treni "vivi": le
      * corse di un altro giorno, di cui il ritardo si sapra' ma non adesso, e i
      * viaggi che un tempo reale non lo avranno mai — un misto con gamba EAV, o
      * un servizio sostitutivo. In tutti l'orario e' previsto, non misurato, e la
-     * card lo dice col colore prima ancora delle parole.
+     * scheda lo dice col colore prima ancora delle parole.
      */
     val soloPrevisto = !row.realtimeNow
-    val fondo = if (soloPrevisto) {
-        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    } else {
-        CardDefaults.cardColors()
-    }
+    val fondo = if (soloPrevisto) scheme.surfaceContainerLow else scheme.surfaceContainerLowest
+
+    /*
+     * L'orario reale sotto quello di tabella, solo quando se ne discosta.
+     *
+     * Lo scarto e' quello del primo treno, l'unico che si interroga. Sulla
+     * partenza vale di sicuro; sull'arrivo lo si proietta solo per i diretti,
+     * perche' su un viaggio con cambio l'arrivo dipende da un altro treno.
+     */
+    val scarto = row.delayMinutes?.takeIf { it != 0 && !cancelled }
+    val partenzaReale = scarto?.let { j.departure.plusMinutes(it.toLong()) }
+    val arrivoReale = scarto?.takeIf { j.isDirect }?.let { j.arrival.plusMinutes(it.toLong()) }
+    val barrato = if (cancelled) TextDecoration.LineThrough else null
+    val inchiostro = if (cancelled) scheme.onSurfaceVariant else scheme.onSurface
 
     Card(
-        colors = fondo,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                /*
-                 * Toccando la scheda fuori dai chip si apre dal principio: con
-                 * un cambio e' la pagina del viaggio col primo treno a fuoco,
-                 * su un diretto il dettaglio della corsa. Un bus sostitutivo da
-                 * solo non ha dettaglio da aprire, e la scheda resta inerte.
-                 */
-                onApri(0)
-            },
+        /*
+         * Toccando la scheda fuori dalle sigle dei treni si apre dal principio:
+         * con un cambio e' la pagina del viaggio col primo treno a fuoco, su un
+         * diretto il dettaglio della corsa. Un bus sostitutivo da solo non ha
+         * dettaglio da aprire, e il tocco non porta da nessuna parte.
+         */
+        onClick = { onApri(0) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = fondo),
+        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.7f)),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 12.dp)) {
 
-            if (j.assembled) {
-                /*
-                 * Il viaggio misto si annuncia per quello che e'.
-                 *
-                 * Cambia operatore per strada, l'abbiamo costruito noi, e la
-                 * gamba Italo puo' non avere prezzo: chi lo sceglie deve saperlo
-                 * prima, non scoprirlo alla biglietteria. Il badge lo distingue
-                 * dai viaggi che una sorgente da' gia' pronti.
-                 */
-                Text(
-                    "Più operatori · beta",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            if (otherDay) {
-                /*
-                 * Il BFF puo' restituire corse di un altro giorno quando per quello
-                 * richiesto non c'e' nulla. Senza questa riga si legge "01:01" e si
-                 * capisce stanotte, mentre e' la notte dopo.
-                 */
-                Text(
-                    j.departure.format(FULL_DATE).replaceFirstChar { c -> c.uppercase() },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    j.departure.format(TIME),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                )
-                Text("  →  ", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    j.arrival.format(TIME),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                )
-                Box(Modifier.weight(1f))
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(formatDuration(j.duration.toMinutes()), style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (j.isDirect) "diretto" else "${j.changes} cambi",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            if (otherDay || j.assembled) {
+                Row(
+                    Modifier.padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     /*
-                     * Il prezzo compare solo quando c'e'.
-                     *
-                     * Lo pubblicano le due sorgenti che vendono — Trenitalia e
-                     * Trenord — e nemmeno loro sempre: sulla stessa tratta una
-                     * ricerca su cinque torna senza. Riempire il vuoto con un
-                     * trattino o con "n.d." darebbe l'idea di un dato mancante
-                     * per colpa dell'app; non scrivere niente e' piu' onesto e
-                     * piu' pulito.
+                     * Il BFF puo' restituire corse di un altro giorno quando per
+                     * quello richiesto non c'e' nulla. Senza questa riga si legge
+                     * "01:01" e si capisce stanotte, mentre e' la notte dopo.
                      */
-                    (j.price ?: j.partialPrice)?.let { p ->
+                    if (otherDay) {
                         Text(
-                            if (p.saleable) p.formatted else "${p.formatted} · esaurito",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (p.saleable) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            j.departure.format(FULL_DATE).replaceFirstChar { c -> c.uppercase() },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = scheme.tertiary,
+                            fontWeight = FontWeight.Bold,
                         )
-                        /*
-                         * Sotto il prezzo, cosa copre.
-                         *
-                         * Su un viaggio con cambio interno alla rete e' del viaggio
-                         * intero, cambi compresi (il BFF lo da' gia' come totale, ma
-                         * da utente si e' in dubbio). Su un misto e' invece il solo
-                         * parziale di chi lo pubblica — la Freccia, o Trenord — e va
-                         * detto forte, o quella cifra sembrerebbe il costo di tutto.
-                         */
-                        val etichettaPrezzo = when {
-                            j.price != null && !j.isDirect -> "intero viaggio"
-                            j.partialPrice != null -> "solo " + operatoreParziale(j)
-                            else -> null
-                        }
-                        etichettaPrezzo?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    }
+                    /*
+                     * Il viaggio misto si annuncia per quello che e': cambia
+                     * operatore per strada, l'abbiamo costruito noi, e la gamba
+                     * Italo puo' non avere prezzo. Chi lo sceglie deve saperlo
+                     * prima, non scoprirlo alla biglietteria.
+                     */
+                    if (j.assembled) {
+                        Text(
+                            "Più operatori · beta",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.tertiary,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
 
-            /*
-             * Il binario di partenza, chiesto dagli utenti: e' l'ultima cosa che
-             * si guarda prima di muoversi, e finora costringeva ad aprire la
-             * corsa per averla. Su un viaggio con cambio e' quello del **primo**
-             * treno, l'unico che serva prima di partire.
-             *
-             * Compare solo quando c'e'. In una lista di otto corse, otto righe
-             * di "bin. non ancora assegnato" sarebbero rumore: li' l'assenza e'
-             * la norma, perche' nelle stazioni grandi il binario lo assegnano un
-             * quarto d'ora prima. Nel dettaglio della corsa, dove la fermata da
-             * cui sali e' una riga sola in mezzo a venti, invece si dice.
-             */
-            BinarioRiga(row.scheduledPlatform, row.actualPlatform)
-
-            /*
-             * Le tratte vanno a capo invece di stringersi.
-             *
-             * Con tre cambi i chip diventano quattro e in una `Row` non ci
-             * stanno: Compose li comprimeva in orizzontale finche' l'ultimo
-             * restava alto e largo un carattere, illeggibile. Un viaggio con
-             * piu' cambi e' proprio quello che ha piu' bisogno di essere letto,
-             * quindi si va a capo.
-             */
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                j.legs.forEachIndexed { indice, leg ->
-                    AssistChip(
-                        /*
-                         * Dentro un viaggio con cambio ogni chip porta alla sua
-                         * tratta, bus e trasferimenti a piedi compresi: la
-                         * pagina li mostra comunque, in fila con gli altri. Su
-                         * un diretto invece un bus non ha niente da aprire e il
-                         * chip resta inerte.
-                         */
-                        enabled = leg.isTrain || !j.isDirect,
-                        onClick = { onApri(indice) },
-                        label = { Text(leg.label, style = MaterialTheme.typography.labelMedium) },
-                        leadingIcon = when {
-                            leg.isTrain -> null
-                            leg.isWalk -> {
-                                {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.DirectionsWalk,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                            }
-                            else -> {
-                                {
-                                    Icon(
-                                        Icons.Filled.DirectionsBus,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                            }
-                        },
-                        colors = AssistChipDefaults.assistChipColors(
-                            labelColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f)) {
+                    Column {
+                        Text(j.departure.format(TIME), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
+                        OrarioReale(partenzaReale, scarto)
+                    }
+                    Column(
+                        Modifier.weight(1f).padding(horizontal = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        LineaViaggio(j, fondo, Modifier.fillMaxWidth().height(30.dp))
+                        Text(
+                            riassunto(j),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(j.arrival.format(TIME), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
+                        OrarioReale(arrivoReale, scarto)
+                    }
                 }
+
+                /*
+                 * Il binario di partenza, in una colonna sua separata come la
+                 * matrice di un biglietto. E' l'ultima cosa che si guarda prima
+                 * di muoversi, e su un viaggio con cambio e' quello del **primo**
+                 * treno, l'unico che serva prima di partire.
+                 *
+                 * Quando non c'e' ancora, un segnaposto tratteggiato tiene il
+                 * posto: nelle stazioni grandi il binario lo assegnano un quarto
+                 * d'ora prima, e una colonna che compare e scompare da una scheda
+                 * all'altra si legge peggio di una colonna vuota.
+                 */
+                if (j.hasTrain) {
+                    MatriceBiglietto(Modifier.padding(start = 12.dp).height(56.dp))
+                    Box(Modifier.width(64.dp), contentAlignment = Alignment.Center) {
+                        BinarioPillola(
+                            row.scheduledPlatform,
+                            row.actualPlatform,
+                            modifier = if (cancelled) Modifier.alpha(0.45f) else Modifier,
+                            segnaposto = true,
+                            conSigla = true,
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(
+                Modifier.padding(top = 12.dp, bottom = 10.dp),
+                color = scheme.outlineVariant.copy(alpha = 0.6f),
+            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Tratte(j, Modifier.weight(1f), onApri)
+                StatoSoluzione(row)
+                Prezzo(j)
             }
 
             if (j.assembled) {
                 // Italo si nomina solo se una gamba e' davvero Italo: su EAV piu'
-                // Freccia il prezzo c'e' (parziale, gia' etichettato sopra), e
-                // tirare in ballo Italo dove non c'entra confonderebbe.
+                // Freccia il prezzo c'e' (parziale, gia' etichettato), e tirare
+                // in ballo Italo dove non c'entra confonderebbe.
                 val conItalo = j.legs.any { it.source == DataSource.ITALO }
                 Text(
                     buildString {
@@ -516,53 +485,262 @@ private fun JourneyCard(
                         if (conItalo) append("Il prezzo Italo non è disponibile. ")
                         append("Verifica orari e biglietti sui siti dei gestori.")
                     },
+                    Modifier.padding(top = 8.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
 
-            when {
-                // Va detto, invece di lasciare la riga vuota come se
-                // l'informazione stesse ancora arrivando.
-                !row.realtimePossible -> Text(
-                    "Servizio sostitutivo: nessun dato in tempo reale",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+/** L'orario vero sotto quello di tabella; vuoto, tiene comunque l'altezza. */
+@Composable
+private fun OrarioReale(quando: LocalDateTime?, scarto: Int?) {
+    Text(
+        quando?.format(TIME) ?: "",
+        style = Cifre.riga.copy(fontSize = 15.sp, lineHeight = 18.sp),
+        fontWeight = FontWeight.SemiBold,
+        color = scartoColor(scarto ?: 0),
+    )
+}
 
-                row.loadingStatus -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+/** «36 min · diretto», «1h 13 · 1 cambio, Treviglio». */
+private fun riassunto(j: Journey): String {
+    val cambi = when {
+        j.isDirect -> "diretto"
+        j.changes == 1 -> "1 cambio, " + j.legs.first().to.name
+        else -> "${j.changes} cambi"
+    }
+    return formatDuration(j.duration.toMinutes()) + " · " + cambi
+}
+
+/**
+ * La linea del viaggio fra partenza e arrivo, con un pallino per ogni cambio
+ * messo dove cade nel tempo: un cambio a meta' strada si vede a meta' linea.
+ */
+@Composable
+private fun LineaViaggio(j: Journey, fondo: Color, modifier: Modifier) {
+    val linea = MaterialTheme.colorScheme.outlineVariant
+    val punto = MaterialTheme.colorScheme.outline
+    val totale = Duration.between(j.departure, j.arrival).toMinutes().coerceAtLeast(1)
+    val cambi = j.legs.dropLast(1).map { leg ->
+        (Duration.between(j.departure, leg.arrival).toMinutes().toFloat() / totale).coerceIn(0.1f, 0.9f)
+    }
+    Canvas(modifier) {
+        val y = size.height / 2
+        val estremo = 3.dp.toPx()
+        drawLine(linea, Offset(estremo, y), Offset(size.width - estremo, y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+        drawCircle(punto, estremo, Offset(estremo, y))
+        drawCircle(punto, estremo, Offset(size.width - estremo, y))
+        cambi.forEach { f ->
+            val c = Offset(size.width * f, y)
+            drawCircle(fondo, 5.dp.toPx(), c)
+            drawCircle(punto, 4.dp.toPx(), c, style = Stroke(2.dp.toPx()))
+        }
+    }
+}
+
+/** Il taglio tratteggiato fra il viaggio e il binario, come sulla matrice di un biglietto. */
+@Composable
+private fun MatriceBiglietto(modifier: Modifier) {
+    val colore = MaterialTheme.colorScheme.outlineVariant
+    Canvas(modifier.width(1.dp)) {
+        drawLine(
+            colore,
+            Offset(size.width / 2, 0f),
+            Offset(size.width / 2, size.height),
+            strokeWidth = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+        )
+    }
+}
+
+/**
+ * I treni del viaggio, in fila: sigla nel riquadro e numero.
+ *
+ * Erano chip Material cliccabili, che facevano sembrare la scheda un modulo da
+ * compilare. Restano toccabili — dentro un viaggio con cambio ognuno porta alla
+ * sua tratta, bus e trasferimenti a piedi compresi — ma si leggono come
+ * etichette. Monocromi apposta: il rosso resta al ritardo, e non si confonde con
+ * una Freccia.
+ *
+ * Vanno a capo invece di stringersi: con tre cambi sono quattro, e in una riga
+ * sola Compose li comprimeva finche' l'ultimo restava largo un carattere.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Tratte(j: Journey, modifier: Modifier, onApri: (Int) -> Unit) {
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        j.legs.forEachIndexed { indice, leg ->
+            // Su un diretto un bus non ha niente da aprire: resta inerte.
+            val attiva = leg.isTrain || !j.isDirect
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = attiva) { onApri(indice) }
+                    .padding(horizontal = 2.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                // La freccia viaggia col treno che segue: andando a capo non resta
+                // sola in fondo a una riga, ne' in testa alla successiva da sola.
+                if (indice > 0) {
                     Text(
-                        "  stato in aggiornamento",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                row.state != null -> {
-                    // Una riga sola: o l'etichetta dello stato anomalo, o il ritardo.
-                    // Prima comparivano entrambe e il ritardo veniva detto due volte.
-                    val anomaly = stateLabel(row.state)
-                    Text(
-                        anomaly ?: delayLabel(row.delayMinutes ?: 0),
+                        "›",
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = stateColor(row.state, row.delayMinutes),
+                        color = MaterialTheme.colorScheme.outline,
                     )
                 }
+                when {
+                    leg.isTrain -> {
+                        leg.category?.let { SiglaTreno(it) }
+                        Text(
+                            leg.trainNumber ?: if (leg.category == null) leg.label else "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    else -> {
+                        Icon(
+                            if (leg.isWalk) Icons.AutoMirrored.Filled.DirectionsWalk else Icons.Filled.DirectionsBus,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(leg.label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+}
 
-                /*
-                 * Corsa di un altro giorno: lo stato non c'e' e non arrivera'.
-                 * Succede anche cercando per oggi, quando la tratta e' ferma e
-                 * le sole soluzioni sono di domani. Il vuoto, li', si legge
-                 * come "in orario".
-                 */
-                !row.isRealtimeDay -> Text(
-                    "Orario previsto: il tempo reale esiste solo per la giornata in corso",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+@Composable
+private fun SiglaTreno(sigla: String) {
+    val colore = MaterialTheme.colorScheme.onSurface
+    Text(
+        sigla,
+        Modifier
+            .border(1.5.dp, colore, RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = colore,
+    )
+}
+
+/**
+ * Lo stato della soluzione, in basso a destra e sempre li'.
+ *
+ * Una riga sola: o l'etichetta dello stato anomalo, o il ritardo. Quando
+ * comparivano entrambe il ritardo veniva detto due volte.
+ */
+@Composable
+private fun StatoSoluzione(row: JourneyRow) {
+    val scheme = MaterialTheme.colorScheme
+    val stato = row.state
+    when {
+        // Va detto, invece di lasciare il posto vuoto come se l'informazione
+        // stesse ancora arrivando.
+        !row.realtimePossible -> Text(
+            "senza tempo reale",
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariant,
+        )
+
+        row.loadingStatus -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+
+        stato == TrainState.CANCELLED -> Text(
+            "Soppresso",
+            Modifier
+                .background(lateColor(), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = onLateColor(),
+        )
+
+        stato != null -> {
+            val anomalia = stateLabel(stato)
+            val minuti = row.delayMinutes ?: 0
+            when {
+                anomalia != null -> Text(
+                    // Nell'elenco la versione corta: «Non ancora partito» da solo
+                    // mandava a capo le sigle di un viaggio con un cambio.
+                    if (stato == TrainState.NOT_DEPARTED) "non partito" else anomalia,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = stateColor(stato, row.delayMinutes),
+                    maxLines = 1,
+                )
+                minuti == 0 -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Box(Modifier.size(6.dp).background(earlyColor(), CircleShape))
+                    Text(
+                        "in orario",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = earlyColor(),
+                    )
+                }
+                else -> Text(
+                    delayLabel(minuti),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scartoColor(minuti),
                 )
             }
+        }
+
+        /*
+         * Corsa di un altro giorno: lo stato non c'e' e non arrivera'. Succede
+         * anche cercando per oggi, quando la tratta e' ferma e le sole soluzioni
+         * sono di domani. Il vuoto, li', si leggerebbe come "in orario".
+         */
+        !row.isRealtimeDay -> Text(
+            "orario previsto",
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Il prezzo compare solo quando c'e'.
+ *
+ * Lo pubblicano le due sorgenti che vendono — Trenitalia e Trenord — e nemmeno
+ * loro sempre: sulla stessa tratta una ricerca su cinque torna senza. Riempire
+ * il vuoto con un trattino o con "n.d." darebbe l'idea di un dato mancante per
+ * colpa dell'app; non scrivere niente e' piu' onesto e piu' pulito.
+ *
+ * Sotto il prezzo, cosa copre. Su un viaggio con cambio interno alla rete e'
+ * del viaggio intero; su un misto e' il solo parziale di chi lo pubblica, e va
+ * detto forte, o quella cifra sembrerebbe il costo di tutto.
+ */
+@Composable
+private fun Prezzo(j: Journey) {
+    val p = j.price ?: j.partialPrice ?: return
+    val scheme = MaterialTheme.colorScheme
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            if (p.saleable) p.formatted else "${p.formatted} · esaurito",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (p.saleable) scheme.primary else scheme.onSurfaceVariant,
+        )
+        val etichetta = when {
+            j.price != null && !j.isDirect -> "intero viaggio"
+            j.partialPrice != null -> "solo " + operatoreParziale(j)
+            else -> null
+        }
+        etichetta?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
         }
     }
 }

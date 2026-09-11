@@ -40,6 +40,41 @@ fun earlyColor(): Color = if (isSystemInDarkTheme()) EarlyDark else EarlyLight
 @ReadOnlyComposable
 fun confirmedColor(): Color = earlyColor()
 
+private val OnLateLight = Color.White
+private val OnLateDark = Color(0xFF3B0907)
+private val ConfirmedBgLight = Color(0xFFE3F2E6)
+private val ConfirmedBgDark = Color(0xFF16301F)
+
+/** Il testo su un fondo pieno di rosso: il binario cambiato, il bollo «Soppresso». */
+@Composable
+@ReadOnlyComposable
+fun onLateColor(): Color = if (isSystemInDarkTheme()) OnLateDark else OnLateLight
+
+private val LateBgLight = Color(0xFFFDECEA)
+private val LateBgDark = Color(0xFF3A1B1A)
+
+/** Il fondo tenue di un allarme che non deve urlare: la coincidenza persa. */
+@Composable
+@ReadOnlyComposable
+fun lateBackground(): Color = if (isSystemInDarkTheme()) LateBgDark else LateBgLight
+
+/** Il fondo tenue del binario confermato: verde, ma senza gridare. */
+@Composable
+@ReadOnlyComposable
+fun confirmedBackground(): Color = if (isSystemInDarkTheme()) ConfirmedBgDark else ConfirmedBgLight
+
+/**
+ * Il colore di un orario reale: verde in orario o in anticipo, rosso in ritardo.
+ *
+ * Diverso da [delayColor], che lo zero lo lascia neutro. Li' lo zero e'
+ * "nessuna notizia"; qui accompagna un orario misurato che coincide con quello
+ * di tabella, cioe' una buona notizia — la stessa grammatica del binario
+ * confermato. Nero previsto, verde confermato, rosso diverso dal previsto.
+ */
+@Composable
+@ReadOnlyComposable
+fun scartoColor(minutes: Int): Color = if (minutes > 0) lateColor() else earlyColor()
+
 /** Colore di un ritardo in minuti: negativo verde, positivo rosso, zero neutro. */
 @Composable
 @ReadOnlyComposable
