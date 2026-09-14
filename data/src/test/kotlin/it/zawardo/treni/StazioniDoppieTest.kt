@@ -109,4 +109,35 @@ class StazioniDoppieTest {
         assertNotNull(fr9587.fermataA("S05043", LocalTime.of(12, 27)))
         assertEquals(0, fr9587.indiceFermata("S05043"))
     }
+
+    /** La corsa con i binari del dettaglio alla fermata AV, e nient'altro di cambiato. */
+    private fun conBinari(programmato: String?, effettivo: String?) =
+        fr9587.copy(stops = listOf(fr9587.stops.single().copy(scheduledPlatform = programmato, actualPlatform = effettivo)))
+
+    /**
+     * Il FR 9645 per Roma Termini, alle 17:10 dello stesso giorno: il tabellone
+     * "19 AV" e " AV", il dettaglio "19" e ancora nessun effettivo. Unite, il
+     * programmato del dettaglio e il segnaposto del tabellone uscivano in rosso:
+     * "AV, nuovo: era 19".
+     */
+    @Test
+    fun `il segnaposto del tabellone non contraddice il programmato del dettaglio`() {
+        val dopo = riga.conBinarioDa(conBinari("19", null), "S05043")
+        assertFalse(dopo.platformChanged)
+        assertFalse(dopo.platformConfirmed)
+        assertEquals("19", dopo.platform)
+    }
+
+    /**
+     * Il FR 9642: il tabellone "AV" programmato e "16 AV" effettivo, il dettaglio
+     * nessun programmato e "16". E' la prima assegnazione, e si legge confermata.
+     */
+    @Test
+    fun `la prima assegnazione non e' un cambio dal segnaposto`() {
+        val tabellone = riga.copy(scheduledPlatform = binarioPulito(" AV"), actualPlatform = binarioPulito("16 AV"))
+        val dopo = tabellone.conBinarioDa(conBinari(null, "16"), "S05043")
+        assertFalse(dopo.platformChanged)
+        assertTrue(dopo.platformConfirmed)
+        assertEquals("16", dopo.platform)
+    }
 }

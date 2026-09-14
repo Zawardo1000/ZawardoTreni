@@ -31,6 +31,29 @@ class BinariPiazzaliTest {
         assertFalse("il numero non l'ha ripetuto nessuno", binarioConfermato("19 AV", "AV"))
     }
 
+    /**
+     * Il FR 9645 per Roma Termini, la sera dello stesso giorno: il dettaglio della
+     * corsa dava "19" senza "AV", il tabellone "AV" senza "19". Unite, uscivano
+     * come "AV, nuovo: era 19".
+     */
+    @Test
+    fun `il piazzale non contraddice un numero, anche scritto altrove`() {
+        assertFalse(binarioCambiato("19", "AV"))
+        assertEquals("19", binarioDaMostrare("19", "AV"))
+        assertFalse(binarioConfermato("19", "AV"))
+    }
+
+    /**
+     * Il FR 9642: "AV" programmato, "16 AV" effettivo. E' la prima assegnazione,
+     * non un cambio: si legge confermato.
+     */
+    @Test
+    fun `il piazzale programmato non fa sembrare cambiata la prima assegnazione`() {
+        assertFalse(binarioCambiato("AV", "16 AV"))
+        assertTrue(binarioConfermato("AV", "16 AV"))
+        assertEquals("16 AV", binarioDaMostrare("AV", "16 AV"))
+    }
+
     @Test
     fun `un numero diverso nello stesso piazzale resta un cambio`() {
         // Il 9618 dello stesso giorno: dal 17 AV al 16 AV.
@@ -38,10 +61,17 @@ class BinariPiazzaliTest {
         assertEquals("16 AV", binarioDaMostrare("17 AV", "16 AV"))
     }
 
+    /**
+     * Il FR 9584: " AV" in tutti e due i campi, due ore prima della partenza. Si
+     * mostra — e' tutto quel che si sa — ma non e' confermato niente.
+     */
     @Test
-    fun `da solo, il piazzale resta quello che c'e'`() {
+    fun `il piazzale da solo si mostra, nero`() {
+        assertEquals("AV", binarioDaMostrare("AV", "AV"))
+        assertFalse(binarioConfermato("AV", "AV"))
         assertEquals("AV", binarioDaMostrare(null, "AV"))
-        assertTrue(binarioConfermato(null, "AV"))
+        assertFalse(binarioConfermato(null, "AV"))
+        assertFalse(binarioCambiato("AV", "AV"))
     }
 
     /** Venezia Santa Lucia: "1 N" nelle partenze, "1N" negli arrivi. */
@@ -61,15 +91,17 @@ class BinariPiazzaliTest {
     }
 
     /**
-     * Bologna Centrale, arrivi: il 17822 aveva "3 EST" programmato e "III-EST"
-     * effettivo. Lo stesso binario, e col trattino attaccato l'app ci leggeva
-     * un cambio.
+     * Bologna Centrale: il 17822 aveva "3 EST" programmato e "III-EST" effettivo,
+     * il 17839 "2 EST" e "II-EST". Lo stesso binario, e col trattino attaccato
+     * l'app ci leggeva un cambio.
      */
     @Test
     fun `il trattino fra numero e piazzale non fa un binario diverso`() {
         assertEquals("3 est", binarioPulito("III-EST"))
+        assertEquals("2 est", binarioPulito("II-EST"))
         assertFalse(binarioCambiato("3 EST", "III-EST"))
-        assertTrue(binarioConfermato("3 EST", "III-EST"))
+        assertFalse(binarioCambiato("2 EST", "II-EST"))
+        assertTrue(binarioConfermato("2 EST", "II-EST"))
     }
 
     /**
@@ -81,6 +113,7 @@ class BinariPiazzaliTest {
         assertEquals("4 ovest", binarioPulito("IV-PO"))
         assertTrue(binarioCambiato("2 OVEST", "VI-PO"))
         assertTrue(stessoBinario("6 OVEST", "VI-PO"))
+        assertTrue(binarioConfermato("1 OVEST", "I-PO"))
     }
 
     @Test

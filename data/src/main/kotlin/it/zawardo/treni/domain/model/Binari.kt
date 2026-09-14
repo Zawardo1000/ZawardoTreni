@@ -250,26 +250,57 @@ fun stessoBinario(uno: String?, altro: String?): Boolean =
  * giorno stesso passava dal 17 AV al 16 AV.
  */
 private fun effettivoUtile(programmato: String?, effettivo: String?): String? {
-    val vero = binarioPulito(effettivo) ?: return null
+    val vero = binarioPulito(effettivo)?.takeUnless { soloPiazzale(it) } ?: return null
     val annunciato = binarioPulito(programmato) ?: return vero
     if (vero.any { it.isDigit() }) return vero
     val parole = annunciato.lowercase().split(' ').toSet()
     return vero.takeUnless { v -> v.lowercase().split(' ').all { it in parole } }
 }
 
-/** Il binario da mostrare: quello vero se c'e' e dice qualcosa, altrimenti quello di tabella. */
+/**
+ * Solo parole di piazzale, nessun numero: "AV", "ovest", "tronco". Dice dove,
+ * non su quale banchina.
+ *
+ * **Non e' un binario, in nessuno dei due campi.** Sondato il tabellone di
+ * Bologna Centrale il 14/09/2026 fino a sera: " AV" era l'effettivo di ogni
+ * Freccia della giornata, anche due ore prima della partenza, e su qualcuna
+ * anche il programmato. Letto come binario ingannava in tre modi, tutti visti:
+ *
+ *  - come effettivo contro un programmato col numero: "AV, nuovo: era 19";
+ *  - come programmato contro l'effettivo vero: "16, nuovo: era AV", un cambio
+ *    inventato proprio sulla prima assegnazione;
+ *  - uguale in tutti e due i campi: verde, confermato, due ore prima.
+ *
+ * Il terzo e il primo si erano mescolati: il dettaglio della corsa scrive "19"
+ * senza "AV", il tabellone "AV" senza "19", e con le due letture unite la regola
+ * precedente — "si tace se il programmato contiene gia' quelle parole" — non
+ * reggeva piu'. Questa non guarda cosa c'e' dall'altra parte. Si mostra solo
+ * quando non c'e' altro, e nero.
+ */
+private fun soloPiazzale(binario: String): Boolean =
+    binario.none { it.isDigit() } &&
+        binario.split(' ').all { parola -> QUALIFICATORI.values.any { it.equals(parola, ignoreCase = true) } }
+
+/** Il programmato, se indica una banchina: vedi [soloPiazzale]. */
+private fun programmatoVero(programmato: String?): String? =
+    binarioPulito(programmato)?.takeUnless { soloPiazzale(it) }
+
+/**
+ * Il binario da mostrare: quello vero se c'e' e dice qualcosa, altrimenti quello
+ * di tabella, e solo in mancanza d'altro il piazzale che una delle due ha scritto.
+ */
 fun binarioDaMostrare(programmato: String?, effettivo: String?): String? =
-    effettivoUtile(programmato, effettivo) ?: binarioPulito(programmato)
+    effettivoUtile(programmato, effettivo) ?: binarioPulito(programmato) ?: binarioPulito(effettivo)
 
 /**
  * Il binario vero non e' quello annunciato.
  *
  * Vale solo dove esistono **entrambi** i valori: una fonte che ne pubblichi uno
  * solo — Italo, EAV, Ferrotramviaria — non puo' dire "cambiato", puo' solo dire
- * qual e'.
+ * qual e'. Un piazzale senza numero non e' un valore: vedi [soloPiazzale].
  */
 fun binarioCambiato(programmato: String?, effettivo: String?): Boolean =
-    binarioPulito(programmato) != null &&
+    programmatoVero(programmato) != null &&
         effettivoUtile(programmato, effettivo) != null &&
         !stessoBinario(programmato, effettivo)
 
@@ -296,5 +327,6 @@ fun binarioCambiato(programmato: String?, effettivo: String?): Boolean =
  * gia' andare.
  */
 fun binarioConfermato(programmato: String?, effettivo: String?): Boolean =
-    binarioPulito(effettivo) != null &&
-        (binarioPulito(programmato) == null || stessoBinario(programmato, effettivo))
+    // Un piazzale senza numero non conferma e non si confronta: vedi [soloPiazzale].
+    effettivoUtile(programmato, effettivo) != null &&
+        (programmatoVero(programmato) == null || stessoBinario(programmato, effettivo))
