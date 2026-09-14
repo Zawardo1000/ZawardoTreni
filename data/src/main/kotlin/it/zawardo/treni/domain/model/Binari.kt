@@ -155,6 +155,8 @@ private val QUALIFICATORI = mapOf(
     "OVEST" to "ovest",
     "E" to "est",
     "EST" to "est",
+    // Roma Termini, 14/09/2026: "20 BIS", un binario che si chiama cosi'.
+    "BIS" to "bis",
 )
 
 private fun String.romanoInCifre(): String? {
@@ -212,13 +214,37 @@ fun binarioPulito(raw: String?): String? {
     return testo.split(SPAZI).flatMap { spezza(it) }.joinToString(" ") { canonico(it) }
 }
 
-/** Vero se le due scritture indicano la stessa banchina: "2" e "II" lo sono. */
+/**
+ * Vero se le due scritture indicano la stessa banchina: "2" e "II" lo sono, e
+ * anche "1 N" e "1N" — Venezia Santa Lucia, il 14/09/2026, scriveva l'uno nelle
+ * partenze e l'altro negli arrivi.
+ */
 fun stessoBinario(uno: String?, altro: String?): Boolean =
-    binarioPulito(uno).equals(binarioPulito(altro), ignoreCase = true)
+    binarioPulito(uno)?.replace(" ", "").equals(binarioPulito(altro)?.replace(" ", ""), ignoreCase = true)
 
-/** Il binario da mostrare: quello vero se c'e', altrimenti quello di tabella. */
+/**
+ * L'effettivo, ma solo se dice qualcosa che il programmato non dice gia'.
+ *
+ * A Bologna Centrale, sondato il 14/09/2026, le Frecce della stazione AV
+ * sotterranea avevano "19 AV" programmato e soltanto "AV" effettivo: il
+ * piazzale, senza il numero. Letto come un binario, ogni Freccia di Bologna
+ * dichiarava "AV, nuovo: era 19 AV", in rosso. Un effettivo senza cifre, fatto
+ * solo di parole che il programmato contiene gia', non e' un binario diverso:
+ * e' lo stesso detto con meno parole, e si tace. Da solo, senza programmato,
+ * resta quello che c'e'. E un numero diverso resta un cambio vero: il 9618 del
+ * giorno stesso passava dal 17 AV al 16 AV.
+ */
+private fun effettivoUtile(programmato: String?, effettivo: String?): String? {
+    val vero = binarioPulito(effettivo) ?: return null
+    val annunciato = binarioPulito(programmato) ?: return vero
+    if (vero.any { it.isDigit() }) return vero
+    val parole = annunciato.lowercase().split(' ').toSet()
+    return vero.takeUnless { v -> v.lowercase().split(' ').all { it in parole } }
+}
+
+/** Il binario da mostrare: quello vero se c'e' e dice qualcosa, altrimenti quello di tabella. */
 fun binarioDaMostrare(programmato: String?, effettivo: String?): String? =
-    binarioPulito(effettivo) ?: binarioPulito(programmato)
+    effettivoUtile(programmato, effettivo) ?: binarioPulito(programmato)
 
 /**
  * Il binario vero non e' quello annunciato.
@@ -229,7 +255,7 @@ fun binarioDaMostrare(programmato: String?, effettivo: String?): String? =
  */
 fun binarioCambiato(programmato: String?, effettivo: String?): Boolean =
     binarioPulito(programmato) != null &&
-        binarioPulito(effettivo) != null &&
+        effettivoUtile(programmato, effettivo) != null &&
         !stessoBinario(programmato, effettivo)
 
 /**

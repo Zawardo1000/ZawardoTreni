@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -506,7 +507,8 @@ internal fun FermataRiga(
             }
         }
 
-        Box(Modifier.width(ColonneCorsa.binario), contentAlignment = Alignment.CenterEnd) {
+        // Minima e non fissa, come nell'elenco e sul tabellone: vedi `BinarioPillola`.
+        Box(Modifier.widthIn(min = ColonneCorsa.binario), contentAlignment = Alignment.CenterEnd) {
             when {
                 stopCancelled -> Unit
                 /*

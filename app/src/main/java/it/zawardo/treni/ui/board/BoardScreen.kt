@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
@@ -434,7 +435,9 @@ private fun BoardRow(
         }
 
         Column(
-            Modifier.width(52.dp),
+            // Minima e non fissa: un binario dal nome lungo allarga la colonna
+            // invece di andare a capo a meta' parola.
+            Modifier.widthIn(min = 52.dp),
             horizontalAlignment = Alignment.End,
         ) {
             /*

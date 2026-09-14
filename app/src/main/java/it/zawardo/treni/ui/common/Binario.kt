@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -168,21 +169,58 @@ fun BinarioPillola(
                     .padding(horizontal = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Row {
-                    if (conSigla) {
+                /*
+                 * Il numero grande, la qualifica sotto: piccola e a parole intere.
+                 *
+                 * "2 tronco ovest" scritto tutto in grande in una colonna larga
+                 * cinquanta punti andava a capo dove capitava — "bin tr", "e",
+                 * "tronc", "o" — e non si leggeva piu' niente. Il numero e' cio'
+                 * che si cerca con gli occhi sui cartelli; la qualifica lo
+                 * distingue, e una parola per riga, se serve, resta leggibile.
+                 */
+                val numero = binario?.substringBefore(' ')
+                val qualifica = binario?.substringAfter(' ', missingDelimiterValue = "")
+                    ?.takeIf { it.isNotBlank() }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row {
+                        if (conSigla) {
+                            Text(
+                                "bin ",
+                                Modifier.alignByBaseline(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = inchiostro.copy(alpha = 0.75f),
+                            )
+                        }
                         Text(
-                            "bin ",
+                            numero ?: "–",
                             Modifier.alignByBaseline(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = inchiostro.copy(alpha = 0.75f),
+                            style = if (piccola) Cifre.binario.copy(fontSize = 16.sp, lineHeight = 20.sp) else Cifre.binario,
+                            color = inchiostro,
+                            // Mai a meta': una sigla senza spazi, come "II-PO" a
+                            // Bologna, allarga la pillola invece di spezzarsi.
+                            softWrap = false,
+                            maxLines = 1,
                         )
                     }
-                    Text(
-                        binario ?: "–",
-                        Modifier.alignByBaseline(),
-                        style = if (piccola) Cifre.binario.copy(fontSize = 16.sp, lineHeight = 20.sp) else Cifre.binario,
-                        color = inchiostro,
-                    )
+                    // Una parola per riga, e sempre intera: se non ci sta, e'
+                    // la colonna ad allargarsi.
+                    if (qualifica != null) {
+                        Column(
+                            Modifier.padding(bottom = 3.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            qualifica.split(' ').forEach { parola ->
+                                Text(
+                                    parola,
+                                    style = MaterialTheme.typography.labelSmall.copy(lineHeight = 12.sp),
+                                    color = inchiostro,
+                                    textAlign = TextAlign.Center,
+                                    softWrap = false,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
                 }
             }
             /*

@@ -106,8 +106,10 @@ class BinariLiveTest {
      * nuova questo test si accorge per primo, e la risposta e' insegnarla a
      * `binarioPulito`: finche' non la conosce, quella grafia fa dichiarare un
      * cambio di binario a chi il binario non l'ha cambiato.
+     *
+     * Il 14/09/2026 si e' aggiunto il "20 BIS" di Roma Termini.
      */
-    private val paroleAmmesse = setOf("tronco", "ovest", "est")
+    private val paroleAmmesse = setOf("tronco", "ovest", "est", "bis")
 
     /**
      * Grafie viste e lasciate cosi' di proposito.

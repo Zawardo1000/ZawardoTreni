@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -573,7 +574,8 @@ private fun CapoDelTratto(
             fontWeight = if (misurato) FontWeight.SemiBold else FontWeight.Normal,
             color = scartoColor(scarto),
         )
-        Box(Modifier.width(ColonneCorsa.binario), contentAlignment = Alignment.CenterEnd) {
+        // Minima e non fissa, come nell'elenco e sul tabellone: vedi `BinarioPillola`.
+        Box(Modifier.widthIn(min = ColonneCorsa.binario), contentAlignment = Alignment.CenterEnd) {
             BinarioPillola(programmato, effettivo, piccola = true, segnaposto = true)
         }
     }

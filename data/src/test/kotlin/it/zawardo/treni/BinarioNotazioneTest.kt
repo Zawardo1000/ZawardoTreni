@@ -157,7 +157,9 @@ class BinarioNotazioneTest {
 
         // "1B" e' un binario che si chiama cosi': la B non e' una qualifica.
         assertEquals("1B", binarioPulito("1B"))
-        assertEquals("1 Bis", binarioPulito("  1   Bis "))
+        // Gli spazi si riducono. "Bis" dal 14/09/2026 e' una qualifica conosciuta
+        // (il 20 BIS di Roma Termini), e si scrive come le altre.
+        assertEquals("1 bis", binarioPulito("  1   Bis "))
     }
 
     // --------------------------------------------------- il binario assente

@@ -98,10 +98,25 @@ import java.time.ZoneOffset
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.compose.foundation.layout.widthIn
 
 private val TIME = DateTimeFormatter.ofPattern("HH:mm")
 private val DATE = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIAN)
+
+/**
+ * Le colonne di stato e prezzo in fondo alla scheda: vedi `JourneyCard`.
+ *
+ * Misurate sulle scritte piu' larghe che ci finiscono — «non partito» e
+ * «Soppresso» da una parte, «vendita chiusa» con l'icona dall'altra — e
+ * minime, non fisse: una scritta imprevista allarga la sua scheda invece di
+ * andare a capo a meta' parola.
+ */
+private val COLONNA_STATO = 84.dp
+private val COLONNA_PREZZO = 104.dp
+
+/** Ritardo e prezzo: cifre tabulari come gli orari, perche' stiano in colonna. */
+private val CIFRE_CODA = Cifre.riga.copy(fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -493,7 +508,9 @@ private fun JourneyCard(
                  */
                 if (j.hasTrain) {
                     MatriceBiglietto(Modifier.padding(start = 12.dp).height(56.dp))
-                    Box(Modifier.width(64.dp), contentAlignment = Alignment.Center) {
+                    // Minima e non fissa: un binario dal nome lungo allarga la
+                    // colonna invece di andare a capo a meta' parola.
+                    Box(Modifier.widthIn(min = 64.dp), contentAlignment = Alignment.Center) {
                         BinarioPillola(
                             row.scheduledPlatform,
                             row.actualPlatform,
@@ -510,15 +527,33 @@ private fun JourneyCard(
                 color = scheme.outlineVariant.copy(alpha = 0.6f),
             )
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Tratte(j, Modifier.weight(1f), onApri)
-                StatoSoluzione(row)
-                // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
-                // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
-                if (ancoraInTempo && j.source == JourneySource.LEFRECCE) VenditaChiusa() else Prezzo(j)
+            /*
+             * Treni, stato e prezzo in tre colonne: le ultime due con una
+             * larghezza propria, allineate a destra, tutte sulla stessa linea di
+             * base.
+             *
+             * Prima stavano l'una accanto all'altra e basta. Il ritardo si
+             * spostava con la larghezza del prezzo, e un «intero viaggio» su due
+             * righe lo tirava piu' in basso e piu' a sinistra di quello della
+             * scheda sopra: scorrendo, i numeri non stavano in colonna e l'elenco
+             * sembrava disordinato (segnalato il 14/09/2026). Le colonne tengono
+             * il posto anche vuote, perche' e' il posto fisso a farle leggere
+             * come colonne.
+             */
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Tratte(j, Modifier.weight(1f).alignByBaseline(), onApri)
+                Box(
+                    Modifier.widthIn(min = COLONNA_STATO).alignByBaseline(),
+                    contentAlignment = Alignment.TopEnd,
+                ) { StatoSoluzione(row) }
+                Box(
+                    Modifier.widthIn(min = COLONNA_PREZZO).alignByBaseline(),
+                    contentAlignment = Alignment.TopEnd,
+                ) {
+                    // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
+                    // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
+                    if (ancoraInTempo && j.source == JourneySource.LEFRECCE) VenditaChiusa() else Prezzo(j)
+                }
             }
 
             if (j.assembled) {
@@ -697,6 +732,7 @@ private fun StatoSoluzione(row: JourneyRow) {
             "senza tempo reale",
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
         )
 
         row.loadingStatus -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -738,8 +774,7 @@ private fun StatoSoluzione(row: JourneyRow) {
                 }
                 else -> Text(
                     delayLabel(minuti),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    style = CIFRE_CODA,
                     color = scartoColor(minuti),
                 )
             }
@@ -754,6 +789,7 @@ private fun StatoSoluzione(row: JourneyRow) {
             "orario previsto",
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
         )
     }
 }
@@ -818,11 +854,15 @@ private fun Prezzo(j: Journey) {
     val scheme = MaterialTheme.colorScheme
     Column(horizontalAlignment = Alignment.End) {
         Text(
-            if (p.saleable) p.formatted else "${p.formatted} · esaurito",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
+            p.formatted,
+            style = CIFRE_CODA,
             color = if (p.saleable) scheme.primary else scheme.onSurfaceVariant,
         )
+        // Sotto la cifra e non accanto: accanto allargava la colonna, e il
+        // ritardo di quella scheda usciva dalla colonna delle altre.
+        if (!p.saleable) {
+            Text("esaurito", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+        }
         val etichetta = when {
             j.price != null && !j.isDirect -> "intero viaggio"
             j.partialPrice != null -> "solo " + operatoreParziale(j)
