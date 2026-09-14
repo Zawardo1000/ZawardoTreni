@@ -19,6 +19,7 @@ import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.matchesCategory
+import it.zawardo.treni.domain.model.stessaStazione
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -606,7 +607,7 @@ class TrainStatusRepository(
         // Si entra nelle corse solo qui, dove serve davvero sapere dove passano.
         val passanti = refs.mapNotNull { ref ->
             val fermata = status(ref)?.stops?.firstOrNull {
-                it.stationCode.equals(boardingCode, ignoreCase = true)
+                stessaStazione(it.stationCode, boardingCode)
             }
             fermata?.let { ref to it }
         }

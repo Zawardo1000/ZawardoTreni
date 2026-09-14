@@ -13,6 +13,7 @@ import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.stessaStazione
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -154,8 +155,8 @@ class ItaloRepository(
         toRfi: String,
         date: LocalDate = LocalDate.now(ROME),
     ): List<Journey> = route(fromRfi, toRfi, date).mapNotNull { ts ->
-        val stopFrom = ts.stops.firstOrNull { it.stationCode == fromRfi } ?: return@mapNotNull null
-        val stopTo = ts.stops.lastOrNull { it.stationCode == toRfi } ?: return@mapNotNull null
+        val stopFrom = ts.stops.firstOrNull { stessaStazione(it.stationCode, fromRfi) } ?: return@mapNotNull null
+        val stopTo = ts.stops.lastOrNull { stessaStazione(it.stationCode, toRfi) } ?: return@mapNotNull null
         val partenza = stopFrom.scheduledDeparture ?: stopFrom.scheduledArrival ?: return@mapNotNull null
         val arrivo = stopTo.scheduledArrival ?: stopTo.scheduledDeparture ?: return@mapNotNull null
         if (!arrivo.isAfter(partenza)) return@mapNotNull null

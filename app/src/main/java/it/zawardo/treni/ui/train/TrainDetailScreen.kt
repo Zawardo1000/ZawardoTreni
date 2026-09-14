@@ -53,6 +53,7 @@ import it.zawardo.treni.ui.theme.TreniBrand
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.stessaStazione
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -222,11 +223,13 @@ fun TrainDetailScreen(
                     // Dove sali e dove scendi. Senza la salita la corsa si legge
                     // dall'inizio; senza la discesa non c'e' un tratto da
                     // evidenziare, solo la fermata da cui parti.
+                    // Con `stessaStazione`: salendo a Bologna Centrale su una
+                    // Freccia, nel dettaglio la fermata e' "Bologna C.le/AV".
                     val salita = status.stops
-                        .indexOfFirst { it.stationCode?.equals(boardingRfi, true) == true }
+                        .indexOfFirst { stessaStazione(it.stationCode, boardingRfi) }
                         .takeIf { it >= 0 }
                     val discesa = status.stops
-                        .indexOfFirst { it.stationCode?.equals(alightingRfi, true) == true }
+                        .indexOfFirst { stessaStazione(it.stationCode, alightingRfi) }
                         .takeIf { it >= 0 && (salita == null || it > salita) }
                     // Dove parti tu: la fermata di salita, o il capolinea di
                     // partenza quando nessuno ci ha detto dove sali.

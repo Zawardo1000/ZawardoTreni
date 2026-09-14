@@ -91,9 +91,10 @@ fun TrainStatus.terminus(arrivals: Boolean = false): String? =
  * sola.
  */
 fun TrainStatus.indiceFermata(codice: String?, quando: LocalDateTime? = null): Int {
-    val cercato = codice?.trim()?.takeIf { it.isNotEmpty() } ?: return -1
+    if (codiceStazione(codice) == null) return -1
+    // Con [stessaStazione]: una Freccia di Bologna Centrale nel dettaglio sta a "Bologna C.le/AV".
     val candidate = stops.withIndex()
-        .filter { it.value.stationCode?.trim().equals(cercato, ignoreCase = true) }
+        .filter { stessaStazione(it.value.stationCode, codice) }
     if (candidate.isEmpty()) return -1
     if (candidate.size == 1 || quando == null) return candidate.first().index
     return candidate.minByOrNull { (_, fermata) ->

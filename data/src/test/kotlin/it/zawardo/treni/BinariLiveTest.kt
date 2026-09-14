@@ -107,9 +107,11 @@ class BinariLiveTest {
      * `binarioPulito`: finche' non la conosce, quella grafia fa dichiarare un
      * cambio di binario a chi il binario non l'ha cambiato.
      *
-     * Il 14/09/2026 si e' aggiunto il "20 BIS" di Roma Termini.
+     * Il 14/09/2026 si sono aggiunti il "20 BIS" di Roma Termini e Bologna
+     * Centrale, coi binari "19 AV" della stazione sotterranea e quelli dei
+     * piazzali scritti "III-EST" e "IV-PO".
      */
-    private val paroleAmmesse = setOf("tronco", "ovest", "est", "bis")
+    private val paroleAmmesse = setOf("tronco", "ovest", "est", "bis", "AV")
 
     /**
      * Grafie viste e lasciate cosi' di proposito.
@@ -127,7 +129,7 @@ class BinariLiveTest {
         val quando = ZonedDateTime.now().format(boardFormat)
         val grezzi = mutableSetOf<String>()
 
-        for (codice in listOf("S01700", "S09218", "S08409", "S00219", "S01645")) {
+        for (codice in listOf("S01700", "S09218", "S08409", "S00219", "S01645", "S05043")) {
             val voci = runCatching { NetworkModule.viaggiaTrenoApi.partenze(codice, quando) }
                 .getOrDefault(emptyList())
             voci.forEach {

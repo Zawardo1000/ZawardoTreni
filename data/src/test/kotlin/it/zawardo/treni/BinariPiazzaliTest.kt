@@ -3,6 +3,7 @@ package it.zawardo.treni
 import it.zawardo.treni.domain.model.binarioCambiato
 import it.zawardo.treni.domain.model.binarioConfermato
 import it.zawardo.treni.domain.model.binarioDaMostrare
+import it.zawardo.treni.domain.model.binarioPulito
 import it.zawardo.treni.domain.model.stessoBinario
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -57,5 +58,33 @@ class BinariPiazzaliTest {
         assertEquals("20 bis", binarioDaMostrare("20 BIS", null))
         assertTrue(stessoBinario("20 BIS", "20bis"))
         assertFalse(stessoBinario("20 BIS", "20"))
+    }
+
+    /**
+     * Bologna Centrale, arrivi: il 17822 aveva "3 EST" programmato e "III-EST"
+     * effettivo. Lo stesso binario, e col trattino attaccato l'app ci leggeva
+     * un cambio.
+     */
+    @Test
+    fun `il trattino fra numero e piazzale non fa un binario diverso`() {
+        assertEquals("3 est", binarioPulito("III-EST"))
+        assertFalse(binarioCambiato("3 EST", "III-EST"))
+        assertTrue(binarioConfermato("3 EST", "III-EST"))
+    }
+
+    /**
+     * Il piazzale ovest di Bologna scritto "PO": il 19595 aveva "2 OVEST"
+     * programmato e "VI-PO" effettivo, un cambio vero dal 2 al 6.
+     */
+    @Test
+    fun `PO e' il piazzale ovest`() {
+        assertEquals("4 ovest", binarioPulito("IV-PO"))
+        assertTrue(binarioCambiato("2 OVEST", "VI-PO"))
+        assertTrue(stessoBinario("6 OVEST", "VI-PO"))
+    }
+
+    @Test
+    fun `un trattino fra due cifre resta com'e'`() {
+        assertEquals("1-2", binarioPulito("1-2"))
     }
 }

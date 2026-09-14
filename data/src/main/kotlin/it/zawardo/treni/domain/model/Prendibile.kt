@@ -16,11 +16,15 @@ import kotlin.math.abs
  * viaggio l'ora in cui sali. Si confronta l'ora del giorno e non l'istante,
  * come in [conBinariDa]: una corsa a cavallo della mezzanotte due fonti la
  * datano in modo diverso. Senza orario, il primo passaggio.
+ *
+ * La stazione si riconosce con [stessaStazione], non col codice nudo: le Frecce
+ * di Bologna Centrale nel dettaglio fermano a "Bologna C.le/AV", che ha un codice
+ * suo.
  */
 fun TrainStatus.fermataA(codice: String?, ora: LocalTime?): Stop? {
-    val chiave = codice?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    if (codiceStazione(codice) == null) return null
     return stops
-        .filter { it.stationCode?.trim().equals(chiave, ignoreCase = true) }
+        .filter { stessaStazione(it.stationCode, codice) }
         .minByOrNull { fermata -> ora?.let { fermata.secondiDa(it) } ?: 0L }
 }
 

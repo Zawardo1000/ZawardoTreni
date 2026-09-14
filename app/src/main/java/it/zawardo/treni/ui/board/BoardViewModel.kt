@@ -12,6 +12,7 @@ import it.zawardo.treni.domain.model.SuggerimentiStazioni
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.conBinarioDa
+import it.zawardo.treni.domain.model.stessaStazione
 import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
@@ -563,7 +564,7 @@ class BoardViewModel : ViewModel() {
                          * limitata. In entrambi i casi quel treno non lo prendi.
                          */
                         val quiSoppressa = stato.stops
-                            .firstOrNull { it.stationCode.equals(code, ignoreCase = true) }
+                            .firstOrNull { stessaStazione(it.stationCode, code) }
                             ?.status == StopStatus.CANCELLED
                         val comeSta = when {
                             stato.state == TrainState.CANCELLED -> TrainState.CANCELLED

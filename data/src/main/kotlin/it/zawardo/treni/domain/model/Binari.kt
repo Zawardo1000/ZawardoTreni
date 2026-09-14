@@ -67,14 +67,14 @@ fun TrainStatus.conBinariDa(altra: TrainStatus): TrainStatus {
 
     val altrove = altra.stops
         .filter { it.scheduledPlatform != null || it.actualPlatform != null }
-        .groupBy { it.stationCode?.trim()?.uppercase().orEmpty() }
+        .groupBy { codiceStazione(it.stationCode).orEmpty() }
         .filterKeys { it.isNotEmpty() }
     if (altrove.isEmpty()) return this
 
     return copy(
         stops = stops.map { fermata ->
             if (fermata.scheduledPlatform != null && fermata.actualPlatform != null) return@map fermata
-            val chiave = fermata.stationCode?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+            val chiave = codiceStazione(fermata.stationCode)
             // Piu' d'una quando la corsa ripassa dalla stessa stazione: e'
             // l'orario a dire di quale dei due passaggi si stia parlando.
             val fonte = chiave?.let { altrove[it] }
@@ -126,7 +126,15 @@ fun BoardEntry.conBinarioDa(corsa: TrainStatus, stazione: String): BoardEntry {
  */
 private val ROMANO = Regex("(X{0,3})(IX|IV|V?I{0,3})", RegexOption.IGNORE_CASE)
 
-private val SPAZI = Regex("""\s+""")
+/**
+ * Dove una scrittura di binario si spezza in parole: gli spazi, e il trattino
+ * che precede una lettera. Bologna Centrale, 14/09/2026: "III-EST" per il "3 EST"
+ * di tabella, "IV-PO" per un binario del piazzale ovest. Col trattino attaccato
+ * il numero romano non si riconosceva e ogni conferma diventava un cambio. Un
+ * trattino fra due cifre invece resta: non se n'e' visto nessuno, e non si
+ * indovina.
+ */
+private val SPAZI = Regex("""\s+|-(?=[A-Za-z])""")
 
 /** Un numero con la sua qualifica attaccata: "IItr", "1Tr", "Iw". */
 private val NUMERO_E_CODA = Regex("""([IVX0-9]+)([A-Za-z]+)""", RegexOption.IGNORE_CASE)
@@ -157,6 +165,13 @@ private val QUALIFICATORI = mapOf(
     "EST" to "est",
     // Roma Termini, 14/09/2026: "20 BIS", un binario che si chiama cosi'.
     "BIS" to "bis",
+    // Bologna Centrale, 14/09/2026: i binari del piazzale ovest scritti "IV-PO",
+    // "VI-PO" dove il programmato dice "2 OVEST". PO sta per piazzale ovest: e'
+    // una lettura dedotta, come la "w" di Milano, e col suo stesso danno massimo
+    // — una parola sbagliata a schermo, non un binario sbagliato.
+    "PO" to "ovest",
+    // La stazione AV sotterranea di Bologna: "19 AV". Una sigla, resta maiuscola.
+    "AV" to "AV",
 )
 
 private fun String.romanoInCifre(): String? {

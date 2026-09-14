@@ -6,6 +6,7 @@ import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.soloOrarioPrevistoPer
+import it.zawardo.treni.domain.model.stessaStazione
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.LocalDate
@@ -166,7 +167,7 @@ internal class CaricatoreCorsa(
 
         // Se la corsa di oggi non tocca la stazione da cui si sale, e' un altro
         // treno con lo stesso numero: non lo si spaccia per quello cercato.
-        if (boardingCode != null && oggi.stops.none { it.stationCode == boardingCode }) return null
+        if (boardingCode != null && oggi.stops.none { stessaStazione(it.stationCode, boardingCode) }) return null
 
         return oggi.soloOrarioPrevistoPer(
             giorno = date,
