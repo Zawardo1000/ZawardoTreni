@@ -65,7 +65,13 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = gitCommitCount
-        versionName = "1.1.$gitCommitCount"
+        /*
+         * La 1.2 comincia con la grafica nuova (settembre 2026) e la patch conta
+         * i commit da li', cosi' resta derivata da git come prima: 81 e' l'ultimo
+         * commit della 1.1, e l'82 e' la 1.2.1. Il versionCode resta il conteggio
+         * intero, l'unico numero che Play confronta.
+         */
+        versionName = "1.2.${(gitCommitCount - 81).coerceAtLeast(0)}"
 
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_DATE", "\"$gitDate\"")
