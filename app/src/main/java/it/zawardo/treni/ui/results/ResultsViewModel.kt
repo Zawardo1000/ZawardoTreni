@@ -14,6 +14,8 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.declaredState
+import it.zawardo.treni.domain.model.fermataA
+import it.zawardo.treni.domain.model.partenzaAncoraUtile
 import it.zawardo.treni.domain.model.soppressione
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -27,7 +29,6 @@ import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
-import kotlin.math.abs
 
 /** Una soluzione più, se disponibile, il suo stato in tempo reale. */
 data class JourneyRow(
@@ -45,6 +46,12 @@ data class JourneyRow(
      */
     val scheduledPlatform: String? = null,
     val actualPlatform: String? = null,
+    /**
+     * Quando parte davvero, per le soluzioni gia' passate in tabella che si
+     * prendono ancora perche' il treno e' in ritardo; null per tutte le altre.
+     * Vedi `ResultsViewModel.cercaAncoraPrendibili`.
+     */
+    val partenzaStimata: LocalDateTime? = null,
 ) {
     /** Stabile fra un refresh e l'altro: evita che la lista salti sotto le dita. */
     val key: String
@@ -192,6 +199,7 @@ class ResultsViewModel(
                 )
             }
             enrich(rows)
+            cercaAncoraPrendibili()
             cercaAltreSoluzioni(direttoMigliore = list.minByOrNull { it.duration }?.duration)
             if (outcome.prezziAssenti) riprovaPrezzi(departure, PAGE)
         }
@@ -340,7 +348,13 @@ class ResultsViewModel(
     fun loadEarlier() {
         val current = _state.value
         if (current.loadingEarlier || current.noMoreEarlier) return
-        val first = current.journeys.firstOrNull()?.journey?.departure ?: return
+        /*
+         * Si parte dalla prima scheda nata dalla ricerca, non da un treno in
+         * ritardo messo in cima perche' si prende ancora: partendo da quello, i
+         * treni fra la sua ora di tabella e l'ora cercata non comparirebbero mai.
+         */
+        val first = (current.journeys.firstOrNull { it.partenzaStimata == null } ?: current.journeys.firstOrNull())
+            ?.journey?.departure ?: return
 
         viewModelScope.launch {
             _state.update { it.copy(loadingEarlier = true) }
@@ -383,7 +397,7 @@ class ResultsViewModel(
                 _state.update { s ->
                     s.copy(
                         loadingEarlier = false,
-                        journeys = rows + s.journeys,
+                        journeys = (rows + s.journeys).sortedBy { it.journey.departure },
                         noMoreEarlier = rows.isEmpty(),
                     )
                 }
@@ -395,7 +409,7 @@ class ResultsViewModel(
                 .filter { it.key !in existing }
 
             _state.update { s ->
-                s.copy(loadingEarlier = false, journeys = rows + s.journeys, noMoreEarlier = rows.isEmpty())
+                s.copy(loadingEarlier = false, journeys = (rows + s.journeys).sortedBy { it.journey.departure }, noMoreEarlier = rows.isEmpty())
             }
             enrich(rows)
             riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE) }
@@ -461,6 +475,74 @@ class ResultsViewModel(
     }
 
     /**
+     * I treni gia' passati in tabella che si fanno ancora in tempo a prendere.
+     *
+     * Cercando Taormina - Catania alle 10:10 del 14/09/2026 non usciva il REG
+     * 5385 delle 10:01, che viaggiava con dieci minuti di ritardo e sarebbe
+     * partito verso le 10:11. Le Frecce ragiona solo sull'orario: cercando dalle
+     * 10:05 quel treno spariva. Il tabellone la regola giusta la applicava gia'
+     * (vedi `stillCatchable`), la ricerca no, e sullo stesso treno le due
+     * schermate si contraddicevano. Per chi fa il pendolare il ritardo e' la
+     * norma, e il treno che conta e' quello che si prende davvero.
+     *
+     * Si cerca da [FINESTRA_RITARDI] prima dell'ora chiesta — una ricerca in
+     * piu', non una per treno — e di quelle soluzioni si interroga il primo
+     * treno con la stessa chiamata che ogni riga fa gia' per il suo ritardo.
+     * Restano quelle la cui partenza stimata cade dall'ora cercata in poi, e con
+     * la coincidenza ancora in piedi se c'e' un cambio: vedi
+     * `partenzaAncoraUtile`.
+     *
+     * Solo attorno ad adesso ([ritardiContano]): il ritardo di un treno di
+     * stamattina non dice niente di quello delle 17, e di un giorno che non e'
+     * oggi non si sa proprio.
+     */
+    private fun cercaAncoraPrendibili() {
+        if (!ritardiContano()) return
+        viewModelScope.launch {
+            val da = departure.minus(FINESTRA_RITARDI)
+            val esito = runCatching {
+                journeys.searchAll(from, to, da, limit = WIDE_PAGE, sources = sources)
+            }.getOrNull() ?: return@launch
+            val candidate = esito.journeys.applyDirectFilter()
+                .filter { it.departure.isBefore(departure) }
+                .map { it.toRow() }
+                .filter { it.realtimeNow }
+            if (candidate.isEmpty()) return@launch
+
+            val prese = coroutineScope {
+                candidate.map { riga ->
+                    async {
+                        val (arricchita, stato) = conStato(riga)
+                        riga.journey.partenzaAncoraUtile(stato, departure)
+                            ?.let { arricchita.copy(partenzaStimata = it) }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            if (prese.isEmpty()) return@launch
+            _state.update { s ->
+                val gia = s.journeys.map { it.key }.toHashSet()
+                s.copy(
+                    journeys = (prese.filter { it.key !in gia } + s.journeys)
+                        .sortedBy { it.journey.departure },
+                )
+            }
+        }
+    }
+
+    /**
+     * Vero se il ritardo di adesso dice qualcosa sull'ora cercata: da
+     * [FINESTRA_RITARDI] fa a [ORIZZONTE_RITARDI] da ora. Prima, i treni della
+     * finestra sono partiti da un pezzo; dopo, sono troppo lontani da qualunque
+     * ritardo misurato adesso. Il giorno lo controlla gia' ogni riga, con
+     * [JourneyRow.realtimeNow].
+     */
+    private fun ritardiContano(): Boolean {
+        val adesso = LocalDateTime.now()
+        return !departure.isBefore(adesso.minus(FINESTRA_RITARDI)) &&
+            !departure.isAfter(adesso.plus(ORIZZONTE_RITARDI))
+    }
+
+    /**
      * Arricchisce le righe indicate con lo stato del loro primo treno.
      *
      * Le chiamate partono in parallelo: in serie sarebbero una dozzina di
@@ -473,46 +555,7 @@ class ResultsViewModel(
 
         viewModelScope.launch {
             val enriched = coroutineScope {
-                interrogabili.map { row ->
-                    async {
-                        // Solo i treni: interrogare ViaggiaTreno col "890A" di un bus
-                        // sostitutivo e' una chiamata sprecata che fallisce sempre.
-                        val leg = row.journey.legs.firstOrNull { it.isTrain }
-                            ?: return@async row.copy(loadingStatus = false)
-                        val number = leg.trainNumber
-                            ?: return@async row.copy(loadingStatus = false)
-                        val giorno = row.journey.departure.toLocalDate()
-                        val status = runCatching {
-                            /*
-                             * Data e stazione di salita sono della tratta, non
-                             * della ricerca: lo stesso numero torna ogni giorno e
-                             * puo' appartenere a due treni diversi. Senza, la
-                             * soluzione delle 01:31 di domani ereditava la corsa
-                             * di stamattina, gia' arrivata.
-                             */
-                            trains.statusByNumber(
-                                trainNumber = number,
-                                date = giorno,
-                                boardingCode = leg.from.rfiCode,
-                                boardingAt = leg.departure,
-                            )
-                        }.getOrNull()?.let { conBinarioDiSalita(it, leg, giorno) }
-                        val salita = status?.fermataDiSalita(leg)
-                        row.copy(
-                            loadingStatus = false,
-                            scheduledPlatform = salita?.scheduledPlatform,
-                            actualPlatform = salita?.actualPlatform,
-                            /*
-                             * La soppressione dichiarata dalla sorgente resta:
-                             * di un treno soppresso ViaggiaTreno non ha nemmeno
-                             * il record, e il suo silenzio non e' una smentita.
-                             */
-                            state = row.journey.declaredState?.takeIf { it.soppressione }
-                                ?: status?.state ?: row.state,
-                            delayMinutes = status?.delayMinutes ?: row.delayMinutes,
-                        )
-                    }
-                }.awaitAll()
+                interrogabili.map { row -> async { conStato(row).first } }.awaitAll()
             }
             val byKey = enriched.associateBy { it.key }
             _state.update { s ->
@@ -522,23 +565,51 @@ class ResultsViewModel(
     }
 
     /**
-     * La fermata da cui sali, dentro la corsa.
-     *
-     * Il codice RFI da solo non basta: una corsa puo' ripassare dalla stessa
-     * stazione, ed e' l'orario a dire di quale dei due passaggi si stia
-     * parlando. E' la stessa regola con cui si accoppiano le fermate di due
-     * letture diverse, in `conBinariDa`.
+     * La riga con lo stato del suo primo treno, e lo stato stesso: chi cerca i
+     * treni ancora prendibili ne ha bisogno per decidere, non solo per mostrarlo.
      */
-    private fun TrainStatus.fermataDiSalita(leg: Leg): Stop? {
-        val codice = leg.from.rfiCode?.takeIf { it.isNotBlank() } ?: return null
-        return stops
-            .filter { it.stationCode?.equals(codice, ignoreCase = true) == true }
-            .minByOrNull { fermata ->
-                val quando = fermata.scheduledDeparture ?: fermata.scheduledArrival
-                if (quando == null) Long.MAX_VALUE
-                else abs(Duration.between(leg.departure, quando).toMinutes())
-            }
+    private suspend fun conStato(row: JourneyRow): Pair<JourneyRow, TrainStatus?> {
+        // Solo i treni: interrogare ViaggiaTreno col "890A" di un bus
+        // sostitutivo e' una chiamata sprecata che fallisce sempre.
+        val leg = row.journey.legs.firstOrNull { it.isTrain }
+            ?: return row.copy(loadingStatus = false) to null
+        val number = leg.trainNumber
+            ?: return row.copy(loadingStatus = false) to null
+        val giorno = row.journey.departure.toLocalDate()
+        val status = runCatching {
+            /*
+             * Data e stazione di salita sono della tratta, non della ricerca: lo
+             * stesso numero torna ogni giorno e puo' appartenere a due treni
+             * diversi. Senza, la soluzione delle 01:31 di domani ereditava la
+             * corsa di stamattina, gia' arrivata.
+             */
+            trains.statusByNumber(
+                trainNumber = number,
+                date = giorno,
+                boardingCode = leg.from.rfiCode,
+                boardingAt = leg.departure,
+            )
+        }.getOrNull()?.let { conBinarioDiSalita(it, leg, giorno) }
+        val salita = status?.fermataDiSalita(leg)
+        val arricchita = row.copy(
+            loadingStatus = false,
+            scheduledPlatform = salita?.scheduledPlatform,
+            actualPlatform = salita?.actualPlatform,
+            /*
+             * La soppressione dichiarata dalla sorgente resta: di un treno
+             * soppresso ViaggiaTreno non ha nemmeno il record, e il suo silenzio
+             * non e' una smentita.
+             */
+            state = row.journey.declaredState?.takeIf { it.soppressione }
+                ?: status?.state ?: row.state,
+            delayMinutes = status?.delayMinutes ?: row.delayMinutes,
+        )
+        return arricchita to status
     }
+
+    /** La fermata da cui sali, dentro la corsa: vedi `fermataA`. */
+    private fun TrainStatus.fermataDiSalita(leg: Leg): Stop? =
+        fermataA(leg.from.rfiCode, leg.departure.toLocalTime())
 
     /**
      * Il binario di dove sali, chiesto all'altra fonte solo quando manca.
@@ -586,5 +657,15 @@ class ResultsViewModel(
          * diretti nazionali, di cui ce n'e' in abbondanza.
          */
         val GRAZIA_MISTI: java.time.Duration = java.time.Duration.ofMinutes(20)
+
+        /**
+         * Quanto indietro guardare per i treni in ritardo che si prendono
+         * ancora. Un'ora, deciso con l'utente il 14/09/2026: oltre, il ritardo e'
+         * un'eccezione che il tabellone racconta meglio di una ricerca.
+         */
+        val FINESTRA_RITARDI: Duration = Duration.ofMinutes(60)
+
+        /** Fin dove, nel futuro, il ritardo misurato adesso dice ancora qualcosa. */
+        val ORIZZONTE_RITARDI: Duration = Duration.ofHours(2)
     }
 }

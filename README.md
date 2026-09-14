@@ -11,6 +11,8 @@ App Android per orari e stato in tempo reale dei treni italiani.
 - Ricerca A→B con autocompletamento stazioni, data e ora (default: adesso)
 - Salvataggio ricerche + cronologia delle ultime 10
 - Risultati con numero treno, stato (soppresso, variato, in orario) e ritardo/anticipo
+- Nei risultati anche i treni già passati in orario che, in ritardo, si fanno ancora in
+  tempo a prendere — segnalati come tali, perché il biglietto per quell'orario non è più in vendita
 - Dettaglio corsa: elenco fermate, posizione attuale del treno, ritardi **effettivi** sulle
   fermate già effettuate e **stimati** su quelle future, binario programmato → effettivo
 - Ricerca per numero treno
@@ -52,9 +54,9 @@ un'informazione diversa. Il modello lo distingue con `BoardEntry.realtime` e
 risponde `204` per qualsiasi altra data. Per le date future l'app mostra il solo orario previsto.
 
 **Del giorno che non è oggi si tiene solo il tragitto.** Il percorso di domani si ricava dalla
-corsa odierna con lo stesso numero, ma di quella corsa si copiano le fermate e gli orari di
-tabella e nient'altro: ritardo, stato, ultimo rilevamento, orari reali e binari restano al
-giorno a cui appartengono. Vale per qualunque risposta arrivi per una data futura, anche da
+corsa odierna con lo stesso numero, ma di quella corsa si copiano le fermate, gli orari e i
+binari di tabella e nient'altro: ritardo, stato, ultimo rilevamento, orari reali e binario
+effettivo restano al giorno a cui appartengono. Vale per qualunque risposta arrivi per una data futura, anche da
 una fonte che a quella data risponde volentieri con i dati di oggi — vedi
 `domain/model/OrarioPrevisto.kt` e `OrarioPrevistoTest`.
 

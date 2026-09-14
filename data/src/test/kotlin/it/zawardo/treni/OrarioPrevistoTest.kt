@@ -96,15 +96,31 @@ class OrarioPrevistoTest {
         assertNull(previsto.lastDetectionTime)
         assertEquals("nessuna fermata gia' fatta", -1, previsto.currentStopIndex)
         assertTrue(
-            "niente orari reali, ritardi, proiezioni o binari",
+            "niente orari reali, ritardi, proiezioni o binari effettivi",
             previsto.stops.all {
                 it.status == StopStatus.FUTURE &&
                     it.actualArrival == null && it.actualDeparture == null &&
                     it.arrivalDelayMinutes == 0 && it.departureDelayMinutes == 0 &&
                     it.projectedArrival == null && it.projectedDeparture == null &&
-                    it.scheduledPlatform == null && it.actualPlatform == null
+                    it.actualPlatform == null
             },
         )
+    }
+
+    /**
+     * Il REG 5385 del 24 novembre si apriva senza un binario, mentre la corsa di
+     * oggi li aveva tutti di tabella. Il programmato e' orario come le ore di
+     * passaggio, e resta; l'effettivo e' della giornata, e no.
+     */
+    @Test
+    fun `il binario di tabella resta, quello di oggi no`() {
+        val previsto = corsaArrivata().soloOrarioPrevistoPer(domani)
+
+        assertEquals(listOf("3", "1", "2"), previsto.stops.map { it.scheduledPlatform })
+        // A Sondrio stamattina e' partito dal 1 invece che dal 3: domani e' il 3.
+        assertEquals("3", previsto.stops.first().platform)
+        assertFalse("il cambio di stamattina non passa a domani", previsto.stops.first().platformChanged)
+        assertFalse("previsto, non confermato", previsto.stops.any { it.platformConfirmed })
     }
 
     @Test

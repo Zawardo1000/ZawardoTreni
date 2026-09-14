@@ -25,6 +25,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.ui.graphics.compositeOver
+import it.zawardo.treni.domain.model.JourneySource
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -343,7 +347,19 @@ private fun JourneyCard(
      * scheda lo dice col colore prima ancora delle parole.
      */
     val soloPrevisto = !row.realtimeNow
-    val fondo = if (soloPrevisto) scheme.surfaceContainerLow else scheme.surfaceContainerLowest
+    /*
+     * Un fondo suo anche per il treno gia' passato in tabella che si prende
+     * ancora: e' la sola scheda con un orario prima di quello cercato, e il
+     * biglietto per quell'orario non si compra piu' (vedi [VenditaChiusa]). Il
+     * rosso appena accennato e' quello del ritardo, che e' il motivo per cui la
+     * scheda sta li'.
+     */
+    val ancoraInTempo = row.partenzaStimata != null
+    val fondo = when {
+        ancoraInTempo -> lateColor().copy(alpha = 0.07f).compositeOver(scheme.surfaceContainerLowest)
+        soloPrevisto -> scheme.surfaceContainerLow
+        else -> scheme.surfaceContainerLowest
+    }
 
     /*
      * L'orario reale sotto quello di tabella, solo quando se ne discosta.
@@ -369,11 +385,14 @@ private fun JourneyCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = fondo),
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.7f)),
+        border = BorderStroke(
+            1.dp,
+            if (ancoraInTempo) lateColor().copy(alpha = 0.45f) else scheme.outlineVariant.copy(alpha = 0.7f),
+        ),
     ) {
         Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 12.dp)) {
 
-            if (otherDay || j.assembled) {
+            if (otherDay || j.assembled || row.partenzaStimata != null) {
                 Row(
                     Modifier.padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -405,6 +424,32 @@ private fun JourneyCard(
                             color = scheme.tertiary,
                             fontWeight = FontWeight.Bold,
                         )
+                    }
+                    /*
+                     * Il treno e' gia' passato in tabella, prima dell'ora
+                     * cercata, e compare perche' in ritardo lo si prende ancora.
+                     * Va detto: senza, un 10:01 in cima a una ricerca delle 10:10
+                     * sembrerebbe un errore dell'elenco. L'ora vera sta sotto
+                     * quella di tabella, come su ogni altra scheda.
+                     */
+                    if (row.partenzaStimata != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = lateColor(),
+                            )
+                            Text(
+                                "In ritardo · fai ancora in tempo",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = lateColor(),
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                 }
             }
@@ -471,7 +516,9 @@ private fun JourneyCard(
             ) {
                 Tratte(j, Modifier.weight(1f), onApri)
                 StatoSoluzione(row)
-                Prezzo(j)
+                // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
+                // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
+                if (ancoraInTempo && j.source == JourneySource.LEFRECCE) VenditaChiusa() else Prezzo(j)
             }
 
             if (j.assembled) {
@@ -707,6 +754,48 @@ private fun StatoSoluzione(row: JourneyRow) {
             "orario previsto",
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Al posto del prezzo, su un treno gia' passato in tabella che si prende ancora.
+ *
+ * Non e' una supposizione: per le soluzioni partite in tabella Le Frecce
+ * risponde `saleable = false` e lo dice a parole — "Impossible d'acheter un
+ * voyage précédent à la date actuelle", sondato il 14/09/2026 su Milano -
+ * Roma e Taormina - Catania. Chi un abbonamento non ce l'ha, e cerca il
+ * biglietto proprio per quell'orario, non lo trova: deve saperlo prima di
+ * correre in banchina, non davanti alla macchinetta.
+ *
+ * Solo sulle soluzioni di Le Frecce, le sole per cui l'abbiamo sentito dire
+ * dalla fonte.
+ */
+@Composable
+private fun VenditaChiusa() {
+    val colore = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(horizontalAlignment = Alignment.End) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Filled.ConfirmationNumber,
+                contentDescription = null,
+                modifier = Modifier.size(15.dp),
+                tint = colore,
+            )
+            Text(
+                "vendita chiusa",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colore,
+            )
+        }
+        Text(
+            "per questo orario",
+            style = MaterialTheme.typography.labelSmall,
+            color = colore,
         )
     }
 }

@@ -239,9 +239,10 @@ fun AboutScreen(onBack: () -> Unit) {
                     "binario: quelle ferrovie un tempo reale non lo pubblicano affatto. In " +
                     "cambio è l'unica che risponda anche per i giorni futuri.\n\n" +
                     "• Di un giorno che non è oggi si conosce l'orario e basta. Ritardo, " +
-                    "binario e stato esistono solo per la giornata in corso: sul treno di " +
-                    "domani l'app mostra fermate e orari previsti e dice che sono quelli, " +
-                    "invece di ripeterti il ritardo che quel numero ha avuto oggi.\n\n" +
+                    "stato e binario effettivo esistono solo per la giornata in corso: sul " +
+                    "treno di domani l'app mostra fermate, orari e binari di tabella e dice " +
+                    "che sono quelli, invece di ripeterti il ritardo che quel numero ha " +
+                    "avuto oggi.\n\n" +
                     "• Gli orari di EAV e ARST viaggiano dentro l'app: sono una fotografia, " +
                     "rinfrescata quando invecchia di qualche mese. Un cambiamento d'orario " +
                     "appena entrato in vigore può non esserci ancora.\n\n" +

@@ -296,14 +296,14 @@ fun BoardScreen(
                     else -> LazyColumn(state = listState) {
                         items(
                             state.entries,
-                            key = { it.trainRef.number + "|" + it.trainRef.departureDateMillis + "|" + it.scheduledTime },
+                            key = { chiaveRiga(it) },
                         ) { e ->
-                            // Solo per le righe che compaiono davvero: il
-                            // controllo della destinazione costa una chiamata.
+                            // Solo per le righe che compaiono davvero: il controllo
+                            // di destinazione e binario costa una chiamata.
                             LaunchedEffect(e.trainRef.number, e.trainRef.departureDateMillis) {
-                                vm.verifyDirection(e)
+                                vm.verifica(e)
                             }
-                            BoardRow(e) { entry ->
+                            BoardRow(e, binarioInArrivo = chiaveRiga(e) in state.binariInArrivo) { entry ->
                                 onOpenTrain(
                                     TrainRoute(
                                         number = entry.trainRef.number,
@@ -344,7 +344,12 @@ fun BoardScreen(
 }
 
 @Composable
-private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
+private fun BoardRow(
+    entry: BoardEntry,
+    /** Si sta chiedendo alla corsa il binario vero: vedi `BoardViewModel.verifica`. */
+    binarioInArrivo: Boolean,
+    onOpenTrain: (BoardEntry) -> Unit,
+) {
     // Barrato in entrambi i casi: la corsa e' soppressa, oppure circola ma qui
     // non ferma. Da questa banchina, la differenza non cambia cosa puoi prendere.
     val cancelled = entry.state.soppressione
@@ -447,6 +452,7 @@ private fun BoardRow(entry: BoardEntry, onOpenTrain: (BoardEntry) -> Unit) {
                 entry.actualPlatform,
                 piccola = true,
                 segnaposto = true,
+                inCaricamento = binarioInArrivo,
             )
             if (entry.inStation) {
                 Text(

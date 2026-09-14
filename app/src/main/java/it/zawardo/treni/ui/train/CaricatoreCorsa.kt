@@ -154,8 +154,8 @@ internal class CaricatoreCorsa(
      * non solo per la rete nazionale: un treno che circola ogni giorno con lo
      * stesso numero ha lo stesso tragitto, e da chiunque lo pubblichi oggi si
      * ricava il percorso di domani. Della corsa di oggi si tiene **solo** il
-     * tragitto: ritardo, stato, binari e orari reali restano a oggi, dove sono
-     * veri — vedi [soloOrarioPrevistoPer].
+     * tragitto, binari di tabella compresi: ritardo, stato, binario effettivo e
+     * orari reali restano a oggi, dove sono veri — vedi [soloOrarioPrevistoPer].
      *
      * Vale solo per una data futura: per oggi risponde gia' [realtime], e
      * ricopiare se stessi non avrebbe senso.
@@ -170,8 +170,9 @@ internal class CaricatoreCorsa(
 
         return oggi.soloOrarioPrevistoPer(
             giorno = date,
-            notice = "Percorso e orari dalla corsa di oggi con lo stesso numero. " +
-                "Ritardo, binario e stato saranno disponibili il giorno della partenza.",
+            notice = "Percorso, orari e binari di tabella dalla corsa di oggi con lo " +
+                "stesso numero. Ritardo, stato e binario effettivo saranno disponibili " +
+                "il giorno della partenza.",
         )
     }
 
@@ -198,8 +199,8 @@ internal class CaricatoreCorsa(
         } else {
             soloOrarioPrevistoPer(
                 giorno = date,
-                notice = "Orario previsto per il giorno scelto. Ritardo, binario " +
-                    "e stato saranno disponibili il giorno della partenza.",
+                notice = "Orario previsto per il giorno scelto. Ritardo, stato e " +
+                    "binario effettivo saranno disponibili il giorno della partenza.",
             )
         }
 }

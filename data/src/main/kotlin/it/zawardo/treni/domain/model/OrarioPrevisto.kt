@@ -6,7 +6,7 @@ import java.time.temporal.ChronoUnit
 
 /**
  * La stessa corsa ridotta al suo **orario previsto** di un dato giorno: le
- * fermate e gli orari di tabella, e nient'altro.
+ * fermate, gli orari e i binari di tabella, e nient'altro.
  *
  * Serve dove il percorso si conosce ma il tempo reale no, e capita in due modi
  * che si somigliano piu' di quanto sembri:
@@ -20,11 +20,21 @@ import java.time.temporal.ChronoUnit
  *    altro giorno. Queste API la data la accettano senza promettere di
  *    rispettarla, e nessuna avverte quando risponde per un giorno diverso.
  *
- * Quel che si tiene e' il tragitto — le fermate, in che ordine, a che ora — e
- * quel che si butta e' tutto cio' che appartiene alla giornata da cui viene:
- * ritardo, stato, ultimo rilevamento, orari reali e proiettati, binari. Anche i
- * binari, benche' siano di tabella: quello scritto e' quello della corsa di
- * oggi, e per domani non l'ha confermato nessuno.
+ * Quel che si tiene e' il tragitto — le fermate, in che ordine, a che ora, da
+ * che binario — e quel che si butta e' tutto cio' che appartiene alla giornata
+ * da cui viene: ritardo, stato, ultimo rilevamento, orari reali e proiettati,
+ * binario effettivo.
+ *
+ * **Il binario di tabella resta, quello effettivo no.** Fino al 14/09/2026 si
+ * buttavano tutti e due, perche' "quello scritto e' quello della corsa di oggi,
+ * e per domani non l'ha confermato nessuno". Ma il programmato e' orario quanto
+ * le ore di passaggio, che si tenevano gia', e la pillola nera dice da se' che
+ * e' soltanto previsto. Il REG 5385 del 24 novembre si apriva con fermate e
+ * orari e senza un binario, mentre quelli di tabella della corsa di oggi erano
+ * li'. A oggi resta l'effettivo, che e' la parte che cambia da un giorno
+ * all'altro: il binario cambiato stamattina non passa a domani. Dove il
+ * programmato non c'e' — le stazioni grandi il binario lo assegnano un quarto
+ * d'ora prima — non c'e' nemmeno domani, ed e' giusto cosi'.
  *
  * Non e' una pulizia cosmetica. Un treno di domani con addosso il ritardo di
  * oggi non dice una cosa imprecisa: dice una cosa falsa su un treno che non e'
@@ -70,7 +80,7 @@ fun TrainStatus.soloOrarioPrevistoPer(
                 actualDeparture = null,
                 arrivalDelayMinutes = 0,
                 departureDelayMinutes = 0,
-                scheduledPlatform = null,
+                // Il programmato resta: e' orario, non giornata. Vedi sopra.
                 actualPlatform = null,
                 projectedArrival = null,
                 projectedDeparture = null,

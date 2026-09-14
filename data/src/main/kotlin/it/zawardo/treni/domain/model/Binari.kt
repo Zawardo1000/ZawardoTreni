@@ -2,6 +2,7 @@ package it.zawardo.treni.domain.model
 
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.LocalTime
 import kotlin.math.abs
 
 /**
@@ -84,6 +85,37 @@ fun TrainStatus.conBinariDa(altra: TrainStatus): TrainStatus {
                 actualPlatform = fermata.actualPlatform ?: fonte.actualPlatform,
             )
         },
+    )
+}
+
+/**
+ * Il binario di una riga di tabellone, aggiornato con quello della corsa stessa.
+ *
+ * **Il tabellone arriva dopo il dettaglio.** Confrontate il 14/09/2026 le
+ * partenze di Milano Centrale, Roma Termini, Napoli Centrale e Catania Centrale
+ * con `andamentoTreno` delle stesse corse: 43 righe su 46 identiche, e le tre
+ * diverse erano tutte binari appena assegnati, che la corsa aveva e il
+ * tabellone non ancora. Il REG 22096 a Catania Centrale, alle 09:50, era "2"
+ * programmato e nient'altro sul tabellone, "2" programmato e "2" effettivo nel
+ * dettaglio: nero da una parte e verde dall'altra, sullo stesso treno nello
+ * stesso minuto. Il 9524 a Roma Termini aveva il "6" nel dettaglio e niente sul
+ * tabellone. E' proprio il momento in cui chi guarda il tabellone si alza per
+ * andare in banchina.
+ *
+ * Per questo qui, al contrario di [conBinariDa], **vince la corsa** dove dice
+ * qualcosa: e' la lettura piu' fresca delle due. Quel che la corsa tace resta
+ * com'era sul tabellone.
+ *
+ * La corsa e' gia' quella giusta — [BoardEntry.trainRef] la identifica — e la
+ * fermata si cerca con [fermataA]: l'orario serve solo se la corsa ripassa
+ * dalla stessa stazione.
+ */
+fun BoardEntry.conBinarioDa(corsa: TrainStatus, stazione: String): BoardEntry {
+    val orario = scheduledTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
+    val fermata = corsa.fermataA(stazione, orario) ?: return this
+    return copy(
+        scheduledPlatform = fermata.scheduledPlatform ?: scheduledPlatform,
+        actualPlatform = fermata.actualPlatform ?: actualPlatform,
     )
 }
 

@@ -11,6 +11,7 @@ import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.SuggerimentiStazioni
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.conBinarioDa
 import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
@@ -29,7 +30,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import it.zawardo.treni.data.mapper.ROME
+import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.stillCatchable
+import kotlinx.coroutines.Deferred
+import java.time.Instant
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
@@ -52,7 +57,20 @@ data class BoardUiState(
     val noMore: Boolean = false,
     /** Serve a non paginare prima del primo caricamento. */
     val loadedOnce: Boolean = false,
+    /**
+     * Le righe ([chiaveRiga]) di cui si sta chiedendo il binario vero alla
+     * corsa: intanto la pillola mostra quello del tabellone, con la rotella.
+     */
+    val binariInArrivo: Set<String> = emptySet(),
 )
+
+/**
+ * Come si riconosce una riga di tabellone. Il numero da solo non basta, perche'
+ * due treni diversi possono condividerlo; nemmeno numero e giorno, perche' una
+ * corsa circolare ripassa dalla stessa stazione.
+ */
+fun chiaveRiga(e: BoardEntry): String =
+    e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime
 
 @OptIn(FlowPreview::class)
 class BoardViewModel : ViewModel() {
@@ -111,6 +129,16 @@ class BoardViewModel : ViewModel() {
 
     /** Numeri gia' chiesti a Trenord cercando i soppressi: si chiedono una volta sola. */
     private val chieste = mutableSetOf<String>()
+
+    /**
+     * L'orario di stazione di Trenord, chiesto una volta per caricamento.
+     *
+     * Serve a due cose: ritrovare i soppressi ([recuperaSoppresse]) e sapere
+     * quali treni sono di Trenord, a cui chiedere il binario
+     * ([conBinariTrenord]). Tenuto qui, le due non lo scaricano due volte in
+     * parallelo prima che la cache del repository si riempia.
+     */
+    private var orarioTrenord: Deferred<List<BoardEntry>>? = null
 
     /**
      * Poche richieste per volta. Una schermata mostra una decina di righe e
@@ -243,6 +271,14 @@ class BoardViewModel : ViewModel() {
         nextFrom = ZonedDateTime.now()
         verificate.clear()
         chieste.clear()
+        val arriviQui = _state.value.mode == BoardMode.ARRIVALS
+        orarioTrenord = if (DataSource.TRENORD in sources) {
+            viewModelScope.async {
+                runCatching { trenord.timetable(code, arriviQui) }.getOrDefault(emptyList())
+            }
+        } else {
+            null
+        }
         viewModelScope.launch {
             _state.update { it.copy(loading = true, message = null, noMore = false) }
 
@@ -486,7 +522,9 @@ class BoardViewModel : ViewModel() {
         if (DataSource.TRENORD !in sources) return
         viewModelScope.launch {
             val arrivi = _state.value.mode == BoardMode.ARRIVALS
-            val orario = runCatching { trenord.timetable(code, arrivi) }.getOrDefault(emptyList())
+            // Lo stesso orario che dice a chi chiedere i binari: vedi [orarioTrenord].
+            val orario = orarioTrenord?.let { runCatching { it.await() }.getOrNull() }
+                ?: runCatching { trenord.timetable(code, arrivi) }.getOrDefault(emptyList())
             if (orario.isEmpty()) return@launch
 
             val ora = LocalTime.now()
@@ -559,19 +597,32 @@ class BoardViewModel : ViewModel() {
     }
 
     /**
-     * Chiede alla corsa dove finisce davvero.
+     * Chiede alla corsa com'e' davvero: dove finisce, e da che binario parte.
      *
-     * Il tabellone di ViaggiaTreno a volte sbaglia la destinazione: il REG 12977
-     * da Acireale risulta diretto a Bicocca, mentre il record della corsa dice
-     * Catania Aeroporto Fontanarossa in ogni campo, orario compreso, e Bicocca
-     * non e' fra le sue fermate. Sul tabellone di Acireale capita a due righe su
-     * dieci: troppo per fidarsi, troppo poco per rinunciare al tabellone.
+     * Il tabellone di ViaggiaTreno sbaglia su tutte e due le cose, e la stessa
+     * chiamata le corregge insieme.
+     *
+     * La destinazione: il REG 12977 da Acireale risulta diretto a Bicocca,
+     * mentre il record della corsa dice Catania Aeroporto Fontanarossa in ogni
+     * campo, orario compreso, e Bicocca non e' fra le sue fermate. Sul
+     * tabellone di Acireale capita a due righe su dieci: troppo per fidarsi,
+     * troppo poco per rinunciare al tabellone.
+     *
+     * Il binario: il tabellone arriva dopo il dettaglio, e un binario appena
+     * assegnato ce l'ha solo la corsa. Il REG 22096 a Catania Centrale era nero
+     * qui e verde aprendolo — vedi `conBinarioDa`. Sui treni Trenord si chiede
+     * anche a Trenord, come fa il dettaglio: vedi [conBinariTrenord].
+     *
+     * Mentre si chiede, la pillola mostra il binario del tabellone con la
+     * rotella accanto ([BoardUiState.binariInArrivo]): quel numero e' ancora
+     * soltanto cio' che si sapeva, e chi guarda deve poterlo capire senza
+     * aspettare di vederlo cambiare colore.
      *
      * Si domanda solo per le righe che l'utente ha davanti, una volta per corsa
      * e poche per volta: il tabellone compare subito col dato grezzo e si
      * corregge da se'. Chi non scorre non paga nulla.
      */
-    fun verifyDirection(entry: BoardEntry) {
+    fun verifica(entry: BoardEntry) {
         // Le corse Italo non stanno su ViaggiaTreno: chiederle sarebbe una
         // chiamata che fallisce sempre, e la destinazione l'hanno gia' detta loro.
         if (entry.trainRef.originCode.isBlank()) return
@@ -579,25 +630,66 @@ class BoardViewModel : ViewModel() {
         if (chiave in verificate) return
         verificate += chiave
         val arrivi = _state.value.mode == BoardMode.ARRIVALS
+        val stazione = _state.value.station?.rfiCode
+        val orario = orarioTrenord
+        _state.update { it.copy(binariInArrivo = it.binariInArrivo + chiave) }
 
         viewModelScope.launch {
-            val vera = runCatching {
-                limite.withPermit { trains.status(entry.trainRef)?.terminus(arrivi) }
-            }.getOrNull()
+            try {
+                val nazionale = runCatching { limite.withPermit { trains.status(entry.trainRef) } }
+                    .getOrNull() ?: return@launch
+                val corsa = conBinariTrenord(nazionale, entry, stazione, orario)
+                val vera = corsa.terminus(arrivi)?.takeIf { it.isNotBlank() }
 
-            if (vera.isNullOrBlank() || vera.equals(entry.direction, ignoreCase = true)) return@launch
-            _state.update { s ->
-                s.copy(
-                    entries = s.entries.map {
-                        if (key(it) == chiave) it.copy(direction = vera) else it
-                    },
-                )
+                _state.update { s ->
+                    s.copy(
+                        entries = s.entries.map { riga ->
+                            if (key(riga) != chiave) return@map riga
+                            val conBinario = stazione?.let { riga.conBinarioDa(corsa, it) } ?: riga
+                            // Lo stesso nome in un'altra grafia non e' una correzione:
+                            // resta quella del tabellone, gia' resa leggibile.
+                            if (vera == null || vera.equals(riga.direction, ignoreCase = true)) conBinario
+                            else conBinario.copy(direction = vera)
+                        },
+                    )
+                }
+            } finally {
+                _state.update { it.copy(binariInArrivo = it.binariInArrivo - chiave) }
             }
         }
     }
 
-    private fun key(e: BoardEntry) =
-        e.trainRef.number + "|" + e.trainRef.departureDateMillis + "|" + e.scheduledTime
+    /**
+     * I binari che ViaggiaTreno non ha, chiesti a Trenord: solo per i suoi
+     * treni, e solo se a mancare e' proprio l'effettivo di questa stazione.
+     *
+     * Nelle stazioni lombarde il binario vero di un regionale spesso lo ha
+     * soltanto Trenord — sul REG 2934 a Milano Centrale ViaggiaTreno dava il
+     * programmato e Trenord l'effettivo, vedi `completaBinari` — e senza
+     * chiederlo il tabellone lo diceva previsto dove il dettaglio lo dava
+     * confermato. Lo stesso difetto del REG 22096 a Catania, da un'altra fonte.
+     *
+     * Quali treni siano suoi lo dice l'orario di stazione di Trenord, che il
+     * tabellone scarica comunque per i soppressi ([orarioTrenord]): un
+     * Frecciarossa a Milano Centrale, o qualunque treno a Catania, non costa
+     * nessuna chiamata.
+     */
+    private suspend fun conBinariTrenord(
+        corsa: TrainStatus,
+        entry: BoardEntry,
+        stazione: String?,
+        orario: Deferred<List<BoardEntry>>?,
+    ): TrainStatus {
+        if (DataSource.TRENORD !in sources || stazione == null || orario == null) return corsa
+        if (entry.conBinarioDa(corsa, stazione).actualPlatform != null) return corsa
+        val suoi = runCatching { orario.await() }.getOrDefault(emptyList())
+        if (suoi.none { it.trainRef.number == entry.trainRef.number }) return corsa
+        val giorno = Instant.ofEpochMilli(entry.trainRef.departureDateMillis).atZone(ROME).toLocalDate()
+        return runCatching { limite.withPermit { trains.completaBinari(corsa, giorno) } }
+            .getOrDefault(corsa)
+    }
+
+    private fun key(e: BoardEntry) = chiaveRiga(e)
 
     private companion object {
         /** Ampiezza della finestra restituita da ViaggiaTreno, misurata. */
