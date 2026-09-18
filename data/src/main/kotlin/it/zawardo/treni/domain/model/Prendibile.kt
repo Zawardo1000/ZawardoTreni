@@ -146,6 +146,25 @@ fun Journey.partenzaAncoraUtile(primo: TrainStatus?, dalle: LocalDateTime): Loca
     return partenza
 }
 
+/**
+ * Il primo cambio del viaggio: il primo treno e la tratta con cui prosegue, se
+ * quella ha un orario da prendere; null altrimenti.
+ *
+ * Il primo **treno**, non la prima tratta: «Urbano › RE 10911» comincia col
+ * tratto urbano, e il ritardo che si conosce e' quello del treno. La tratta dopo
+ * deve partire a un'ora fissa, come un treno o un bus sostitutivo. Il tratto
+ * urbano no, perche' la metropolitana passa ogni pochi minuti; e nemmeno il
+ * tratto a piedi, dopo il quale il cambio vero e' con la tratta successiva, a
+ * una distanza che il margine di [coincidenzaRegge] non conosce. Li' la
+ * coincidenza non si giudica, invece di giudicarla male.
+ */
+fun Journey.primoCambio(): Pair<Leg, Leg>? {
+    val i = legs.indexOfFirst { it.isTrain }
+    if (i < 0) return null
+    val poi = legs.getOrNull(i + 1)?.takeIf { !it.isWalk && !it.urbano } ?: return null
+    return legs[i] to poi
+}
+
 /** Come sta la coincidenza di un viaggio il cui primo treno e' in ritardo. */
 enum class Coincidenza {
     REGGE,
@@ -157,7 +176,8 @@ enum class Coincidenza {
 }
 
 /**
- * La coincidenza al primo cambio, col ritardo che il primo treno ha adesso.
+ * La coincidenza al primo cambio ([primoCambio]), col ritardo che il primo
+ * treno ha adesso. Senza un cambio da giudicare, regge.
  *
  * Il secondo treno e' [secondo]; senza, lo si considera in orario. Chi chiama
  * lo interroga solo se in orario la coincidenza non reggerebbe: se regge
@@ -169,11 +189,11 @@ enum class Coincidenza {
  * in ritardo sulla stessa linea, tacere la soluzione era la risposta sbagliata.
  * Cosi' si decide fino a
  * [RECUPERO] oltre la partenza del secondo; piu' in la', o col secondo gia'
- * partito dal cambio o soppresso, e' persa davvero.
+ * partito dal cambio prima dell'arrivo del primo, o soppresso, e' persa davvero.
+ * Partito dopo, l'ha aspettato, e regge.
  */
 fun Journey.coincidenza(primo: TrainStatus?, secondo: TrainStatus?): Coincidenza {
-    val salita = legs.firstOrNull() ?: return Coincidenza.REGGE
-    val poi = legs.getOrNull(1) ?: return Coincidenza.REGGE
+    val (salita, poi) = primoCambio() ?: return Coincidenza.REGGE
 
     val ritardo = (primo?.delayMinutes ?: delayMinutes ?: 0).coerceAtLeast(0)
     val arrivo = primo?.arrivoStimatoA(salita.to.rfiCode, salita.arrival)
@@ -184,7 +204,17 @@ fun Journey.coincidenza(primo: TrainStatus?, secondo: TrainStatus?): Coincidenza
         secondo.state == TrainState.CANCELLED -> return Coincidenza.PERSA
         // Una corsa che non passa di li' e' quella sbagliata: resta la tabella.
         secondo.fermataA(poi.from.rfiCode, poi.departure.toLocalTime()) == null -> poi.departure
-        else -> secondo.partenzaStimataDa(poi.from.rfiCode, poi.departure) ?: return Coincidenza.PERSA
+        else -> secondo.partenzaStimataDa(poi.from.rfiCode, poi.departure) ?: run {
+            /*
+             * Gia' partito dal cambio. Nell'elenco si guardano anche i viaggi di
+             * stamattina, e un secondo treno partito dopo l'arrivo del primo l'ha
+             * aspettato: la coincidenza c'e' stata. Partito prima, e' persa, senza
+             * il margine di [RECUPERO]: un treno partito non recupera piu' niente.
+             */
+            val partito = secondo.fermataA(poi.from.rfiCode, poi.departure.toLocalTime())
+                ?.actualDeparture ?: return Coincidenza.PERSA
+            return if (partito.isBefore(arrivo)) Coincidenza.PERSA else Coincidenza.REGGE
+        }
     }
 
     return when {

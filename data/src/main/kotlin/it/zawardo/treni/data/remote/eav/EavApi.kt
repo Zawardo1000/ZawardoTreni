@@ -24,8 +24,13 @@ import retrofit2.http.POST
  * - **non dice il percorso.** Di ogni corsa da' numero, categoria, direzione,
  *   binario, orario e ritardo; le fermate no. Si ricostruiscono per numero di
  *   treno, che e' la stessa chiave del GTFS.
- * - **non risponde in GET.** Una GET torna 200 con un corpo vuoto, il che e'
- *   piu' insidioso di un errore: sembra una stazione senza treni.
+ * - **non risponde in GET.** Una GET torna 200 con una pagina "Lista non
+ *   disponibile" e nessuna riga, il che e' piu' insidioso di un errore: sembra
+ *   una stazione senza treni.
+ * - **non ha nome stabile.** Il 18/09/2026 `ws_getData.php` e' diventato
+ *   `ws_getData_pis.php`, e per giorni il tabellone e' rimasto vuoto: se ne
+ *   accorge `EavOrarioBoardTest`, che fallisce quando oggi risponde l'orario
+ *   invece del tabellone.
  */
 interface EavApi {
 
@@ -59,8 +64,17 @@ interface EavApi {
      * fisico) e' ignorato dal server: provato con valori inventati e con
      * l'assenza, la risposta non cambia. Non lo si manda.
      */
+    /*
+     * `ws_getData_pis.php`, e non piu' `ws_getData.php`: EAV ha rinominato il
+     * file, e il vecchio nome risponde 404. Verificato il 18/09/2026 su tutte le
+     * 126 stazioni col tabellone, partenze e arrivi: stessi parametri, stessi
+     * `codLoc`, stesso HTML, nessuna chiave. Lo stesso sito prepara un secondo
+     * endpoint, `ws_getData_moova.php`, con altri id e dati peggiori — orari di
+     * domani senza data, treni gia' partiti, binari sbagliati — e il sito non lo
+     * usa. Vedi `data/API-EAV.md`.
+     */
     @FormUrlEncoded
-    @POST("ws_getData.php")
+    @POST("ws_getData_pis.php")
     suspend fun tabellone(
         @Field("codLoc") codLoc: Int,
         @Field("tipoLista") tipoLista: String = PARTENZE,

@@ -45,6 +45,12 @@ import java.time.temporal.ChronoUnit
  * zero) sia con chi risponde per il proprio, e i treni che scavallano la
  * mezzanotte mantengono le distanze fra una fermata e l'altra.
  *
+ * Restano a oggi anche il perche' e gli avvisi ([TrainStatus.motivo],
+ * [TrainStatus.avvisi]) e le fermate straordinarie, che in tabella non ci sono:
+ * domani non sono ne' straordinarie ne' fermate. Il REG 2833 limitato a Sesto il
+ * 18/09/2026, aperto per il giorno dopo, avrebbe detto «Richiesta Impresa
+ * Ferroviaria» e fermato a Sesto anche lui.
+ *
  * Lo [TrainStatus.state] diventa [TrainState.NOT_DEPARTED] perche' e' quel che
  * dicono le fermate, tutte future e nessuna effettuata — la stessa regola del
  * mapper Trenord. Non e' un giudizio sulla puntualita': quello lo nega
@@ -72,7 +78,9 @@ fun TrainStatus.soloOrarioPrevistoPer(
         lastDetectionStation = null,
         lastDetectionTime = null,
         notice = notice,
-        stops = stops.map { fermata ->
+        motivo = null,
+        avvisi = emptyList(),
+        stops = stops.filterNot { it.straordinaria }.map { fermata ->
             fermata.copy(
                 scheduledArrival = sposta(fermata.scheduledArrival),
                 scheduledDeparture = sposta(fermata.scheduledDeparture),

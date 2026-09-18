@@ -97,23 +97,27 @@ data class Journey(
      *
      * Null non vuol dire gratis: vuol dire **non lo so**. Lo espongono le due
      * sorgenti che vendono biglietti — il BFF Le Frecce e Trenord — e nemmeno
-     * loro sempre: Trenitalia lo omette su circa una ricerca su cinque, Trenord
-     * fuori dall'area tariffaria integrata. Le altre sorgenti sono servizi di
-     * informazione sulla circolazione e un prezzo non lo conoscono affatto.
+     * loro sempre: Trenitalia non prezza i viaggi dentro la zona urbana di
+     * Milano, Trenord i treni che non vende, fuori dalla Lombardia. Le altre
+     * sorgenti sono servizi di informazione sulla circolazione e un prezzo non
+     * lo conoscono affatto.
      *
      * Trattare null come zero, o non distinguerlo da "esaurito", darebbe per
      * certo qualcosa che nessuno ha detto.
      */
     val price: Price? = null,
     /**
-     * Il prezzo di **una sola gamba** di un viaggio misto: quella che lo pubblica
-     * (la Freccia di Trenitalia, o Trenord) quando l'altra no (EAV, ARST, Italo).
+     * Il prezzo di **una parte** del viaggio, dichiarata come tale.
      *
-     * Non e' il costo del viaggio — quello resta ignoto, e per questo [price] su un
-     * misto e' null — ma dire la parte che si conosce, etichettata con l'operatore
-     * che la vende, e' piu' utile che tacere tutto. Distinto da [price] apposta:
-     * [price] e' il totale di una soluzione intera, questo e' un pezzo dichiarato
-     * come tale. Nullo quando nessuna gamba ha un prezzo (es. EAV piu' Italo).
+     * Su un viaggio misto e' la gamba che lo pubblica (la Freccia di Trenitalia,
+     * o Trenord) quando l'altra no (EAV, ARST, Italo). Su una soluzione Le Frecce
+     * con un tratto urbano o in autobus e' la **parte in treno**, chiesta a
+     * Trenord quando Le Frecce non la prezza: vedi [prezzoDaTrenord].
+     *
+     * Non e' il costo del viaggio — quello resta ignoto, e per questo [price] e'
+     * null — ma dire la parte che si conosce, etichettata, e' piu' utile che
+     * tacere tutto. Distinto da [price] apposta: [price] e' il totale di una
+     * soluzione intera, questo e' un pezzo. Nullo quando nessuna parte ha un prezzo.
      */
     val partialPrice: Price? = null,
     /**
@@ -127,6 +131,14 @@ data class Journey(
      * per cui avverte che il prezzo puo' essere parziale.
      */
     val assembled: Boolean = false,
+    /**
+     * La fonte dichiara che il biglietto per questa partenza non si vende piu':
+     * e' gia' passata in tabella. Trenord lo scrive per soluzione —
+     * `PAST_DEPARTURE_DATE`, e nessun titolo allegato — e cosi' il RE 2844 del
+     * 18/09/2026, ancora in banchina a +48, arrivava senza prezzo e senza un
+     * perche'. Vedi `VenditaChiusa` nella lista dei risultati.
+     */
+    val venditaChiusa: Boolean = false,
 ) {
     val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
     val isDirect: Boolean get() = legs.size <= 1
@@ -219,6 +231,13 @@ data class Leg(
     /** Solo i treni si possono seguire in tempo reale. */
     val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
 
+    /**
+     * Il tratto urbano di Le Frecce ("UB"), da una stazione all'altra della
+     * stessa citta'. Il prezzo della soluzione non lo comprende: lo scrive il
+     * sito stesso, "Urban transport (not included in the price)".
+     */
+    val urbano: Boolean get() = category.equals("UB", ignoreCase = true)
+
     /** Vero per il trasferimento a piedi di un viaggio misto. */
     val isWalk: Boolean get() = kind == TransportKind.WALK
 
@@ -291,9 +310,42 @@ val Journey.declaredState: TrainState?
         else -> TrainState.REGULAR
     }
 
+/**
+ * Una soluzione Le Frecce senza prezzo, con dei treni: il loro prezzo si puo'
+ * chiedere a Trenord. Vedi `JourneyRepository.prezziDeiTreni`.
+ *
+ * Succede poco, da quando i prezzi si prendono dal sito di Trenitalia: nella
+ * zona urbana di Milano, che Trenitalia non prezza e Trenord si', e quando il
+ * sito non risponde.
+ */
+val Journey.prezzoDaTrenord: Boolean
+    get() = source == JourneySource.LEFRECCE && !assembled &&
+        price == null && partialPrice == null &&
+        legs.any { it.isTrain }
+
+/**
+ * Se il prezzo dei treni e' il prezzo di tutto: vero quando la soluzione e' fatta
+ * solo di treni. Con un tratto urbano o in autobus e' un prezzo parziale, e il
+ * biglietto di quel tratto resta fuori.
+ */
+val Journey.soloTreni: Boolean
+    get() = legs.all { it.isTrain }
+
 /** Vero per gli stati che dicono "questa corsa, tutta o in parte, non si fa". */
 val TrainState.soppressione: Boolean
     get() = this == TrainState.CANCELLED || this == TrainState.PARTIALLY_CANCELLED
+
+/**
+ * Vero per una corsa che viaggia, ma non come in orario: deviata, o soppressa
+ * solo in parte.
+ *
+ * Accanto a questi stati **il ritardo resta**: sono due notizie, e l'una non
+ * sostituisce l'altra. Chiesto il 18/09/2026 guardando il FR 9588, deviato per
+ * un incendio e a +193, che in cima diceva soltanto «Percorso variato». Una
+ * soppressione totale no: di un treno che non viaggia non c'e' ritardo da dire.
+ */
+val TrainState.variazione: Boolean
+    get() = this == TrainState.DIVERTED || this == TrainState.PARTIALLY_CANCELLED
 
 enum class StopStatus { FUTURE, DONE, CURRENT, CANCELLED }
 
@@ -328,6 +380,25 @@ data class TrainStatus(
      * treno puntuale.
      */
     val realtime: Boolean = true,
+    /**
+     * Perche' la corsa oggi non fa il suo percorso, quando qualcuno lo dice.
+     *
+     * Lo dice solo Trenord, e solo sulle sue corse: ViaggiaTreno scrive *cosa*
+     * cambia in [notice] ma non il perche' — nel REG 2833 del 18/09/2026, col
+     * capolinea spostato da Milano Centrale a Sesto, `provvedimenti`,
+     * `anormalita`, `segnalazioni` e `motivoRitardoPrevalente` erano tutti
+     * vuoti, mentre Trenord scriveva "Richiesta Impresa Ferroviaria". Il testo e'
+     * quello della fonte, com'e'.
+     */
+    val motivo: String? = null,
+    /**
+     * Gli avvisi di circolazione che Trenord attacca alla corsa: spiegano il
+     * ritardo quando il ritardo ha una causa sola, per esempio "Circolazione
+     * fortemente rallentata, per accertamenti delle forze dell'ordine nella
+     * stazione di MILANO ROGOREDO", che il 18/09/2026 stava su 61 corse lombarde
+     * su 189.
+     */
+    val avvisi: List<String> = emptyList(),
 ) {
     /** Indice dell'ultima fermata effettuata, -1 se non ancora partito. */
     val currentStopIndex: Int
@@ -367,6 +438,15 @@ data class Stop(
      * precisi quanto gli altri.
      */
     val detected: Boolean = true,
+    /**
+     * Fermata che la corsa oggi fa ma che il suo orario non ha: un capolinea
+     * anticipato, o una stazione in piu' al posto di un treno soppresso.
+     *
+     * Va detto perche' da sola, fra le altre, sembra una fermata come tutte e
+     * non spiega niente; accanto alla soppressa che sostituisce, racconta la
+     * variazione. Solo ViaggiaTreno la dichiara.
+     */
+    val straordinaria: Boolean = false,
 ) {
     /** Se true, i minuti mostrati sono una proiezione e non una misura. */
     val isEstimate: Boolean get() = status == StopStatus.FUTURE

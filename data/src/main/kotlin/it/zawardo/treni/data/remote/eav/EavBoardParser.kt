@@ -52,8 +52,14 @@ internal object EavBoardParser {
      */
     private const val SOPPRESSO = "SOPPRESSO"
 
+    /** Lo stato "in ritardo" in `informazioni`, anche quando i minuti mancano. */
+    private const val IN_RITARDO = "IN RITARDO"
+
+    /** La traduzione che EAV mette accanto allo stato, dopo un altro trattino. */
+    private val STATO_IN_INGLESE = setOf("DELAYED", "CANCELLED", "SUPPRESSED")
+
     /**
-     * Interpreta la risposta di `ws_getData.php`.
+     * Interpreta la risposta di `ws_getData_pis.php`.
      *
      * [departureDateMillis] e' il giorno di riferimento: il tabellone non lo
      * dichiara mai, perche' per lui esiste solo adesso.
@@ -94,6 +100,18 @@ internal object EavBoardParser {
          */
         val ritardo = ritardoGrezzo.toIntOrNull()?.coerceAtLeast(0) ?: 0
 
+        /*
+         * In ritardo, ma senza dire di quanto.
+         *
+         * Il 18/09/2026 alle 18:12 Dazio elencava venti partenze, dalle 05:04
+         * alle 17:33, con "IN RITARDO - DELAYED" fra le informazioni e `RIT.`
+         * al posto dei minuti; Soccavo una, delle 16:38. Letto solo il numero,
+         * uscivano puntuali. Quelle passate il tabellone le toglie comunque;
+         * su una futura, "in ritardo" senza cifra e' tutto quello che si sa, ed
+         * e' diverso da "in orario".
+         */
+        val inRitardo = informazioni.contains(IN_RITARDO, ignoreCase = true)
+
         val categoria = testo(CATEGORIA, tr)?.takeIf { it.isNotBlank() }
         val binario = binarioPulito(testo(BINARIO, tr))
 
@@ -116,7 +134,7 @@ internal object EavBoardParser {
             actualPlatform = binario,
             state = when {
                 soppresso -> TrainState.CANCELLED
-                ritardo > 0 -> TrainState.DELAYED
+                ritardo > 0 || inRitardo -> TrainState.DELAYED
                 else -> TrainState.REGULAR
             },
             // Il tabellone non dice se il treno e' gia' in banchina.
@@ -163,6 +181,10 @@ internal object EavBoardParser {
      * Torre Annunziata e' l'informazione decisiva, e lo stato della corsa
      * ("SOPPRESSO", "IN RITARDO"), che l'app rappresenta gia' per conto suo.
      * Ripetere il secondo accanto al primo sarebbe rumore.
+     *
+     * Lo stato arriva in due lingue separate dallo stesso trattino, "IN RITARDO
+     * - DELAYED": scartato l'italiano, l'inglese restava e compariva come nota
+     * di percorso. Il 18/09/2026 erano 50 righe su 3118.
      */
     fun noteDiPercorso(informazioni: String?): String? = informazioni
         ?.split(" - ")
@@ -170,7 +192,8 @@ internal object EavBoardParser {
         ?.filter { it.isNotBlank() }
         ?.filterNot {
             it.contains(SOPPRESSO, ignoreCase = true) ||
-                it.startsWith("IN RITARDO", ignoreCase = true)
+                it.startsWith(IN_RITARDO, ignoreCase = true) ||
+                STATO_IN_INGLESE.any { parola -> it.equals(parola, ignoreCase = true) }
         }
         ?.joinToString(" · ")
         ?.takeIf { it.isNotBlank() }

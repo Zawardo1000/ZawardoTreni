@@ -137,6 +137,28 @@ data class TrenordTrainDto(
     /** Falso quando la corsa non e' tracciata: non va spacciata per "in orario". */
     @SerialName("has_live_info") val hasLiveInfo: Boolean = false,
     @SerialName("train_operator") val operator: String? = null,
+    /**
+     * Perche' la corsa e' soppressa in tutto o in parte: "Richiesta Impresa
+     * Ferroviaria" sul REG 2833 del 18/09/2026. E' l'unica fonte che lo dica.
+     */
+    @SerialName("suppression_reason") val suppressionReason: String? = null,
+    val alerts: List<TrenordTrainAlertDto> = emptyList(),
+)
+
+/**
+ * Un avviso attaccato alla singola corsa.
+ *
+ * Visti il 18/09/2026 su 189 corse lombarde due [type]: `suppressed`, la
+ * soppressione della corsa, che ha anche [reason]; e `custom_high_severity`,
+ * un avviso di linea senza motivo — "+Circolazione fortemente rallentata, per
+ * accertamenti delle forze dell'ordine nella stazione di MILANO ROGOREDO. ",
+ * col segno piu' davanti e lo spazio in fondo, su 61 corse.
+ */
+@Serializable
+data class TrenordTrainAlertDto(
+    val type: String? = null,
+    val message: String? = null,
+    val reason: String? = null,
 )
 
 @Serializable
@@ -144,6 +166,14 @@ data class TrenordStopDto(
     val station: TrenordStationDto? = null,
     @SerialName("arr_time") val scheduledArrival: String? = null,
     @SerialName("dep_time") val scheduledDeparture: String? = null,
+    /**
+     * Quanti giorni dopo la data della soluzione cadono arrivo e partenza: 1
+     * dopo la mezzanotte. Il 18/09/2026, Milano Porta Garibaldi - Melzo delle
+     * 23:56: il REG 10911 ripartiva da Milano Centrale alle 00:15 con
+     * `dep_day_offset` 1. Senza leggerlo, quelle 00:15 cadevano il 18.
+     */
+    @SerialName("arr_day_offset") val arrivalDayOffset: Int? = null,
+    @SerialName("dep_day_offset") val departureDayOffset: Int? = null,
     /**
      * Dove cade questa fermata rispetto al TUO viaggio, non rispetto alla corsa.
      *

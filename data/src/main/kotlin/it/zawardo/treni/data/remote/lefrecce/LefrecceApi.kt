@@ -1,6 +1,8 @@
 package it.zawardo.treni.data.remote.lefrecce
 
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -35,7 +37,7 @@ interface LefrecceApi {
      * Apre una sessione di ricerca. [departureTime] in ISO locale senza offset,
      * es. `2026-08-28T08:00:00.000`.
      *
-     * Il `searchId` restituito **scade dopo circa 10 minuti**.
+     * Il `searchId` restituito **scade dopo 15 minuti** (misurato il 18/09/2026).
      */
     @GET("search")
     suspend fun search(
@@ -63,4 +65,22 @@ interface LefrecceApi {
         @Query("offset") offset: Int = 0,
         @Query("limit") limit: Int = 10,
     ): List<SolutionDto>
+
+    /**
+     * Le soluzioni come le chiede il **sito** di Trenitalia, che le prezza.
+     *
+     * Lo stesso BFF ha due porte: `/app/`, quella di [search] e [solutions], e
+     * `/website/`, quella che usa lefrecce.it. Confrontate il 18/09/2026 alla
+     * stessa ora sulle stesse tratte: dall'app 3 ricerche su 16 tornavano senza
+     * alcun prezzo, Frecce comprese, e i regionali Trenord di Milano-Brescia
+     * avevano il prezzo in una ricerca su otto; dal sito 16 su 16, e i regionali
+     * otto su otto (RE a 8,40 euro). In 24 ricerche piu' nessun errore.
+     *
+     * Le sue tratte pero' non hanno i codici delle stazioni, solo i nomi, e
+     * all'app servono per il tempo reale e per i binari: le soluzioni restano
+     * quelle dell'app, e da qui si prendono i prezzi. Dieci per volta, a
+     * qualunque limite: si pagina con `criteria.offset`.
+     */
+    @POST("https://www.lefrecce.it/Channels.Website.BFF.WEB/website/ticket/solutions")
+    suspend fun soluzioniDelSito(@Body richiesta: RichiestaSito): RispostaSito
 }

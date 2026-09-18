@@ -6,25 +6,38 @@ import it.zawardo.treni.data.mapper.toBoardEntry
 import it.zawardo.treni.data.mapper.toJourney
 import it.zawardo.treni.data.mapper.toStation
 import it.zawardo.treni.data.mapper.toTrainStatus
+import it.zawardo.treni.data.remote.lefrecce.CriteriSito
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
+import it.zawardo.treni.data.remote.lefrecce.RicercaAvanzataSito
+import it.zawardo.treni.data.remote.lefrecce.RichiestaSito
+import it.zawardo.treni.data.remote.lefrecce.SoluzioneSito
+import it.zawardo.treni.data.remote.viaggiatreno.InfomobilitaParser
+import it.zawardo.treni.data.remote.viaggiatreno.NotiziaCorsa
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.NearbyStation
+import it.zawardo.treni.domain.model.Price
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.conAvvisiDa
 import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.conRitardoDaFermo
 import it.zawardo.treni.domain.model.matchesCategory
+import it.zawardo.treni.domain.model.prezzoDaTrenord
 import it.zawardo.treni.domain.model.stessaStazione
+import it.zawardo.treni.domain.model.vedePartireDa
+import java.io.IOException
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -35,13 +48,17 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
+import retrofit2.HttpException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Ricerca stazioni. */
 class StationRepository(
@@ -155,10 +172,16 @@ data class SearchOutcome(
     val journeys: List<Journey> = emptyList(),
     val alerts: List<ServiceAlert> = emptyList(),
     /**
-     * Le Frecce ha risposto senza alcun prezzo. E' intermittente, e una ricerca
-     * nuova puo' riportarli: vedi [JourneyRepository.prezziLeFrecce].
+     * Le Frecce ha risposto senza alcun prezzo. E' intermittente, e la stessa
+     * ricerca rifatta poco dopo puo' riportarli: vedi [JourneyRepository.prezziLeFrecce].
      */
     val prezziAssenti: Boolean = false,
+    /**
+     * Le Frecce non ha risposto, nemmeno ai nuovi tentativi: le soluzioni
+     * nazionali mancano per un guasto, non perche' non ce ne siano. Chi mostra
+     * la lista deve dirlo, o un elenco vuoto sembra una tratta senza treni.
+     */
+    val nazionaleNonRisponde: Boolean = false,
 )
 
 /**
@@ -185,10 +208,6 @@ class JourneyRepository(
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ITALY)
 
     /**
-     * Il `searchId` restituito dalla `/search` scade in circa 10 minuti, quindi
-     * le due chiamate restano accoppiate qui dentro e non vengono mai separate.
-     */
-    /**
      * Interroga le due sorgenti **in parallelo** e ne fonde i risultati.
      *
      * In serie si sommerebbero i tempi di due backend lenti. Se una fallisce si
@@ -208,7 +227,11 @@ class JourneyRepository(
                 // (Sorrento-EAV) va chiesta a Le Frecce col suo id nazionale,
                 // altrimenti il codice sintetico non instrada. Vedi Station.idNazionale.
                 runCatching { cercaLeFrecce(from.perNazionale(), to.perNazionale(), departure, limit) }
-                    .getOrDefault(RisultatoLeFrecce())
+                    .getOrElse { e ->
+                        if (e is CancellationException) throw e
+                        // Un guasto si dichiara; una richiesta rifiutata resta muta, come prima.
+                        RisultatoLeFrecce(nonRisponde = e.passeggero())
+                    }
             } else {
                 RisultatoLeFrecce()
             }
@@ -228,6 +251,7 @@ class JourneyRepository(
             journeys = merge(fromLefrecce.journeys, fromTrenord?.journeys.orEmpty(), departure, limit),
             alerts = fromTrenord?.alerts.orEmpty(),
             prezziAssenti = fromLefrecce.senzaPrezzi,
+            nazionaleNonRisponde = fromLefrecce.nonRisponde,
         )
     }
 
@@ -251,33 +275,146 @@ class JourneyRepository(
      * soluzione (vedi [chiaveSoluzione]).
      *
      * Serve quando la prima e' tornata tutta senza prezzi
-     * ([SearchOutcome.prezziAssenti]). La stessa sessione richiamata da' lo
-     * stesso esito; una sessione nuova invece puo' riportarli. Misurato
-     * l'11/09/2026 su Varese-Brescia: la stessa ricerca ripetuta ha dato 8
-     * prezzi, poi 0, poi 0; per il giorno dopo 0, 8, 0.
+     * ([SearchOutcome.prezziAssenti]). Misurato l'11/09/2026 su Varese-Brescia:
+     * la stessa ricerca ripetuta ha dato 8 prezzi, poi 0, poi 0; per il giorno
+     * dopo 0, 8, 0. Nella stessa sessione, stessa tratta e stessa ora ridanno lo
+     * stesso `searchId` (verificato il 18/09/2026): a riportare i prezzi e' il
+     * tempo che passa — lo stesso `searchId`, riletto a una decina di secondi di
+     * distanza, e' passato da 4 prezzi a nessuno e di nuovo a 4.
      */
     suspend fun prezziLeFrecce(
         from: Station,
         to: Station,
         departure: LocalDateTime,
         limit: Int = 10,
-    ): Map<String, it.zawardo.treni.domain.model.Price> =
+    ): Map<String, Price> =
         cercaLeFrecce(from.perNazionale(), to.perNazionale(), departure, limit).journeys
             .mapNotNull { j -> j.price?.let { chiaveSoluzione(j) to it } }
             .toMap()
 
+    /**
+     * Il prezzo dei treni delle soluzioni Le Frecce che un prezzo non hanno,
+     * chiesto a Trenord ([prezzoDaTrenord]). Per chiave di soluzione, come
+     * [prezziLeFrecce].
+     *
+     * Il prezzo di solito lo porta gia' la ricerca, dal sito di Trenitalia (vedi
+     * `LefrecceApi.soluzioniDelSito`). Qui arriva quel che resta: le tratte che
+     * Trenitalia non prezza affatto — i viaggi dentro la zona urbana di Milano,
+     * Milano Centrale-Lambrate zero prezzi su dieci il 18/09/2026, che Trenord
+     * vende a tariffa STIBM — e le ricerche in cui il sito non ha risposto.
+     *
+     * Gli si chiede la parte in treno — dalla stazione del primo treno a quella
+     * dell'ultimo — e si prende la sua soluzione con gli stessi treni alla stessa
+     * ora. Su una soluzione di soli treni e' il prezzo di tutto; con un tratto
+     * urbano e' quello del treno, e il biglietto urbano resta fuori: chi mostra il
+     * prezzo lo dice.
+     *
+     * Una ricerca Trenord torna con piu' partenze: le soluzioni con la stessa
+     * parte in treno ne condividono una finche' le copre, e se ne apre un'altra
+     * solo per un treno che quella non aveva. Dove Trenord risponde senza alcun
+     * prezzo — fuori dalla Lombardia non vende — per quella tratta ci si ferma.
+     */
+    suspend fun prezziDeiTreni(viaggi: List<Journey>): Map<String, Price> {
+        val trenord = trenord ?: return emptyMap()
+        val prezzi = mutableMapOf<String, Price>()
+        val perTratta = viaggi.filter { it.prezzoDaTrenord }.groupBy { viaggio ->
+            val treni = viaggio.legs.filter { it.isTrain }
+            treni.first().from.rfiCode to treni.last().to.rfiCode
+        }
+        for (gruppo in perTratta.values) {
+            val treniDelPrimo = gruppo.first().legs.filter { it.isTrain }
+            val da = treniDelPrimo.first().from
+            val a = treniDelPrimo.last().to
+            if (!trenord.covers(da, a)) continue
+            val trovate = mutableListOf<Journey>()
+            for (viaggio in gruppo.sortedBy { it.departure }) {
+                val treni = viaggio.legs.filter { it.isTrain }
+                var stessa = trovate.firstOrNull { it.haGliStessiTreniDi(treni) }
+                if (stessa == null) {
+                    val nuove = runCatching { trenord.search(da, a, treni.first().departure).journeys }
+                        .getOrDefault(emptyList())
+                    // Trenord che non risponde, che non ha niente o che qui non
+                    // vende: inutile insistere su questa tratta.
+                    if (nuove.none { it.price != null }) break
+                    trovate += nuove
+                    stessa = trovate.firstOrNull { it.haGliStessiTreniDi(treni) }
+                }
+                stessa?.price?.let { prezzi[chiaveSoluzione(viaggio)] = it }
+            }
+        }
+        return prezzi
+    }
+
+    /** Stessi treni, nello stesso ordine, in partenza entro un paio di minuti. */
+    private fun Journey.haGliStessiTreniDi(treni: List<Leg>): Boolean {
+        val suoi = legs.filter { it.isTrain }
+        return suoi.size == treni.size && suoi.zip(treni).all { (suo, altro) ->
+            suo.trainNumber == altro.trainNumber &&
+                abs(Duration.between(suo.departure, altro.departure).toMinutes()) <= 2
+        }
+    }
+
+    /**
+     * Una ricerca Le Frecce, rifatta quando il BFF ha un guasto di passaggio.
+     *
+     * Una ricerca che torna vuota senza che la tratta lo sia ha sempre la stessa
+     * firma: `/search` risponde bene, con decine di soluzioni dichiarate, e
+     * `/solutions` risponde **500** — vuoto, o con un messaggio generico in una
+     * lingua a caso. Misurato il 18/09/2026 su circa 190 ricerche: il 7,5% delle
+     * ricerche nuove, a grappoli, quattro guasti su cinque in un minuto e mezzo.
+     * Fino ad allora l'errore finiva inghiottito, e la schermata diceva
+     * "Nessun collegamento trovato".
+     *
+     * Si rifa' solo cio' che e' passeggero ([passeggero]): un 5xx, un errore di
+     * rete, una risposta monca. Mai un vuoto vero, che e' `totalSolutions` a
+     * zero e `/solutions` a lista vuota; e mai un 4xx, che e' una richiesta
+     * sbagliata e sbagliata resta.
+     *
+     * Rifarla subito non serve: sullo stesso `searchId`, entro due secondi,
+     * riesce una volta su cinque; dopo due secondi tre su quattro, dopo cinque
+     * quattro su quattro. Di qui le attese di [RIPROVE_LE_FRECCE].
+     */
     private suspend fun cercaLeFrecce(
         from: Station,
         to: Station,
         departure: LocalDateTime,
         limit: Int,
+    ): RisultatoLeFrecce {
+        var tentativi = 0
+        while (true) {
+            try {
+                return unaRicercaLeFrecce(from, to, departure, limit)
+            } catch (e: Exception) {
+                if (e is CancellationException || !e.passeggero() || tentativi == RIPROVE_LE_FRECCE.size) throw e
+                delay(RIPROVE_LE_FRECCE[tentativi++])
+            }
+        }
+    }
+
+    /**
+     * La `/search` e la sua `/solutions`, sempre in coppia. Il `searchId` scade
+     * 15 minuti dopo, e nella stessa sessione stessa tratta e stessa ora ridanno
+     * lo stesso: le due chiamate restano insieme qui dentro e non si separano mai.
+     */
+    private suspend fun unaRicercaLeFrecce(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        limit: Int,
     ): RisultatoLeFrecce = withContext(Dispatchers.IO) {
+        // I prezzi dal sito, in parallelo, tutte le pagine che servono a [limit]:
+        // vedi [conPrezziDelSito].
+        val pagineDelSito = (0 until pagineDelSitoPer(limit)).map { pagina ->
+            async { paginaDelSito(from, to, departure, offset = pagina * SOLUZIONI_PER_PAGINA) }
+        }
+
         val session = lefrecce.search(
             startLocationId = from.locationId,
             endLocationId = to.locationId,
             departureTime = departure.atZone(ROME).format(bffFormat),
         )
-        if (session.searchId.isBlank()) return@withContext RisultatoLeFrecce()
+        // Anche una ricerca vera senza treni ha il suo searchId: senza, e' un guasto.
+        if (session.searchId.isBlank()) throw RispostaMonca("searchId vuoto")
 
         /*
          * Si chiede piu' del necessario e si tronca dopo il filtro.
@@ -289,10 +426,20 @@ class JourneyRepository(
          * tornassero soluzioni diverse e "funzionasse".
          */
         val soluzioni = lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit * OVERFETCH)
-        val viaggi = soluzioni
+        if (soluzioni.isEmpty() && session.totalSolutions > 0) {
+            throw RispostaMonca("dichiarate ${session.totalSolutions} soluzioni, arrivate nessuna")
+        }
+        val dellApp = soluzioni
             .mapNotNull { it.toJourney() }
             .filter { it.legs.isNotEmpty() }
             .take(limit)
+        // Coi prezzi gia' tutti, il sito non aggiungerebbe niente: non lo si aspetta.
+        val viaggi = if (dellApp.none { it.price == null }) {
+            pagineDelSito.forEach { it.cancel() }
+            dellApp
+        } else {
+            conPrezziDelSito(dellApp, from, to, departure, pagineDelSito.map { it.await() })
+        }
         RisultatoLeFrecce(
             journeys = viaggi,
             /*
@@ -307,14 +454,169 @@ class JourneyRepository(
         )
     }
 
-    /** Le soluzioni di Le Frecce, e se sono arrivate tutte senza prezzo. */
+    /**
+     * I prezzi del sito sulle soluzioni dell'app che non ne hanno.
+     *
+     * Le soluzioni sono quelle dell'app, che ha i codici delle stazioni; i
+     * prezzi quelli del sito, che li ha tutti: vedi `LefrecceApi.soluzioniDelSito`.
+     * Si accoppiano per partenza al minuto e numeri dei treni — il tratto urbano
+     * non conta, il sito non gli da' un numero. Il sito risponde dieci soluzioni
+     * alla volta: le pagine che servono al numero chiesto partono insieme, subito,
+     * e se l'app ne ha date di piu' tarde se ne chiede un'altra, fino a
+     * [PAGINE_DEL_SITO]. Misurato il 18/09/2026 su 12 ricerche da quindici
+     * soluzioni: 178 prezzi su 180, contro circa sei su dieci dalla sola app.
+     *
+     * Il sito che non risponde non toglie niente: restano i prezzi che l'app
+     * aveva, e gli altri li cerca chi viene dopo.
+     */
+    private suspend fun conPrezziDelSito(
+        viaggi: List<Journey>,
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        pagineArrivate: List<List<SoluzioneSito>?>,
+    ): List<Journey> {
+        // Una pagina che non risponde interrompe la fila: le successive non si sanno accostare.
+        val arrivate = pagineArrivate.takeWhile { it != null }.filterNotNull()
+        if (viaggi.none { it.price == null } || arrivate.isEmpty()) return viaggi
+        val delSito = arrivate.flatten().toMutableList()
+        var pagine = arrivate.size
+        val ultima = viaggi.maxOf { it.departure }
+        while (pagine < PAGINE_DEL_SITO && delSito.size == pagine * SOLUZIONI_PER_PAGINA &&
+            delSito.mapNotNull { it.partenza() }.maxOrNull()?.isBefore(ultima) == true
+        ) {
+            val altra = paginaDelSito(from, to, departure, offset = pagine * SOLUZIONI_PER_PAGINA) ?: break
+            delSito += altra
+            pagine++
+        }
+        val prezzi = delSito.mapNotNull { sito ->
+            val partenza = sito.partenza() ?: return@mapNotNull null
+            val prezzo = sito.prezzo() ?: return@mapNotNull null
+            chiavePrezzo(partenza, sito.trains.mapNotNull { it.name }) to prezzo
+        }.toMap()
+        return viaggi.map { viaggio ->
+            if (viaggio.price != null) return@map viaggio
+            val chiave = chiavePrezzo(viaggio.departure, viaggio.legs.filter { it.isTrain }.mapNotNull { it.trainNumber })
+            prezzi[chiave]?.let { viaggio.copy(price = it) } ?: viaggio
+        }
+    }
+
+    /**
+     * Una pagina del sito; null se non risponde, o non in tempo, che qui non e'
+     * un errore. Il tempo e' contato ([ATTESA_SITO_MS]): la ricerca aspetta i
+     * suoi prezzi, e un sito lento non deve rallentare la lista.
+     */
+    private suspend fun paginaDelSito(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        offset: Int,
+    ): List<SoluzioneSito>? = try {
+        withTimeoutOrNull(ATTESA_SITO_MS) { richiestaDelSito(from, to, departure, offset) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    private suspend fun richiestaDelSito(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        offset: Int,
+    ): List<SoluzioneSito> =
+        lefrecce.soluzioniDelSito(
+            RichiestaSito(
+                departureLocationId = from.locationId,
+                arrivalLocationId = to.locationId,
+                departureTime = departure.format(orarioDelSito),
+                adults = 1,
+                children = 0,
+                criteria = CriteriSito(
+                    frecceOnly = false,
+                    regionalOnly = false,
+                    intercityOnly = false,
+                    tourismOnly = false,
+                    noChanges = false,
+                    order = "DEPARTURE_DATE",
+                    offset = offset,
+                    limit = SOLUZIONI_PER_PAGINA,
+                ),
+                advancedSearchRequest = RicercaAvanzataSito(bestFare = false),
+            ),
+        ).solutions.mapNotNull { it.solution }
+
+    /**
+     * Le pagine del sito da chiedere subito per [limit] soluzioni. Una basta alla
+     * prima ricerca, da otto; per le pagine larghe ne serve una in piu' del
+     * conto, perche' il sito elenca anche soluzioni che l'app scarta: su Roma -
+     * Firenze, il 18/09/2026, quindici soluzioni dell'app chiedevano la terza
+     * pagina, e chiederla dopo le altre portava la ricerca a nove secondi.
+     */
+    private fun pagineDelSitoPer(limit: Int): Int =
+        if (limit <= SOLUZIONI_PER_PAGINA) 1
+        else ((limit + SOLUZIONI_PER_PAGINA - 1) / SOLUZIONI_PER_PAGINA + 1).coerceAtMost(PAGINE_DEL_SITO)
+
+    /** Il sito scrive l'ora locale senza fuso, al contrario della `/search` dell'app. */
+    private val orarioDelSito: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS")
+
+    private fun SoluzioneSito.partenza(): LocalDateTime? = departureTime?.let {
+        runCatching { OffsetDateTime.parse(it).atZoneSameInstant(ROME).toLocalDateTime() }.getOrNull()
+    }
+
+    private fun SoluzioneSito.prezzo(): Price? {
+        val p = price ?: return null
+        val euro = p.amount?.takeIf { it > 0.0 && !p.hideAmount } ?: return null
+        return Price(
+            amount = "%.2f".format(Locale.US, euro),
+            currency = "EUR",
+            saleable = status == "SALEABLE",
+        )
+    }
+
+    /**
+     * Partenza al minuto e numeri dei treni: quanto basta a riconoscere la stessa
+     * soluzione dall'app e dal sito. Solo i numeri veri — il tratto urbano l'app
+     * lo chiama "Urb" e il sito null.
+     */
+    private fun chiavePrezzo(partenza: LocalDateTime, numeri: List<String>): String =
+        partenza.withSecond(0).withNano(0).toString() + "|" +
+            numeri.filter { n -> n.isNotEmpty() && n.all { it.isDigit() } }.sorted().joinToString(",")
+
+    /** Le soluzioni di Le Frecce, se sono arrivate senza prezzi, e se il BFF non ha risposto. */
     private data class RisultatoLeFrecce(
         val journeys: List<Journey> = emptyList(),
         val senzaPrezzi: Boolean = false,
+        val nonRisponde: Boolean = false,
     )
+
+    /** Una risposta a cui manca un pezzo che una risposta vera ha sempre. */
+    private class RispostaMonca(motivo: String) : IOException("Le Frecce: $motivo")
+
+    /** Un guasto che la stessa ricerca, poco dopo, puo' non avere: vedi [cercaLeFrecce]. */
+    private fun Throwable.passeggero(): Boolean = when (this) {
+        is HttpException -> code() >= 500
+        is IOException -> true
+        else -> false
+    }
 
     private companion object {
         const val OVERFETCH = 3
+
+        /** Quante soluzioni da' il sito per pagina, qualunque sia il limite chiesto. */
+        const val SOLUZIONI_PER_PAGINA = 10
+
+        /** Fin dove si pagina il sito per coprire le soluzioni dell'app. */
+        const val PAGINE_DEL_SITO = 3
+
+        /**
+         * Quanto si aspetta una pagina del sito: il 18/09/2026 rispondeva in
+         * 1-3 secondi, 4 al piu' lento su 40 richieste.
+         */
+        const val ATTESA_SITO_MS = 6_000L
+
+        /** Le attese prima di ogni nuovo tentativo: vedi [cercaLeFrecce]. */
+        val RIPROVE_LE_FRECCE = listOf(2_000L, 5_000L)
     }
 }
 
@@ -427,14 +729,75 @@ class TrainStatusRepository(
      * Un treno fermo all'origine oltre la sua ora esce col ritardo che ha
      * davvero, non con lo zero di ViaggiaTreno: vedi `conRitardoDaFermo`. Qui e
      * non nel mapper, perche' e' il solo punto da cui passano tutte le corse
-     * ViaggiaTreno e perche' vuole l'ora di adesso.
+     * ViaggiaTreno e perche' vuole l'ora di adesso. Non dove la corsa di ieri
+     * prova il contrario: vedi [nonPartitoVuolDireFermo].
      */
     suspend fun status(ref: TrainRef): TrainStatus? = withContext(Dispatchers.IO) {
         val resp = runCatching {
             viaggiaTreno.andamentoTreno(ref.originCode, ref.number, ref.departureDateMillis)
         }.getOrElse { return@withContext null }
         if (!resp.isSuccessful || resp.code() == 204) return@withContext null
-        resp.body()?.toTrainStatus()?.conRitardoDaFermo(LocalDateTime.now(ROME))
+        val stato = resp.body()?.toTrainStatus() ?: return@withContext null
+        val daFermo = stato.conRitardoDaFermo(LocalDateTime.now(ROME))
+        if (daFermo.delayMinutes != stato.delayMinutes && nonPartitoVuolDireFermo(ref)) daFermo else stato
+    }
+
+    /**
+     * Le risposte di [nonPartitoVuolDireFermo], per corsa: la chiave porta il
+     * giorno. Non di piu', perche' la risposta dipende da com'e' andata ieri, e
+     * un tratto fatto in bus per lavori prima o poi torna in treno. Concorrente
+     * come [senzaTrenord].
+     */
+    private val partenzeViste = ConcurrentHashMap<String, Boolean>()
+
+    /**
+     * Se il «non partito» di ViaggiaTreno, per questa corsa, puo' voler dire
+     * fermo all'origine. Falso solo con la prova del contrario.
+     *
+     * A Milano Centrale lo vuol dire: il RE 2824 del 17/09/2026 era in banchina.
+     * Il REG 2987 del 18/09/2026 invece era dato in partenza da Gallarate alle
+     * 22:54, e Gallarate quella sera non l'ha mai visto: Saronno-Malpensa-
+     * Gallarate era chiusa e fatta in bus, e il treno partiva da Saronno. Lo
+     * diceva la ricerca di Trenord, che lo proponeva solo «Saronno 23:36 →
+     * Milano Centrale»; la corsa no, ne' `andamentoTreno` ne' quella di Trenord
+     * segnavano soppresso il tratto. ViaggiaTreno l'ha tenuto «non partito» fino
+     * a Saronno, alle 23:43: contato da Gallarate, alle 23:44 era a +50, e da
+     * Saronno era partito con sette minuti.
+     *
+     * La prova e' la corsa di ieri ([vedePartireDa]): se ieri ViaggiaTreno il
+     * treno l'ha visto solo piu' avanti, e mai partire dall'origine, il silenzio
+     * di oggi non dice che sia fermo li'. Il 2987 e il 2989 non avevano l'orario
+     * reale a Gallarate ne' il 18 ne' il 17.
+     *
+     * **Quella prova c'e' di rado, e senza si fa come prima.** ViaggiaTreno la
+     * corsa di ieri la da' solo se e' arrivata oggi, cioe' se ha passato la
+     * mezzanotte: il 19/09/2026 alle 00:30 nove corse diurne del 18 — il RE 2824,
+     * il FR 9303 fra le altre — rispondevano 204, il 2987 del 18 no. Per un treno
+     * di giorno quindi vale la regola di [conRitardoDaFermo] com'era, ed e' il
+     * caso del RE 2824, fermo davvero. La prova copre le corse serali, che sono
+     * anche quelle dei lavori notturni.
+     *
+     * Una chiamata in piu', solo sui treni «non partiti» oltre la loro ora, e una
+     * volta per corsa: la risposta si ricorda, anche vuota. Un errore di rete no,
+     * e la volta dopo si richiede.
+     */
+    private suspend fun nonPartitoVuolDireFermo(ref: TrainRef): Boolean {
+        val chiave = "${ref.number}|${ref.originCode}|${ref.departureDateMillis}"
+        partenzeViste[chiave]?.let { return it }
+        val ieri = ref.departureDateInRome().minusDays(1).atStartOfDay(ROME).toInstant().toEpochMilli()
+        val risposta = try {
+            viaggiaTreno.andamentoTreno(ref.originCode, ref.number, ieri)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return true
+        }
+        if (!risposta.isSuccessful) return true
+        val ieriVisto = risposta.takeIf { it.code() != 204 }?.body()?.toTrainStatus()?.vedePartireDa(ref.originCode)
+        // Senza prova, anche con la corsa di ieri che non c'e': come prima.
+        val fermo = ieriVisto != false
+        partenzeViste[chiave] = fermo
+        return fermo
     }
 
     /**
@@ -459,6 +822,11 @@ class TrainStatusRepository(
      * bussato trenta volte per sentirsi rispondere trenta volte la stessa lista
      * vuota. Vedi [senzaTrenord].
      *
+     * Con la stessa lettura arriva, gratis, il **perche'** di una variazione e
+     * gli avvisi di circolazione, che ViaggiaTreno non pubblica: vedi
+     * [conAvvisiDa]. Su una corsa in viaggio la chiamata parte comunque, perche'
+     * alle fermate da fare il binario vero non c'e' ancora.
+     *
      * Il chiamante deve comunque rispettare l'interruttore della sorgente: qui
      * non si leggono le impostazioni.
      */
@@ -480,7 +848,7 @@ class TrainStatusRepository(
             return status
         }
         senzaTrenord.remove(chiave)
-        return status.conBinariDa(altra)
+        return status.conBinariDa(altra).conAvvisiDa(altra)
     }
 
     /**
@@ -647,9 +1015,20 @@ class TrainStatusRepository(
     suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
         withContext(Dispatchers.IO) {
             val adesso = LocalDateTime.now(ROME)
-            runCatching { viaggiaTreno.partenze(stationCode, at.format(boardFormat)) }
+            val righe = runCatching { viaggiaTreno.partenze(stationCode, at.format(boardFormat)) }
                 .getOrDefault(emptyList())
-                .mapNotNull { it.toBoardEntry()?.conRitardoDaFermo(stationCode, adesso) }
+                .mapNotNull { it.toBoardEntry() }
+            // Come per la corsa, vedi [nonPartitoVuolDireFermo]; in parallelo, perche'
+            // su un tabellone i treni fermi oltre la loro ora possono essere piu' d'uno.
+            coroutineScope {
+                righe.map { riga ->
+                    async {
+                        val daFermo = riga.conRitardoDaFermo(stationCode, adesso)
+                        val cambia = daFermo.delayMinutes != riga.delayMinutes
+                        if (cambia && nonPartitoVuolDireFermo(riga.trainRef)) daFermo else riga
+                    }
+                }.awaitAll()
+            }
         }
 
     suspend fun arrivals(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
@@ -659,8 +1038,46 @@ class TrainStatusRepository(
                 .mapNotNull { it.toBoardEntry() }
         }
 
+    /** Le notizie di ViaggiaTreno gia' lette, e quando: vedi [conNotizie]. */
+    @Volatile
+    private var notizie: Pair<Long, List<NotiziaCorsa>>? = null
+
+    /**
+     * Aggiunge a una corsa quel che ne dicono le notizie di ViaggiaTreno: il
+     * perche' di un ritardo o di una variazione, che la corsa non dice mai.
+     * Vedi `InfomobilitaParser`.
+     *
+     * La pagina e' una sola per tutta Italia, 17 KB, e cambia di rado: si tiene
+     * per [NOTIZIE_VALIDE_MS], cosi' aprire dieci treni costa una chiamata sola.
+     * Se non risponde la corsa resta com'era.
+     *
+     * Quando una notizia vale per la corsa lo decide [NotiziaCorsa.riguarda].
+     */
+    suspend fun conNotizie(status: TrainStatus, date: LocalDate): TrainStatus {
+        if (!status.realtime) return status
+        if (status.number.isBlank()) return status
+        val oggi = LocalDate.now(ROME)
+        val suoi = notizieDiOggi()
+            .filter { it.riguarda(status, date, oggi) }
+            .map { it.testo }
+        if (suoi.isEmpty()) return status
+        return status.copy(avvisi = (suoi + status.avvisi).distinct())
+    }
+
+    private suspend fun notizieDiOggi(): List<NotiziaCorsa> = withContext(Dispatchers.IO) {
+        val adesso = System.currentTimeMillis()
+        notizie?.let { (quando, lette) -> if (adesso - quando < NOTIZIE_VALIDE_MS) return@withContext lette }
+        val lette = runCatching { InfomobilitaParser.parse(viaggiaTreno.infomobilita().string()) }
+            .getOrElse { return@withContext notizie?.second.orEmpty() }
+        notizie = adesso to lette
+        lette
+    }
+
     private companion object {
         /** Quanto si aspetta prima di richiedere a Trenord una corsa che non conosceva. */
         const val RICHIEDI_DOPO_MS = 15 * 60_000L
+
+        /** Per quanto vale una lettura delle notizie di ViaggiaTreno. */
+        const val NOTIZIE_VALIDE_MS = 5 * 60_000L
     }
 }

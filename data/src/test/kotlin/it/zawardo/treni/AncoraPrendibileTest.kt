@@ -8,9 +8,11 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.TransportKind
 import it.zawardo.treni.domain.model.coincidenza
 import it.zawardo.treni.domain.model.coincidenzaRegge
 import it.zawardo.treni.domain.model.partenzaAncoraUtile
+import it.zawardo.treni.domain.model.primoCambio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -242,10 +244,54 @@ class AncoraPrendibileTest {
         assertEquals(Coincidenza.PERSA, j.coincidenza(corsa(), siracusano("10:45", stato = TrainState.CANCELLED)))
     }
 
+    /**
+     * Nell'elenco si guardano anche i viaggi di stamattina: il primo treno e'
+     * arrivato in ritardo, e il secondo, gia' partito, conta per quando e'
+     * partito. Dopo l'arrivo del primo l'ha aspettato, prima no.
+     */
+    @Test
+    fun `il secondo partito dopo l'arrivo del primo l'ha aspettato`() {
+        val arrivato = corsa(ritardo = 12).let { c ->
+            c.copy(stops = c.stops.map { f -> if (f.stationCode == catania.rfiCode) f.copy(actualArrival = ora("10:49")) else f })
+        }
+        val j = viaggio(reg5385, perSiracusa("10:45"))
+        assertEquals(Coincidenza.REGGE, j.coincidenza(arrivato, siracusano("10:51", partito = true)))
+        assertEquals(Coincidenza.PERSA, j.coincidenza(arrivato, siracusano("10:47", partito = true)))
+    }
+
     /** Un diretto non ha coincidenze da perdere. */
     @Test
     fun `un diretto regge sempre`() {
         assertEquals(Coincidenza.REGGE, viaggio(reg5385).coincidenza(corsa(ritardo = 40), null))
+    }
+
+    /**
+     * Il cambio si giudica dal primo treno, non dalla prima tratta: e' del treno
+     * il ritardo che si conosce. «Urbano › RE 10911» da Milano Porta Garibaldi
+     * cominciava col tratto urbano.
+     */
+    @Test
+    fun `un tratto urbano in testa non sposta il cambio`() {
+        val urbano = Leg(null, "UB", Station("S12316", 0L, "Letojanni"), taormina, ora("09:50"), ora("09:58"))
+        val j = viaggio(urbano, reg5385, perSiracusa("10:45"))
+        assertEquals(reg5385 to perSiracusa("10:45"), j.primoCambio())
+        assertEquals(Coincidenza.PERSA, j.coincidenza(corsa(ritardo = 25), null))
+    }
+
+    /**
+     * Dopo il treno, un tratto a piedi o urbano non ha un'ora di partenza da
+     * mancare: il cambio vero e' piu' in la', e quanto serva per arrivarci il
+     * margine non lo sa. Prima si confrontava l'arrivo con l'inizio della
+     * camminata, e ogni minuto di ritardo diventava una coincidenza a rischio.
+     */
+    @Test
+    fun `dopo un tratto a piedi o urbano la coincidenza non si giudica`() {
+        val piedi = Leg(null, null, catania, catania, ora("10:37"), ora("10:45"), kind = TransportKind.WALK)
+        val urbano = Leg(null, "UB", catania, Station("S12333", 0L, "Catania Borgo"), ora("10:40"), ora("10:50"))
+        for (j in listOf(viaggio(reg5385, piedi, perSiracusa("10:50")), viaggio(reg5385, urbano))) {
+            assertNull(j.primoCambio())
+            assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(ritardo = 40), null))
+        }
     }
 
     @Test

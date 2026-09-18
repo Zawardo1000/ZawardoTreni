@@ -60,7 +60,10 @@ data class FermataDto(
     /** P = partenza (capolinea), F = fermata intermedia, A = arrivo (capolinea). */
     val tipoFermata: String? = null,
 
-    /** 0 = futura, 1 = effettuata, 2 = in corso, 3 = soppressa. */
+    /**
+     * 0 = regolare da fare, 1 = regolare effettuata, 2 = straordinaria, 3 =
+     * soppressa. Il 2 non dice se sia stata fatta: vedi `toStop`.
+     */
     val actualFermataType: Int = 0,
 
     // --- arrivo: snake_case nel payload originale ---

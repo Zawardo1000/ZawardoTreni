@@ -136,10 +136,13 @@ internal class CaricatoreCorsa(
          * binario invece di essere l'unica riga senza.
          */
         if (nazionale != null) {
+            // Il perche' di un ritardo o di una variazione ViaggiaTreno lo scrive
+            // solo nelle sue notizie, non nella corsa: vedi `conNotizie`.
+            val spiegata = trains.conNotizie(nazionale, giorno)
             return if (DataSource.TRENORD in sources) {
-                trains.completaBinari(nazionale, giorno)
+                trains.completaBinari(spiegata, giorno)
             } else {
-                nazionale
+                spiegata
             }
         }
 

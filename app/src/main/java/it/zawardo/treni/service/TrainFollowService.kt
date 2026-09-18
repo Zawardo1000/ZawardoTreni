@@ -22,6 +22,7 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.variazione
 import it.zawardo.treni.domain.model.indiceFermata
 import it.zawardo.treni.domain.model.stessoBinario
 import it.zawardo.treni.ui.MainActivity
@@ -452,8 +453,15 @@ class TrainFollowService : Service() {
      */
     private fun describe(corsa: Sorvegliata): String {
         val status = corsa.status ?: return "Ricerca dello stato in corso…"
-        stateWord(status.state)?.let { return it }
+        val parola = stateWord(status.state)
+        // Una variazione non toglie l'orario: sta davanti, e il resto segue.
+        // Prima «Percorso variato» era tutto il testo, anche a +193.
+        if (parola != null && !status.state.variazione) return parola
+        val orario = orarioTuo(corsa, status)
+        return if (parola != null) "$parola · $orario" else orario
+    }
 
+    private fun orarioTuo(corsa: Sorvegliata, status: TrainStatus): String {
         val salita = corsa.boarding
         val salito = salita != null &&
             (salita.status == StopStatus.DONE || salita.actualDeparture != null)

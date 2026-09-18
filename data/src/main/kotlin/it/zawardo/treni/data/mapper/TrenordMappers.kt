@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.mapper
 
+import it.zawardo.treni.data.remote.trenord.CodiciTrenord
 import it.zawardo.treni.data.remote.trenord.TrenordActualDto
 import it.zawardo.treni.data.remote.trenord.TrenordJourneyDto
 import it.zawardo.treni.data.remote.trenord.TrenordProductDto
@@ -26,6 +27,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 private val YMD: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
@@ -44,6 +46,18 @@ private fun combine(date: LocalDate?, time: String?, dayOffset: Int = 0): LocalD
     return d.plusDays(dayOffset.toLong()).atTime(t)
 }
 
+/**
+ * Un orario senza giorno, messo nel giorno che lo porta piu' vicino a
+ * [riferimento]: il giorno prima, lo stesso o il dopo. Un treno delle 23:50
+ * rilevato alle 00:05 e' arrivato il giorno dopo, non diciassette ore prima.
+ */
+private fun vicinoA(riferimento: LocalDateTime?, time: String?): LocalDateTime? {
+    val base = riferimento ?: return null
+    val t = parseTime(time) ?: return null
+    return (-1L..1L).map { base.toLocalDate().plusDays(it).atTime(t) }
+        .minBy { abs(Duration.between(base, it).toMinutes()) }
+}
+
 /** `HH:mm:ss` di durata, non un orario. */
 private fun parseDuration(s: String?): Duration? {
     val t = parseTime(s) ?: return null
@@ -53,8 +67,8 @@ private fun parseDuration(s: String?): Duration? {
 }
 
 private fun TrenordStationDto.toStation() = Station(
-    // station_id e' il codice RFI: aggancia direttamente il resto dell'app.
-    rfiCode = stationId?.takeIf { it.isNotBlank() },
+    // station_id e' il MIR di Trenord, quasi sempre il codice RFI: vedi CodiciTrenord.
+    rfiCode = CodiciTrenord.perApp(stationId),
     /*
      * locationId resta 0: e' l'identificativo del BFF Le Frecce e Trenord non
      * lo espone.
@@ -137,8 +151,9 @@ private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): 
         category = t.line?.takeIf { it.isNotBlank() }?.replace("_", "") ?: t.category,
         from = from,
         to = to,
-        departure = combine(date, first.scheduledDeparture) ?: fallback,
-        arrival = combine(date, last.scheduledArrival) ?: fallback,
+        // Col giorno della fermata, non della soluzione: vedi TrenordStopDto.departureDayOffset.
+        departure = combine(date, first.scheduledDeparture, first.departureDayOffset ?: 0) ?: fallback,
+        arrival = combine(date, last.scheduledArrival, last.arrivalDayOffset ?: 0) ?: fallback,
         kind = t.kind(),
         kindLabel = t.category,
     )
@@ -203,8 +218,16 @@ fun TrenordSolutionDto.toJourney(): Journey? {
         // assenza di dato, non assenza di ritardo.
         delayMinutes = delay?.takeIf { delayDefined },
         price = toPrice(),
+        venditaChiusa = saleability?.saleable == false && saleability.reason == PARTENZA_PASSATA,
     )
 }
+
+/**
+ * Il motivo con cui Trenord dice che il biglietto non si vende piu' perche' la
+ * partenza e' passata. Gli altri — `OTHER_OPERATOR`, `NO_PRODUCTS` — dicono che
+ * quel biglietto Trenord non lo vende proprio, che e' un'altra cosa.
+ */
+private const val PARTENZA_PASSATA = "PAST_DEPARTURE_DATE"
 
 /**
  * Il prezzo della corsa semplice a tariffa intera, sommato su tutte le tratte.
@@ -232,8 +255,8 @@ fun TrenordSolutionDto.toJourney(): Journey? {
  *    somma non cambia niente, e il giorno che ne arrivassero due sarebbero due
  *    titoli da pagare entrambi.
  *
- * Null quando i titoli non ci sono — capita sulle tratte fuori dall'area
- * tariffaria integrata — che e' diverso da gratis. E null anche quando nessun
+ * Null quando i titoli non ci sono — capita sui treni che Trenord non vende,
+ * fuori dalla Lombardia — che e' diverso da gratis. E null anche quando nessun
  * titolo si dichiara a tariffa piena: un prezzo che non si sa piu' riconoscere
  * e' peggio di un prezzo assente, e `PrezziLiveTest` diventa rosso se quei nomi
  * cambiano.
@@ -304,19 +327,23 @@ private fun List<TrenordProductDto>.secondaClasse(): List<TrenordProductDto> =
 
 private fun TrenordStopDto.toStop(index: Int, date: LocalDate?, now: LocalDateTime): Stop {
     val a: TrenordActualDto? = actual
-    val schedArr = combine(date, scheduledArrival)
-    val schedDep = combine(date, scheduledDeparture)
-    val realArr = combine(date, a?.actualArrival)
-    val realDep = combine(date, a?.actualDeparture)
-    val estArr = combine(date, a?.estimatedArrival)
-    val estDep = combine(date, a?.estimatedDeparture)
+    val schedArr = combine(date, scheduledArrival, arrivalDayOffset ?: 0)
+    val schedDep = combine(date, scheduledDeparture, departureDayOffset ?: 0)
+    // Gli orari veri non hanno un giorno loro: si mettono accanto a quelli di
+    // tabella, perche' un ritardo puo' scavalcare la mezzanotte da solo.
+    // Senza orari di tabella, il giorno della soluzione a mezzogiorno: resta quel giorno.
+    val giorno = date?.atTime(12, 0)
+    val realArr = vicinoA(schedArr ?: schedDep ?: giorno, a?.actualArrival)
+    val realDep = vicinoA(schedDep ?: schedArr ?: giorno, a?.actualDeparture)
+    val estArr = vicinoA(schedArr ?: schedDep ?: giorno, a?.estimatedArrival)
+    val estDep = vicinoA(schedDep ?: schedArr ?: giorno, a?.estimatedDeparture)
 
     val done = realArr != null || realDep != null
     val binario = binarioPulito(platform)
     return Stop(
         index = index,
         stationName = nomeLeggibile(station?.name.orEmpty()),
-        stationCode = station?.stationId,
+        stationCode = CodiciTrenord.perApp(station?.stationId),
         scheduledArrival = schedArr,
         actualArrival = realArr,
         arrivalDelayMinutes = a?.arrivalDelay ?: 0,
@@ -369,16 +396,44 @@ fun TrenordSolutionDto.toTrainStatus(): TrainStatus? {
         delayMinutes = delay,
         state = when {
             cancelled || journey.stops.all { it.cancelled } -> TrainState.CANCELLED
+            /*
+             * Arrivata prima che soppressa in parte, contando solo le fermate
+             * che si fanno: una corsa limitata restava "soppressa in parte"
+             * anche a destinazione, e non risultava arrivata mai — con le
+             * soppresse fra le fermate, "tutte effettuate" non puo' essere vero.
+             */
+            stops.any { it.status != StopStatus.CANCELLED } &&
+                stops.all { it.status == StopStatus.DONE || it.status == StopStatus.CANCELLED } ->
+                TrainState.ARRIVED
             journey.stops.any { it.cancelled } -> TrainState.PARTIALLY_CANCELLED
-            stops.isNotEmpty() && stops.all { it.status == StopStatus.DONE } -> TrainState.ARRIVED
             stops.none { it.status == StopStatus.DONE } -> TrainState.NOT_DEPARTED
             delay > 0 -> TrainState.DELAYED
             else -> TrainState.REGULAR
         },
         lastDetectionStation = lastDetection?.lastDetectionName,
         lastDetectionTime = null,
-        // Va detto: senza tracciamento gli orari sono quelli previsti, non rilevati.
-        notice = if (!t.hasLiveInfo) "Corsa non tracciata in tempo reale" else null,
+        notice = when {
+            // Va detto: senza tracciamento gli orari sono quelli previsti, non rilevati.
+            !t.hasLiveInfo -> "Corsa non tracciata in tempo reale"
+            else -> t.alerts.firstOrNull { it.type == SOPPRESSIONE }?.message?.let(::testoAvviso)
+        },
         stops = stops,
+        motivo = (t.suppressionReason ?: t.alerts.firstNotNullOfOrNull { it.reason })
+            ?.let(::testoAvviso),
+        // La soppressione non e' fra gli avvisi: il suo testo sta in `notice`, o in
+        // quello di ViaggiaTreno quando la corsa arriva da li'.
+        avvisi = t.alerts.filter { it.type != SOPPRESSIONE }
+            .mapNotNull { it.message?.let(::testoAvviso) }
+            .distinct(),
     )
 }
+
+private const val SOPPRESSIONE = "suppressed"
+
+/**
+ * Il testo di un avviso Trenord, senza le sbavature con cui arriva: il
+ * "+Circolazione fortemente rallentata..." del 18/09/2026 aveva un segno piu'
+ * davanti e uno spazio in fondo.
+ */
+private fun testoAvviso(testo: String): String? =
+    testo.trim().trimStart('+').trim().takeIf { it.isNotEmpty() }

@@ -181,4 +181,29 @@ class OrarioPrevistoTest {
         )
         assertEquals(corsa.notice, corsa.soloOrarioPrevistoPer(domani).notice)
     }
+
+    /**
+     * Il perche' di oggi, gli avvisi di oggi e le fermate aggiunte oggi non sono
+     * orario. Il REG 2833 del 18/09/2026 era limitato a Sesto per «Richiesta
+     * Impresa Ferroviaria», con Sesto fermata straordinaria: aperto per il giorno
+     * dopo, lo avrebbe ripetuto di un treno che doveva ancora partire.
+     */
+    @Test
+    fun `motivo, avvisi e fermate straordinarie restano a oggi`() {
+        val corsa = corsaArrivata()
+        val oggiVariata = corsa.copy(
+            motivo = "Richiesta Impresa Ferroviaria",
+            avvisi = listOf("Linea Milano-Lecco: rallentamenti"),
+            stops = corsa.stops.mapIndexed { i, fermata -> fermata.copy(straordinaria = i == 1) },
+        )
+        val previsto = oggiVariata.soloOrarioPrevistoPer(domani)
+        assertNull(previsto.motivo)
+        assertTrue(previsto.avvisi.isEmpty())
+        assertEquals(
+            "la fermata aggiunta oggi domani non c'e'",
+            listOf("SONDRIO", "LECCO"),
+            previsto.stops.map { it.stationName },
+        )
+        assertFalse(previsto.stops.any { it.straordinaria })
+    }
 }

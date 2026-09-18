@@ -46,6 +46,11 @@ internal fun Stop.projectedBy(delayMinutes: Int): Stop {
  * la scrive nessuno. E va applicato solo al «non partito» di ViaggiaTreno, che
  * lo dichiara: le altre fonti lo deducono dall'assenza di fermate fatte, che su
  * una corsa non tracciata e' la regola, non un indizio.
+ *
+ * **E non dove il treno da li' non parte, o ViaggiaTreno non lo vede partire**,
+ * cosa che questa funzione non puo' sapere: lo decide chi la chiama, con
+ * [vedePartireDa] sulla corsa del giorno prima quando c'e'. Vedi
+ * `TrainStatusRepository.nonPartitoVuolDireFermo`.
  */
 fun TrainStatus.conRitardoDaFermo(adesso: LocalDateTime): TrainStatus {
     if (!realtime || state != TrainState.NOT_DEPARTED) return this
@@ -79,6 +84,27 @@ fun BoardEntry.conRitardoDaFermo(stazione: String, adesso: LocalDateTime): Board
     }
     if (fermo <= delayMinutes) return this
     return copy(delayMinutes = fermo)
+}
+
+/**
+ * Se in questa corsa ViaggiaTreno ha visto il treno partire da [origine].
+ *
+ * Vero con l'orario reale di partenza. Falso se l'ha visto solo piu' avanti:
+ * o da li' la partenza non si rileva, o da li' il treno non e' partito affatto,
+ * come il 2987 del 18/09/2026 che la corsa dava da Gallarate e partiva da
+ * Saronno. In tutti e due i casi il suo «non partito» non vuol dire fermo li'.
+ * Null se la corsa non lo dice, perche' non ha rilevamenti o perche' li' era
+ * soppressa.
+ *
+ * Si chiede alla corsa del giorno prima, gia' fatta, come prova per oggi: vedi
+ * `TrainStatusRepository.nonPartitoVuolDireFermo`.
+ */
+fun TrainStatus.vedePartireDa(origine: String): Boolean? {
+    val fermata = stops.firstOrNull { stessaStazione(it.stationCode, origine) } ?: return null
+    if (fermata.status == StopStatus.CANCELLED) return null
+    if (fermata.actualDeparture != null) return true
+    val rilevata = stops.any { it.actualArrival != null || it.actualDeparture != null }
+    return if (rilevata) false else null
 }
 
 /**

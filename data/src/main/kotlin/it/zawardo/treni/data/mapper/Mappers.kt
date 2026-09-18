@@ -121,8 +121,9 @@ fun SolutionDto.toJourney(): Journey? {
  *
  * Tre condizioni, e servono tutte e tre:
  *
- *  - **una cifra**, ovviamente. Le soluzioni regionali spesso non ce l'hanno,
- *    perche' il BFF non le commercializza tutte.
+ *  - **una cifra**, ovviamente. Dalla porta dell'app del BFF spesso manca, e
+ *    ai regionali lombardi quasi sempre: e' per questo che i prezzi si prendono
+ *    anche dalla porta del sito, vedi `LefrecceApi.soluzioniDelSito`.
  *  - **`showPrice`**, che il BFF mette a falso quando il prezzo esiste nei suoi
  *    archivi ma non e' da pubblicare. Ignorarlo vorrebbe dire mostrare cifre
  *    che Trenitalia stessa non mostra.
@@ -150,6 +151,11 @@ fun SolutionDto.toJourney(): Journey? {
  * Milano-Bergamo 5 su 6), mai su Milano-Roma o Napoli-Salerno. La stessa
  * sessione richiamata da' lo stesso esito, ma una ricerca **nuova** puo'
  * riportare i prezzi. Il filtro qui regge entrambe le forme.
+ *
+ * **Il 18/09/2026 la causa: e' la porta.** La stessa ricerca, alla stessa ora,
+ * chiesta alla porta del sito (`/website/ticket/solutions`) tornava coi prezzi
+ * 16 volte su 16, regionali Trenord compresi, mentre questa porta dell'app li
+ * perdeva in 3 ricerche su 16 e ai regionali lombardi quasi sempre.
  */
 private fun SolutionDto.toPrice(): Price? {
     val cifra = (totalAmount?.amount ?: totalPrice)?.trim()?.takeIf { it.isNotBlank() } ?: return null
@@ -169,16 +175,65 @@ private fun SolutionDto.toPrice(): Price? {
 
 /**
  * Deriva lo stato dai flag di ViaggiaTreno, che sono ridondanti e in parte
- * sovrapposti. L'ordine dei controlli conta: le soppressioni prevalgono.
+ * sovrapposti.
+ *
+ * `tipoTreno` ha piu' valori di quelli che si leggevano. Contati il 18/09/2026
+ * su 740 corse: `PG` regolare, `ST` soppresso, `PP` soppresso in parte, e poi
+ * `SI`, `SF`, `SM` — soppresso all'inizio, alla fine, in mezzo: il REG 2839
+ * "parte da Sondrio" invece che da Tirano, il REG 2833 finiva a Sesto invece
+ * che a Milano — e `DV`, deviato. Non basta nemmeno quello: l'IC 612 era "PG"
+ * con due fermate straordinarie. Per questo contano anche le fermate, che non
+ * mentono: una soppressa e' una soppressione, una straordinaria una variazione.
+ *
+ * L'ordine dei controlli conta. La soppressione totale prevale su tutto. Poi
+ * vengono arrivo e partenza, prima delle variazioni: su "non partito" si
+ * calcola il ritardo di un treno fermo all'origine (`conRitardoDaFermo`), e su
+ * "arrivato" smettono gli aggiornamenti. Una corsa limitata che restasse
+ * "soppressa in parte" anche a destinazione non finirebbe mai. Cosa sia
+ * cambiato lo dicono comunque l'avviso e le fermate barrate.
  */
-private fun AndamentoTrenoDto.deriveState(): TrainState = when {
-    provvedimento == 1 || tipoTreno == "ST" -> TrainState.CANCELLED
-    tipoTreno == "PP" || fermateSoppresse.isNotEmpty() -> TrainState.PARTIALLY_CANCELLED
-    provvedimento == 2 -> TrainState.DIVERTED
-    arrivato -> TrainState.ARRIVED
-    nonPartito -> TrainState.NOT_DEPARTED
-    ritardo > 0 -> TrainState.DELAYED
-    else -> TrainState.REGULAR
+private fun AndamentoTrenoDto.deriveState(): TrainState {
+    val tutte = fermate + fermateSoppresse
+    return when {
+        provvedimento == 1 || tipoTreno == "ST" -> TrainState.CANCELLED
+        tutte.isNotEmpty() && tutte.all { it.actualFermataType == 3 } -> TrainState.CANCELLED
+        arrivato -> TrainState.ARRIVED
+        nonPartito -> TrainState.NOT_DEPARTED
+        tipoTreno in SOPPRESSO_IN_PARTE || tutte.any { it.actualFermataType == 3 } ->
+            TrainState.PARTIALLY_CANCELLED
+        provvedimento == 2 || tipoTreno == "DV" || tutte.any { it.actualFermataType == 2 } ->
+            TrainState.DIVERTED
+        ritardo > 0 -> TrainState.DELAYED
+        else -> TrainState.REGULAR
+    }
+}
+
+private val SOPPRESSO_IN_PARTE = setOf("PP", "SI", "SF", "SM")
+
+/**
+ * Le fermate nell'ordine in cui il treno le incontra.
+ *
+ * Nessuno dei due ordini che ViaggiaTreno offre regge da solo. L'elenco sbaglia
+ * quando aggiunge un capolinea: nel REG 2833 del 18/09/2026 Sesto, capolinea
+ * nuovo, stava dopo Milano Centrale soppressa. Il `progressivo` sbaglia quando
+ * la corsa riparte da una stazione nuova, che riprende a contare da 1: nel REG
+ * 4972 Velletri e le sette soppresse dopo andavano da 1 a 9, e Ciampino, la
+ * nuova origine, era di nuovo 1 — ordinato per numero, Ciampino finiva fra
+ * Velletri e S.Gennaro. Nemmeno l'orario basta: le fermate di un percorso
+ * deviato lo portano ricalcolato, e il PM Eccellente del FR 9588 aveva l'arrivo
+ * dopo Lamezia, che sta dopo.
+ *
+ * Quindi la numerazione vale dentro un tratto, e un tratto nuovo comincia dove
+ * compare una nuova origine (`tipoFermata` "P" dopo la prima fermata). I tratti
+ * restano nell'ordine dell'elenco.
+ */
+private fun List<FermataDto>.inOrdineDiPercorso(): List<FermataDto> {
+    val tratti = mutableListOf<MutableList<FermataDto>>()
+    forEachIndexed { i, fermata ->
+        if (i == 0 || fermata.tipoFermata == "P") tratti += mutableListOf<FermataDto>()
+        tratti.last() += fermata
+    }
+    return tratti.flatMap { tratto -> tratto.sortedBy { it.progressivo } }
 }
 
 private fun FermataDto.toStop() = Stop(
@@ -202,17 +257,26 @@ private fun FermataDto.toStop() = Stop(
         ?: binarioPulito(binarioEffettivoArrivoDescrizione),
     /*
      * `actualFermataType` dice se la fermata e' stata effettuata, non dove sia
-     * il treno adesso. Il 2 significa "effettuata ma non rilevata": gli orari
-     * sono ricostruiti. Leggerlo come posizione corrente riempiva il percorso
-     * di "sei qui" - su un IC per la Sicilia erano cinque, da Pisa in giu',
-     * mentre il treno era gia' in vista di Catania.
+     * il treno adesso: leggerlo come posizione riempiva il percorso di "sei
+     * qui".
+     *
+     * Il 2 e' la **fermata straordinaria**, non una fermata fatta. Lo dice il
+     * sito di ViaggiaTreno, che la colora di giallo come l'icona "fermata
+     * straordinaria" della sua legenda. Letta come effettuata, il 18/09/2026
+     * ha disegnato il REG 2833 gia' a Sesto S.Giovanni, capolinea aggiunto al
+     * posto di Milano Centrale, mentre era ad Airuno: e dietro Sesto, Monza
+     * "passaggio non rilevato", venti minuti prima che ci arrivasse. Nella
+     * stessa corsa era straordinaria anche Ponte in Valtellina, che Trenord non
+     * ha nel suo orario. Una straordinaria e' fatta quando ha un orario reale,
+     * come ogni altra.
      */
-    status = when (actualFermataType) {
-        1, 2 -> StopStatus.DONE
-        3 -> StopStatus.CANCELLED
+    status = when {
+        actualFermataType == 3 -> StopStatus.CANCELLED
+        actualFermataType == 1 -> StopStatus.DONE
+        actualFermataType == 2 && (arrivoReale != null || partenzaReale != null) -> StopStatus.DONE
         else -> StopStatus.FUTURE
     },
-    detected = actualFermataType != 2,
+    straordinaria = actualFermataType == 2,
 )
 
 fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
@@ -229,10 +293,10 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
         lastDetectionStation = detected?.let(::nomeLeggibile),
         lastDetectionTime = oraUltimoRilevamento.toRomeDateTime(),
         notice = subTitle?.takeIf { it.isNotBlank() },
-        // Le soppresse non sono in `fermate`: vanno riunite e riordinate.
+        // Le soppresse possono stare in `fermateSoppresse`: vanno riunite e riordinate.
         stops = (fermate + fermateSoppresse)
+            .inOrdineDiPercorso()
             .map { it.toStop().projectedBy(ritardo) }
-            .sortedBy { it.index }
             .consolidate(),
     )
 }

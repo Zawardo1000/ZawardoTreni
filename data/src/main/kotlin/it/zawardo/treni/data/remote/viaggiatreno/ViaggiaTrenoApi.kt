@@ -59,6 +59,14 @@ interface ViaggiaTrenoApi {
         @Path("dateTime") dateTime: String,
     ): List<TabelloneVoceDto>
 
+    /**
+     * Le notizie di infomobilita' in corso, in HTML: vedi `InfomobilitaParser`.
+     * Il `false` e' quello del loro sito, e distingue le notizie dai lavori
+     * programmati (`true`). Non porta nessun dato di chi chiede.
+     */
+    @GET("infomobilitaRSS/false")
+    suspend fun infomobilita(): ResponseBody
+
     /** Tabellone arrivi, stesso formato di [partenze]. */
     @GET("arrivi/{stationCode}/{dateTime}")
     suspend fun arrivi(

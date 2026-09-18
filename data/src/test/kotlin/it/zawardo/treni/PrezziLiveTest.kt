@@ -4,6 +4,8 @@ import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrenordRepository
+import it.zawardo.treni.domain.model.Journey
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,39 +36,50 @@ class PrezziLiveTest {
         journeys.search(from, to, LocalDateTime.now().plusDays(1).withHour(8).withMinute(0))
     }
 
+    /**
+     * Fino a quattro ricerche, distanziate come i nuovi tentativi dell'app
+     * (`ResultsViewModel.ATTESE_PREZZI`). I buchi di Le Frecce vengono a
+     * grappoli: il 18/09/2026 tre ricerche di fila, una subito dopo l'altra,
+     * erano tornate tutte senza prezzi, e il test falliva per l'intermittenza
+     * del servizio invece che per un cambio nei campi.
+     */
+    private suspend fun cercaConPrezzi(da: String, a: String): List<Journey> {
+        var res = cerca(da, a)
+        for (attesa in listOf(1_000L, 4_000L, 10_000L)) {
+            if (res.any { it.price != null }) break
+            delay(attesa)
+            res = cerca(da, a)
+        }
+        return res
+    }
+
     @Test
     fun `l'alta velocita' arriva col prezzo`() = runBlocking {
         /*
          * Si riprova su piu' sessioni perche' il prezzo e' intermittente: su
          * cinque ricerche consecutive per la stessa tratta, una torna senza
          * prezzi e ripetere la chiamata sullo stesso `searchId` non rimedia
-         * (vedi il commento su `toPrice`). Tre tentativi portano la probabilita'
-         * di un falso allarme sotto l'uno per cento, e un fallimento a quel
-         * punto vuol dire davvero che i campi sono cambiati.
+         * (vedi il commento su `toPrice`). Con quattro tentativi distanziati
+         * ([cercaConPrezzi]) un fallimento vuol dire davvero che i campi sono
+         * cambiati.
          */
-        var conPrezzo = 0
-        var soluzioni = 0
-        repeat(3) { giro ->
-            if (conPrezzo == 0) {
-                val res = cerca("Milano Centrale", "Bologna Centrale")
-                soluzioni = res.size
-                conPrezzo = res.count { it.price != null }
-                println("\n=== MILANO -> BOLOGNA, tentativo ${giro + 1}: $conPrezzo prezzi su $soluzioni ===")
-                res.take(8).forEach {
-                    println(
-                        "  %s -> %s  %-18s %s".format(
-                            it.departure.toLocalTime(), it.arrival.toLocalTime(),
-                            it.legs.firstOrNull()?.let { l -> "${l.category ?: ""} ${l.trainNumber ?: ""}" } ?: "",
-                            it.price?.let { p -> p.formatted + if (!p.saleable) " (non acquistabile)" else "" }
-                                ?: "prezzo non pubblicato",
-                        ),
-                    )
-                }
-            }
+        val res = cercaConPrezzi("Milano Centrale", "Bologna Centrale")
+        val soluzioni = res.size
+        val conPrezzo = res.count { it.price != null }
+        println("\n=== MILANO -> BOLOGNA: $conPrezzo prezzi su $soluzioni ===")
+        res.take(8).forEach {
+            println(
+                "  %s -> %s  %-18s %s".format(
+                    it.departure.toLocalTime(), it.arrival.toLocalTime(),
+                    it.legs.firstOrNull()?.let { l -> "${l.category ?: ""} ${l.trainNumber ?: ""}" } ?: "",
+                    it.price?.let { p -> p.formatted + if (!p.saleable) " (non acquistabile)" else "" }
+                        ?: "prezzo non pubblicato",
+                ),
+            )
         }
         assertTrue("nessuna soluzione", soluzioni > 0)
         assertTrue(
-            "in tre ricerche nessuna soluzione ha portato un prezzo: " +
+            "in quattro ricerche nessuna soluzione ha portato un prezzo: " +
                 "il BFF ha probabilmente cambiato i campi",
             conPrezzo > 0,
         )
@@ -74,16 +87,8 @@ class PrezziLiveTest {
 
     @Test
     fun `un prezzo pubblicato e' una cifra sensata`() = runBlocking {
-        /*
-         * Fino a tre ricerche, come per l'alta velocita' qui sopra. Una ricerca
-         * intera senza prezzi capita — l'11/09/2026 in 12 casi su 36 — e con un
-         * tentativo solo il test falliva per l'intermittenza del servizio, non
-         * per un cambio nei campi.
-         */
-        var res = cerca("Roma Termini", "Firenze S. M. Novella")
-        repeat(2) {
-            if (res.none { it.price != null }) res = cerca("Roma Termini", "Firenze S. M. Novella")
-        }
+        // Vedi [cercaConPrezzi]: una ricerca intera senza prezzi capita.
+        val res = cercaConPrezzi("Roma Termini", "Firenze S. M. Novella")
         val prezzi = res.mapNotNull { it.price }
         println("\n=== ROMA -> FIRENZE: ${prezzi.size} prezzi su ${res.size} soluzioni ===")
         prezzi.forEach { println("  ${it.formatted}  vendibile=${it.saleable}") }
@@ -154,7 +159,7 @@ class PrezziLiveTest {
         }
         val conPrezzo = res.journeys.filter { it.price != null }
         if (conPrezzo.isEmpty()) {
-            println("  (nessun prezzo su questa tratta: fuori area tariffaria integrata)")
+            println("  (nessun prezzo Trenord su questa tratta)")
             return@runBlocking
         }
         conPrezzo.forEach {

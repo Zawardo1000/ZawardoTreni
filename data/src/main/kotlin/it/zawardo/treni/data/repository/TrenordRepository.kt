@@ -4,6 +4,7 @@ import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.mapper.toJourney
 import it.zawardo.treni.data.mapper.toServiceAlert
 import it.zawardo.treni.data.mapper.toTrainStatus
+import it.zawardo.treni.data.remote.trenord.CodiciTrenord
 import it.zawardo.treni.data.remote.trenord.TrenordApi
 import it.zawardo.treni.data.remote.trenord.TrenordBoardParser
 import it.zawardo.treni.data.remote.trenord.TrenordCrypto
@@ -47,22 +48,25 @@ class TrenordRepository(
     private val isoDate: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val hourFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-    /** Vero quando la tratta e' interrogabile: serve il codice RFI di entrambe. */
+    /**
+     * Vero quando la tratta e' interrogabile: servono due stazioni che Trenord
+     * conosce. Un codice qualunque non basta — vedi [CodiciTrenord].
+     */
     fun covers(from: Station, to: Station): Boolean =
-        !from.rfiCode.isNullOrBlank() && !to.rfiCode.isNullOrBlank()
+        CodiciTrenord.hafas(from.rfiCode) != null && CodiciTrenord.hafas(to.rfiCode) != null
 
     suspend fun search(
         from: Station,
         to: Station,
         departure: LocalDateTime,
     ): TrenordResult = withContext(Dispatchers.IO) {
-        val origin = from.rfiCode ?: return@withContext TrenordResult()
-        val destination = to.rfiCode ?: return@withContext TrenordResult()
+        val origin = CodiciTrenord.hafas(from.rfiCode) ?: return@withContext TrenordResult()
+        val destination = CodiciTrenord.hafas(to.rfiCode) ?: return@withContext TrenordResult()
 
         val parsed = runCatching {
             val body = api.search(
-                origin = TrenordApi.hafasCode(origin),
-                destination = TrenordApi.hafasCode(destination),
+                origin = origin,
+                destination = destination,
                 // Il formato deve essere yyyyMMdd: con yyyy-MM-dd risponde 500.
                 departureDate = departure.format(dateFormat),
                 departureHour = departure.format(hourFormat),
@@ -122,7 +126,9 @@ class TrenordRepository(
      * riaprendo lo stesso tabellone.
      */
     private suspend fun stationDetails(rfiCode: String): TrenordStationDetailsDto? {
-        val chiave = rfiCode.uppercase()
+        // Il tabellone vuole il MIR: per Brescia `S09999`, e per Osteria Nuova
+        // niente, perche' con `S05302` Trenord risponderebbe Melide.
+        val chiave = CodiciTrenord.mir(rfiCode) ?: return null
         val adesso = System.currentTimeMillis()
         synchronized(orari) {
             val avuto = orari[chiave]

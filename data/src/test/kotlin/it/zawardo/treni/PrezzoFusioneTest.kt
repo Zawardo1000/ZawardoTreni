@@ -18,7 +18,7 @@ import java.time.LocalDateTime
  * Nasce da una segnalazione precisa: Milano Dateo - Vignate compariva senza
  * prezzo. La causa non era il prezzo in se' — Trenord quella tratta la prezza,
  * 3,00 euro — ma il fatto che il viaggio mostrato arrivasse da Le Frecce, che
- * i regionali lombardi non li commercializza. Due sorgenti descrivono la stessa
+ * dentro la zona urbana di Milano un prezzo non lo da'. Due sorgenti descrivono la stessa
  * corsa e solo una sa quanto costa: se la fusione sceglie l'altra, il prezzo
  * sparisce pur essendo stato ottenuto.
  *
@@ -63,7 +63,7 @@ class PrezzoFusioneTest {
         /*
          * Non si pretende che TUTTE abbiano il prezzo: Trenord ne restituisce
          * cinque per chiamata, e le soluzioni oltre quella finestra arrivano dal
-         * BFF, che i regionali lombardi non li prezza. Si pretende che le
+         * BFF, che nella zona urbana di Milano non le prezza. Si pretende che le
          * soluzioni Trenord — quelle che il prezzo ce l'hanno — lo portino fino
          * in fondo invece di perderlo nella fusione.
          */

@@ -27,7 +27,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.graphics.compositeOver
+import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.JourneySource
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -52,6 +54,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -65,6 +72,7 @@ import it.zawardo.treni.ui.tratteDelViaggio
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.primoCambio
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
@@ -121,6 +129,7 @@ private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIA
  */
 private val COLONNA_STATO = 72.dp
 private val COLONNA_PREZZO = 104.dp
+private val SPAZIO_COLONNE = 6.dp
 
 /** Ritardo e prezzo: cifre tabulari come gli orari, perche' stiano in colonna. */
 private val CIFRE_CODA = Cifre.riga.copy(fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
@@ -205,6 +214,25 @@ fun ResultsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    /*
+                     * Vuota per un guasto non e' vuota: dirlo cambia cosa fare.
+                     * Prima una ricerca a cui Trenitalia aveva risposto 500
+                     * diceva "Nessun collegamento trovato", e cambiare orario
+                     * era il consiglio sbagliato: bastava riprovare.
+                     */
+                    if (state.nazionaleNonRisponde) {
+                        Text(
+                            "Trenitalia non risponde",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            "Il servizio ha dato errore anche ai nuovi tentativi: le corse " +
+                                "ci sono, ma adesso non arrivano. Riprova fra poco con ↻.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        return@Column
+                    }
                     Text(
                         "Nessun collegamento trovato",
                         style = MaterialTheme.typography.titleMedium,
@@ -237,6 +265,20 @@ fun ResultsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(state.alerts) { _, alert -> AlertCard(alert) }
+
+                    if (state.nazionaleNonRisponde) {
+                        item {
+                            // Qualcosa c'e' — Trenord, le altre reti — ma non tutto.
+                            AlertCard(
+                                ServiceAlert(
+                                    title = "Trenitalia non risponde",
+                                    message = "Qui sotto mancano le corse nazionali: il servizio ha " +
+                                        "dato errore anche ai nuovi tentativi. Riprova fra poco con ↻.",
+                                    severe = true,
+                                ),
+                            )
+                        }
+                    }
 
                     if (state.noSameDayResults) {
                         item {
@@ -377,8 +419,14 @@ private fun JourneyCard(
      * scheda sta li'.
      */
     val ancoraInTempo = row.partenzaStimata != null
+    /*
+     * Lo stesso rosso per il cambio che coi ritardi di adesso non regge: anche
+     * li' e' il ritardo a cambiare la soluzione, e la scheda lo dice prima
+     * delle parole. Come la scheda della coincidenza nella pagina del viaggio.
+     */
+    val cambioSaltato = row.coincidenza != Coincidenza.REGGE
     val fondo = when {
-        ancoraInTempo -> lateColor().copy(alpha = 0.07f).compositeOver(scheme.surfaceContainerLowest)
+        ancoraInTempo || cambioSaltato -> lateColor().copy(alpha = 0.07f).compositeOver(scheme.surfaceContainerLowest)
         soloPrevisto -> scheme.surfaceContainerLow
         else -> scheme.surfaceContainerLowest
     }
@@ -409,12 +457,13 @@ private fun JourneyCard(
         colors = CardDefaults.cardColors(containerColor = fondo),
         border = BorderStroke(
             1.dp,
-            if (ancoraInTempo) lateColor().copy(alpha = 0.45f) else scheme.outlineVariant.copy(alpha = 0.7f),
+            if (ancoraInTempo || cambioSaltato) lateColor().copy(alpha = 0.45f) else scheme.outlineVariant.copy(alpha = 0.7f),
         ),
     ) {
         Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 12.dp)) {
 
-            if (otherDay || j.assembled || row.partenzaStimata != null) {
+            val stazioneDelCambio = j.primoCambio()?.first?.to?.name.orEmpty()
+            if (otherDay || j.assembled || ancoraInTempo || cambioSaltato) {
                 Row(
                     Modifier.padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -476,14 +525,43 @@ private fun JourneyCard(
                             // Il primo treno si prende, ma al cambio arriva dopo
                             // la coincidenza: si propone contando su un recupero,
                             // e chi la sceglie deve saperlo.
-                            if (row.coincidenzaARischio) {
+                            if (row.coincidenza == Coincidenza.A_RISCHIO) {
                                 Text(
-                                    "Coincidenza a ${j.legs.first().to.name} a rischio",
+                                    "Coincidenza a $stazioneDelCambio a rischio",
                                     Modifier.padding(top = 2.dp),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = lateColor(),
                                 )
                             }
+                        }
+                    }
+                    /*
+                     * Il treno parte all'ora cercata o dopo, ma in ritardo, e al
+                     * cambio arriva dopo la coincidenza. La scheda resta, come
+                     * resta barrato un treno soppresso: l'orario la prevede, e
+                     * sapere perche' non si fa dice di piu' che vederla sparire.
+                     */
+                    if (!ancoraInTempo && cambioSaltato) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.SwapHoriz,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = lateColor(),
+                            )
+                            Text(
+                                if (row.coincidenza == Coincidenza.PERSA) {
+                                    "Coincidenza persa a $stazioneDelCambio"
+                                } else {
+                                    "Coincidenza a $stazioneDelCambio a rischio"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = lateColor(),
+                                fontWeight = FontWeight.Bold,
+                            )
                         }
                     }
                 }
@@ -560,21 +638,21 @@ private fun JourneyCard(
              * il posto anche vuote, perche' e' il posto fisso a farle leggere
              * come colonne.
              */
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Tratte(j, Modifier.weight(1f).alignByBaseline(), onApri)
-                Box(
-                    Modifier.widthIn(min = COLONNA_STATO).alignByBaseline(),
-                    contentAlignment = Alignment.TopEnd,
-                ) { StatoSoluzione(row) }
-                Box(
-                    Modifier.widthIn(min = COLONNA_PREZZO).alignByBaseline(),
-                    contentAlignment = Alignment.TopEnd,
-                ) {
-                    // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
-                    // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
-                    if (ancoraInTempo && j.source == JourneySource.LEFRECCE) VenditaChiusa() else Prezzo(j)
-                }
-            }
+            RigaColonne(
+                treni = { Tratte(j, Modifier, onApri) },
+                stato = { StatoSoluzione(row) },
+                prezzo = {
+                    when {
+                        // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
+                        // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
+                        ancoraInTempo && (j.source == JourneySource.LEFRECCE || j.venditaChiusa) -> VenditaChiusa()
+                        // Lo si sta richiedendo: vedi `ResultsViewModel.riprovaPrezzi`.
+                        row.prezzoInArrivo && row.aspettaPrezzo ->
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        else -> Prezzo(j)
+                    }
+                },
+            )
 
             if (j.assembled) {
                 // Italo si nomina solo se una gamba e' davvero Italo: su EAV piu'
@@ -721,6 +799,81 @@ private fun Tratte(j: Journey, modifier: Modifier, onApri: (Int) -> Unit) {
     }
 }
 
+/**
+ * La riga in fondo alla scheda: treni, stato, prezzo.
+ *
+ * Stato e prezzo sono colonne, e tengono il loro posto anche vuote: cosi'
+ * ritardi e prezzi stanno in colonna da una scheda all'altra, e scorrendo
+ * l'elenco si leggono come su un tabellone (segnalato il 14/09/2026).
+ *
+ * Ma il posto vuoto di una colonna non vale una riga in piu' per i treni: con
+ * due treni le sigle devono stare su una riga (chiesto l'11/09/2026), e con le
+ * colonne fisse ci stavano solo sugli schermi larghi. Il 18/09/2026 «RE 2822 ›
+ * S8 24838» chiedeva 151 dp e su un telefono di 390 dp ne aveva 134, mentre la
+ * colonna del prezzo, vuota, ne teneva 104.
+ *
+ * Quindi le colonne stanno ferme finche' i treni ci stanno. Quando non ci
+ * starebbero cedono **il loro vuoto** — prima il prezzo, che manca spesso, poi
+ * lo stato — e mai quello che scrivono. Solo se non basta nemmeno cosi' i treni
+ * vanno a capo, che e' il caso estremo.
+ *
+ * Tutte e tre sulla stessa linea di base, come prima.
+ */
+@Composable
+private fun RigaColonne(
+    treni: @Composable () -> Unit,
+    stato: @Composable () -> Unit,
+    prezzo: @Composable () -> Unit,
+) {
+    SubcomposeLayout { vincoli ->
+        val spazio = SPAZIO_COLONNE.roundToPx()
+        val larghezza = vincoli.maxWidth
+        val libero = Constraints(maxWidth = larghezza)
+
+        // Quanto chiedono davvero. I treni si misurano su una riga senza limite
+        // di larghezza: l'intrinseca di FlowRow non conta lo spazio fra le voci,
+        // e il 18/09/2026 dava 419 px a una riga che ne voleva 431.
+        val inRiga = subcompose(Parte.TRENI, treni).single().measure(Constraints())
+        val testoStato = subcompose(Parte.STATO) { Box { stato() } }.single().measure(libero)
+        val testoPrezzo = subcompose(Parte.PREZZO) { Box { prezzo() } }.single().measure(libero)
+
+        var colonnaStato = maxOf(testoStato.width, COLONNA_STATO.roundToPx())
+        var colonnaPrezzo = maxOf(testoPrezzo.width, COLONNA_PREZZO.roundToPx())
+        val manca = inRiga.width + colonnaStato + colonnaPrezzo + 2 * spazio - larghezza
+        if (manca > 0) {
+            val dalPrezzo = minOf(manca, colonnaPrezzo - testoPrezzo.width)
+            colonnaPrezzo -= dalPrezzo
+            colonnaStato -= minOf(manca - dalPrezzo, colonnaStato - testoStato.width)
+        }
+        val colonnaTreni = (larghezza - colonnaStato - colonnaPrezzo - 2 * spazio).coerceAtLeast(0)
+
+        // Solo nel caso estremo i treni si rimisurano, e vanno a capo.
+        val treniMisurati = if (inRiga.width <= colonnaTreni) {
+            inRiga
+        } else {
+            subcompose(Parte.TRENI_A_CAPO, treni).single().measure(Constraints(maxWidth = colonnaTreni))
+        }
+
+        // Tutte e tre sulla stessa linea di base; chi non ne ha una si allinea dall'alto.
+        fun Placeable.base() = this[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
+        val parti = listOf(treniMisurati, testoStato, testoPrezzo)
+        val base = parti.maxOf { it.base() }
+        val altezza = parti.maxOf { it.height + base - it.base() }
+        val inizioStato = colonnaTreni + spazio
+        val inizioPrezzo = inizioStato + colonnaStato + spazio
+
+        layout(larghezza, altezza) {
+            treniMisurati.place(0, base - treniMisurati.base())
+            // Le colonne sono allineate a destra, come i numeri.
+            testoStato.place(inizioStato + colonnaStato - testoStato.width, base - testoStato.base())
+            testoPrezzo.place(inizioPrezzo + colonnaPrezzo - testoPrezzo.width, base - testoPrezzo.base())
+        }
+    }
+}
+
+/** Le parti della riga in fondo alla scheda: vedi [RigaColonne]. */
+private enum class Parte { TRENI, TRENI_A_CAPO, STATO, PREZZO }
+
 @Composable
 private fun SiglaTreno(sigla: String) {
     val colore = MaterialTheme.colorScheme.onSurface
@@ -835,8 +988,12 @@ private fun StatoSoluzione(row: JourneyRow) {
  * biglietto proprio per quell'orario, non lo trova: deve saperlo prima di
  * correre in banchina, non davanti alla macchinetta.
  *
- * Solo sulle soluzioni di Le Frecce, le sole per cui l'abbiamo sentito dire
- * dalla fonte.
+ * Solo dove lo dice la fonte. Le Frecce per ogni soluzione partita in tabella:
+ * la porta del sito lo scrive come regola, "It's not possible to buy a travel
+ * solution if the departure date is before current date" (18/09/2026). Trenord
+ * soluzione per soluzione, con `PAST_DEPARTURE_DATE`: vedi `Journey.venditaChiusa`.
+ * Prima valeva per le sole soluzioni di Le Frecce, e il RE 2844 del 18/09/2026,
+ * che nella fusione arrivava da Trenord, restava senza prezzo e senza un perche'.
  */
 @Composable
 private fun VenditaChiusa() {
@@ -895,8 +1052,12 @@ private fun Prezzo(j: Journey) {
             Text("esaurito", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
         }
         val etichetta = when {
-            j.price != null && !j.isDirect -> "intero viaggio"
-            j.partialPrice != null -> "solo " + operatoreParziale(j)
+            // Su un misto, il pezzo di un operatore.
+            j.price == null && j.assembled -> "solo " + operatoreParziale(j)
+            // Il tratto urbano nel prezzo non c'e': prima questa scheda diceva
+            // "intero viaggio" su «Urbano › FR 9715», ed era falso.
+            j.price == null || j.legs.any { it.urbano } -> "solo treno"
+            !j.isDirect -> "intero viaggio"
             else -> null
         }
         etichetta?.let {
@@ -948,8 +1109,9 @@ private fun apri(
 }
 
 /**
- * Avviso di servizio. Arriva solo da Trenord ed e' l'unica fonte che spieghi
- * *perche'* una tratta oggi non abbia treni: lavori, sospensioni, sostitutivi.
+ * Avviso di servizio. Arriva da Trenord, l'unica fonte che spieghi *perche'*
+ * una tratta oggi non abbia treni — lavori, sospensioni, sostitutivi — oppure
+ * dall'app stessa, quando Trenitalia non risponde.
  */
 @Composable
 private fun AlertCard(alert: ServiceAlert) {

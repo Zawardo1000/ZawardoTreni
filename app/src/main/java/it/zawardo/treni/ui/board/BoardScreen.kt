@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
+import it.zawardo.treni.ui.common.lateColor
 import it.zawardo.treni.ui.common.rememberLocationRequester
 import it.zawardo.treni.ui.common.stateColor
 import java.time.Instant
@@ -414,12 +415,13 @@ private fun BoardRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (!cancelled && entry.delayMinutes != 0) {
+                } else if (!cancelled && (entry.delayMinutes != 0 || entry.state == TrainState.DELAYED)) {
                     Text(
-                        "  " + delayLabel(entry.delayMinutes),
+                        // In ritardo senza cifra: EAV a volte lo dice senza dire di quanto.
+                        "  " + if (entry.delayMinutes != 0) delayLabel(entry.delayMinutes) else "in ritardo",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        color = stateColor(entry.state, entry.delayMinutes),
+                        color = if (entry.delayMinutes != 0) stateColor(entry.state, entry.delayMinutes) else lateColor(),
                     )
                 }
                 if (cancelled) {

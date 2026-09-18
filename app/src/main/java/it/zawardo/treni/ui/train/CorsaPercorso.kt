@@ -52,7 +52,9 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.variazione
 import it.zawardo.treni.ui.common.BinarioPillola
+import it.zawardo.treni.ui.common.avvisiDaMostrare
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.fermoInRitardo
 import it.zawardo.treni.ui.common.lateColor
@@ -178,7 +180,8 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
                     fontWeight = FontWeight.SemiBold,
                     color = scheme.onSurfaceVariant,
                 )
-                anomalia != null && !fermo -> Text(
+                // Una variazione non prende il posto del ritardo: vedi `variazione`.
+                anomalia != null && !fermo && !status.state.variazione -> Text(
                     anomalia,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
@@ -191,7 +194,16 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
                         style = Cifre.scarto,
                         color = scartoColor(status.delayMinutes),
                     )
-                    if (status.delayMinutes != 0) {
+                    // Accanto al ritardo, al posto di «di ritardo»: la riga e' una sola.
+                    if (anomalia != null && status.state.variazione) {
+                        Text(
+                            "  · " + anomalia.lowercase(),
+                            Modifier.alignByBaseline(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = stateColor(status.state, status.delayMinutes),
+                        )
+                    } else if (status.delayMinutes != 0) {
                         Text(
                             when {
                                 fermo -> "  non ancora partito"
@@ -254,6 +266,8 @@ internal fun ColumnScope.DettagliCorsa(
                 !status.realtime -> "Orario previsto"
                 fermoInRitardo(status.state, status.delayMinutes) ->
                     delayLabel(status.delayMinutes) + " · non ancora partito"
+                status.state.variazione ->
+                    delayLabel(status.delayMinutes) + " · " + stateLabel(status.state).orEmpty().lowercase()
                 else -> stateLabel(status.state) ?: delayLabel(status.delayMinutes)
             },
             style = MaterialTheme.typography.headlineSmall,
@@ -313,13 +327,14 @@ internal fun ColumnScope.DettagliCorsa(
         }
     }
 
-    // La riga separa il ritardo dall'avviso di servizio: senza niente sotto
+    // La riga separa il ritardo dagli avvisi di servizio: senza niente sotto
     // sarebbe un taglio in fondo alla scheda.
-    if (status.notice != null) {
+    val avvisi = status.avvisiDaMostrare()
+    if (avvisi.isNotEmpty()) {
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
     }
 
-    status.notice?.let {
+    avvisi.forEach {
         Text(
             it,
             Modifier.padding(top = 4.dp),
@@ -504,6 +519,9 @@ internal fun FermataRiga(
             }
             if (stopCancelled) {
                 Text("Fermata soppressa", style = MaterialTheme.typography.bodySmall, color = lateColor())
+            } else if (stop.straordinaria) {
+                // Stesso colore di "Percorso variato": e' quella variazione, vista da qui.
+                Text("Fermata straordinaria", style = MaterialTheme.typography.bodySmall, color = scheme.tertiary)
             } else if (!stop.detected) {
                 Text(
                     if (stop.effectiveArrival != null || stop.effectiveDeparture != null) {

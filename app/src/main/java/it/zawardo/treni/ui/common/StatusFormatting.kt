@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.TrainStatus
 
 /*
  * Verde = anticipo, rosso = ritardo, su tutta l'app.
@@ -142,3 +143,15 @@ fun stateColor(state: TrainState, delayMinutes: Int?): Color = when (state) {
     TrainState.ARRIVED -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> delayColor(delayMinutes)
 }
+
+/**
+ * Gli avvisi di una corsa, nell'ordine in cui si leggono: cosa cambia oggi,
+ * perche', e cosa succede sulla linea.
+ *
+ * Il "cosa" e il "perche'" vengono di solito da due fonti — ViaggiaTreno scrive
+ * il percorso variato, Trenord il motivo — e stanno uno sotto l'altro perche'
+ * il secondo spiega il primo. Una funzione sola per il dettaglio e per il
+ * viaggio con cambi, che altrimenti li mostrerebbero ciascuno a modo suo.
+ */
+fun TrainStatus.avvisiDaMostrare(): List<String> =
+    listOfNotNull(notice, motivo?.let { "Motivo: $it" }) + avvisi

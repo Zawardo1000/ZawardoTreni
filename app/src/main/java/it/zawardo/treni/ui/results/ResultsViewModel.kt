@@ -8,6 +8,7 @@ import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.JourneySource
 import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
@@ -17,11 +18,15 @@ import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.coincidenza
 import it.zawardo.treni.domain.model.declaredState
 import it.zawardo.treni.domain.model.fermataA
+import it.zawardo.treni.domain.model.prezzoDaTrenord
+import it.zawardo.treni.domain.model.soloTreni
 import it.zawardo.treni.domain.model.partenzaAncoraUtile
+import it.zawardo.treni.domain.model.primoCambio
 import it.zawardo.treni.domain.model.soppressione
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,11 +60,48 @@ data class JourneyRow(
      */
     val partenzaStimata: LocalDateTime? = null,
     /**
-     * Su una di quelle soluzioni, la coincidenza che coi ritardi di adesso si
-     * perde di poco: si propone lo stesso, ma va detto. Vedi `coincidenza`.
+     * Come sta il primo cambio coi ritardi di adesso: vedi `coincidenza`.
+     *
+     * Su una soluzione gia' passata in tabella non arriva mai persa, perche' in
+     * quel caso la soluzione non si propone affatto. Sulle altre la riga resta e
+     * lo dice, come resta barrato un treno soppresso: vedi
+     * `ResultsViewModel.enrich`.
      */
-    val coincidenzaARischio: Boolean = false,
+    val coincidenza: Coincidenza = Coincidenza.REGGE,
+    /**
+     * Quante richieste stanno cercando il prezzo di questa riga: vedi
+     * `ResultsViewModel.riprovaPrezzi` e `prezziDeiTreni`. Un contatore e non un
+     * si'/no, perche' sulla stessa riga possono lavorare tutte e due, e la prima
+     * che finisce non deve spegnere la rotella dell'altra.
+     */
+    val richiestePrezzo: Int = 0,
 ) {
+    /** Il prezzo manca e lo si sta chiedendo: al suo posto, una rotella. */
+    val prezzoInArrivo: Boolean get() = richiestePrezzo > 0
+
+    /**
+     * I campi del tempo reale letti in [letta], sopra la riga com'e' adesso.
+     *
+     * Non la riga letta intera: e' una copia presa prima delle chiamate, e nel
+     * frattempo possono essere arrivati prezzi o partite le loro rotelle, che
+     * rimpiazzandola si perderebbero. Vedi `ResultsViewModel.enrich`.
+     */
+    fun conTempoRealeDi(letta: JourneyRow): JourneyRow = copy(
+        loadingStatus = letta.loadingStatus,
+        state = letta.state,
+        delayMinutes = letta.delayMinutes,
+        scheduledPlatform = letta.scheduledPlatform,
+        actualPlatform = letta.actualPlatform,
+    )
+
+    /**
+     * Una soluzione Le Frecce senza prezzo, di quelle che una ricerca nuova puo'
+     * riempire. Non i misti, il cui prezzo e' parziale per costruzione.
+     */
+    val aspettaPrezzo: Boolean
+        get() = journey.source == JourneySource.LEFRECCE && !journey.assembled &&
+            journey.price == null && journey.partialPrice == null
+
     /** Stabile fra un refresh e l'altro: evita che la lista salti sotto le dita. */
     val key: String
         get() = journey.departure.toString() + "|" +
@@ -79,7 +121,18 @@ data class JourneyRow(
      * domani mattina, e chiedere per quelle lo stato di oggi risponde con la
      * corsa sbagliata, quasi sempre gia' arrivata.
      */
-    val isRealtimeDay: Boolean get() = journey.departure.toLocalDate() == LocalDate.now()
+    val isRealtimeDay: Boolean get() = giornoDelPrimoTreno == LocalDate.now()
+
+    /**
+     * Il giorno del primo treno, che non e' sempre quello della soluzione.
+     *
+     * «Urbano › RE 10911» da Milano Porta Garibaldi, il 18/09/2026: il tratto
+     * urbano alle 23:52, il treno da Lambrate dopo la mezzanotte. Chiesto col
+     * giorno della soluzione, il 10911 era la corsa della notte prima, e la riga
+     * diceva "Arrivato" con un binario cambiato che non era il suo.
+     */
+    val giornoDelPrimoTreno: LocalDate
+        get() = (journey.legs.firstOrNull { it.isTrain }?.departure ?: journey.departure).toLocalDate()
 
     /** Interrogabile davvero: un treno, e nella giornata in cui il dato esiste. */
     val realtimeNow: Boolean get() = realtimePossible && isRealtimeDay
@@ -108,6 +161,11 @@ data class ResultsUiState(
     val directOnly: Boolean = false,
     /** Sta ancora cercando i viaggi misti (beta), che arrivano dopo i diretti. */
     val loadingMisti: Boolean = false,
+    /**
+     * Trenitalia non ha risposto nemmeno ai nuovi tentativi: le corse
+     * nazionali mancano per un guasto. Vedi `SearchOutcome.nazionaleNonRisponde`.
+     */
+    val nazionaleNonRisponde: Boolean = false,
 )
 
 class ResultsViewModel(
@@ -201,14 +259,16 @@ class ResultsViewModel(
                     loading = false,
                     journeys = rows,
                     alerts = outcome.alerts,
+                    nazionaleNonRisponde = outcome.nazionaleNonRisponde,
                     noSameDayResults = rows.isNotEmpty() &&
                         rows.none { r -> r.journey.departure.toLocalDate() == requestedDay },
                 )
             }
             enrich(rows)
+            prezziDeiTreni(rows)
             cercaAncoraPrendibili()
             cercaAltreSoluzioni(direttoMigliore = list.minByOrNull { it.duration }?.duration)
-            if (outcome.prezziAssenti) riprovaPrezzi(departure, PAGE)
+            if (outcome.prezziAssenti) riprovaPrezzi(departure, PAGE, rows)
         }
     }
 
@@ -278,28 +338,110 @@ class ResultsViewModel(
     }
 
     /**
-     * Una ricerca tornata tutta senza prezzi si rifa' una volta, in sottofondo.
+     * Una ricerca tornata tutta senza prezzi si rifa', in sottofondo, piu' volte.
      *
      * Le Frecce a volte risponde senza alcun prezzo, Frecce comprese: misurato
      * l'11/09/2026 in 12 ricerche su 36, quasi tutte su tratte regionali
      * lombarde. Richiamare la stessa sessione non cambia niente, una ricerca
      * nuova si'. La lista resta a schermo com'e': i prezzi, se arrivano, si
      * aggiungono alle righe che ne sono senza, e nient'altro si muove.
+     *
+     * **Un tentativo solo non bastava.** Il 18/09/2026, sedici ricerche a
+     * quattro secondi l'una dall'altra: Roma-Firenze ha portato i prezzi in 6
+     * su 8, coi buchi sparsi (si', no, si', si', si', no, si', si');
+     * Milano-Brescia in 2 su 8. E i buchi vengono a grappoli: tre ricerche di
+     * fila, una subito dopo l'altra, erano tornate tutte e tre senza. Quindi
+     * fino a tre tentativi, distanziati ([ATTESE_PREZZI]), fermandosi al primo
+     * che porta prezzi: e' una ricerca riuscita, e quel che li' resta senza
+     * prezzo non e' in vendita.
+     *
+     * **Solo quando mancano tutti**, non quando ne manca qualcuno. Da quando la
+     * ricerca prende i prezzi anche dal sito di Trenitalia (vedi
+     * `LefrecceApi.soluzioniDelSito`), una lista tutta senza prezzi vuol dire
+     * che non hanno risposto ne' l'app ne' il sito; le singole righe senza sono
+     * biglietti che Trenitalia li' non vende, e per quelle c'e' [prezziDeiTreni].
+     *
+     * Intanto le righe senza prezzo mostrano una rotella al suo posto, come la
+     * pillola del binario mentre lo si chiede. Si segnano solo le [righe] di
+     * questa pagina: due pagine possono riprovare insieme, e la prima che
+     * finisce non deve spegnere la rotella dell'altra.
      */
-    private fun riprovaPrezzi(quando: LocalDateTime, limite: Int) {
+    private fun riprovaPrezzi(quando: LocalDateTime, limite: Int, righe: List<JourneyRow>) {
+        val attese = righe.filter { it.aspettaPrezzo }.map { it.key }.toSet()
+        if (attese.isEmpty()) return
         viewModelScope.launch {
-            val prezzi = runCatching { journeys.prezziLeFrecce(from, to, quando, limite) }
-                .getOrDefault(emptyMap())
-            if (prezzi.isEmpty()) return@launch
-            _state.update { s ->
-                s.copy(
-                    journeys = s.journeys.map { riga ->
-                        if (riga.journey.price != null) return@map riga
-                        val prezzo = prezzi[chiaveSoluzione(riga.journey)] ?: return@map riga
-                        riga.copy(journey = riga.journey.copy(price = prezzo))
-                    },
-                )
+            segnaPrezzoInArrivo(attese, +1)
+            try {
+                for (attesa in ATTESE_PREZZI) {
+                    delay(attesa)
+                    val prezzi = runCatching { journeys.prezziLeFrecce(from, to, quando, limite) }
+                        .getOrDefault(emptyMap())
+                    if (prezzi.isEmpty()) continue
+                    _state.update { s ->
+                        s.copy(
+                            journeys = s.journeys.map { riga ->
+                                if (riga.journey.price != null) return@map riga
+                                val prezzo = prezzi[chiaveSoluzione(riga.journey)] ?: return@map riga
+                                riga.copy(journey = riga.journey.copy(price = prezzo))
+                            },
+                        )
+                    }
+                    break
+                }
+            } finally {
+                segnaPrezzoInArrivo(attese, -1)
             }
+        }
+    }
+
+    /**
+     * Il prezzo dei treni dove Le Frecce non ne da' nessuno, chiesto a Trenord:
+     * vedi `JourneyRepository.prezziDeiTreni`.
+     *
+     * In sottofondo come [riprovaPrezzi]: la lista resta ferma, al posto del
+     * prezzo gira la rotella, e il prezzo, se arriva, si aggiunge. Intero su una
+     * soluzione di soli treni; parziale — «solo treno» — con un tratto urbano o
+     * in autobus, il cui biglietto non c'e' dentro. Solo con Trenord acceso: e' a
+     * lui che si chiede.
+     */
+    private fun prezziDeiTreni(righe: List<JourneyRow>) {
+        if (DataSource.TRENORD !in sources) return
+        val daPrezzare = righe.filter { it.journey.prezzoDaTrenord }
+        if (daPrezzare.isEmpty()) return
+        val chiavi = daPrezzare.map { it.key }.toSet()
+        viewModelScope.launch {
+            segnaPrezzoInArrivo(chiavi, +1)
+            try {
+                val prezzi = runCatching { journeys.prezziDeiTreni(daPrezzare.map { it.journey }) }
+                    .getOrDefault(emptyMap())
+                if (prezzi.isEmpty()) return@launch
+                _state.update { s ->
+                    s.copy(
+                        journeys = s.journeys.map { riga ->
+                            val viaggio = riga.journey
+                            if (!viaggio.prezzoDaTrenord) return@map riga
+                            val prezzo = prezzi[chiaveSoluzione(viaggio)] ?: return@map riga
+                            riga.copy(
+                                journey = if (viaggio.soloTreni) viaggio.copy(price = prezzo)
+                                else viaggio.copy(partialPrice = prezzo),
+                            )
+                        },
+                    )
+                }
+            } finally {
+                segnaPrezzoInArrivo(chiavi, -1)
+            }
+        }
+    }
+
+    private fun segnaPrezzoInArrivo(chiavi: Set<String>, variazione: Int) {
+        _state.update { s ->
+            s.copy(
+                journeys = s.journeys.map { riga ->
+                    if (riga.key !in chiavi) return@map riga
+                    riga.copy(richiestePrezzo = (riga.richiestePrezzo + variazione).coerceAtLeast(0))
+                },
+            )
         }
     }
 
@@ -369,6 +511,8 @@ class ResultsViewModel(
             var found = emptyList<Journey>()
             // Da dove rifare la ricerca, se questa finestra torna tutta senza prezzi.
             var riprovaDa: LocalDateTime? = null
+            // Una finestra vuota per un guasto non dice che prima non c'e' niente.
+            var guasto = false
             for (hoursBack in intArrayOf(3, 8)) {
                 val start = first.minusHours(hoursBack.toLong())
                 // Prima dell'inizio del giorno non c'e' niente da cercare.
@@ -377,6 +521,7 @@ class ResultsViewModel(
                 // devono comparire, altrimenti la lista cambia natura scorrendo.
                 val esito = runCatching { journeys.searchAll(from, to, clamped, limit = WIDE_PAGE, sources = sources) }
                     .getOrNull()
+                if (esito == null || esito.nazionaleNonRisponde) guasto = true
                 val batch = esito?.journeys.orEmpty()
                     .applyDirectFilter()
                     .filter { it.departure.isBefore(first) }
@@ -405,7 +550,7 @@ class ResultsViewModel(
                     s.copy(
                         loadingEarlier = false,
                         journeys = (rows + s.journeys).sortedBy { it.journey.departure },
-                        noMoreEarlier = rows.isEmpty(),
+                        noMoreEarlier = rows.isEmpty() && !guasto,
                     )
                 }
                 return@launch
@@ -419,7 +564,8 @@ class ResultsViewModel(
                 s.copy(loadingEarlier = false, journeys = (rows + s.journeys).sortedBy { it.journey.departure }, noMoreEarlier = rows.isEmpty())
             }
             enrich(rows)
-            riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE) }
+            prezziDeiTreni(rows)
+            riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE, rows) }
         }
     }
 
@@ -437,6 +583,9 @@ class ResultsViewModel(
             }.getOrNull()
             val batch = esito?.journeys.orEmpty().applyDirectFilter()
                 .filter { it.departure.isAfter(last) }
+            // Una finestra vuota per un guasto non dice che dopo non c'e' niente:
+            // il pulsante resta, e riprovare tocca a chi guarda.
+            val guasto = esito == null || esito.nazionaleNonRisponde
 
             val existing = current.journeys.map { it.key }.toSet()
 
@@ -450,7 +599,7 @@ class ResultsViewModel(
                     .sortedBy { it.journey.departure }
                     .take(PAGE)
                 _state.update { s ->
-                    s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty())
+                    s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty() && !guasto)
                 }
                 return@launch
             }
@@ -464,7 +613,8 @@ class ResultsViewModel(
                 s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty())
             }
             enrich(rows)
-            if (esito?.prezziAssenti == true) riprovaPrezzi(last.plusMinutes(1), WIDE_PAGE)
+            prezziDeiTreni(rows)
+            if (esito?.prezziAssenti == true) riprovaPrezzi(last.plusMinutes(1), WIDE_PAGE, rows)
         }
     }
 
@@ -525,10 +675,7 @@ class ResultsViewModel(
                             ?: return@async null
                         val coincidenza = coincidenzaDi(riga.journey, stato)
                         if (coincidenza == Coincidenza.PERSA) return@async null
-                        arricchita.copy(
-                            partenzaStimata = partenza,
-                            coincidenzaARischio = coincidenza == Coincidenza.A_RISCHIO,
-                        )
+                        arricchita.copy(partenzaStimata = partenza, coincidenza = coincidenza)
                     }
                 }.awaitAll().filterNotNull()
             }
@@ -556,7 +703,7 @@ class ResultsViewModel(
     private suspend fun coincidenzaDi(j: Journey, primo: TrainStatus?): Coincidenza {
         val inOrario = j.coincidenza(primo, secondo = null)
         if (inOrario == Coincidenza.REGGE) return inOrario
-        val poi = j.legs.getOrNull(1)?.takeIf { it.isTrain } ?: return inOrario
+        val poi = j.primoCambio()?.second?.takeIf { it.isTrain } ?: return inOrario
         val numero = poi.trainNumber ?: return inOrario
         val secondo = runCatching {
             trains.statusByNumber(
@@ -583,10 +730,25 @@ class ResultsViewModel(
     }
 
     /**
-     * Arricchisce le righe indicate con lo stato del loro primo treno.
+     * Arricchisce le righe indicate con lo stato del loro primo treno, e poi con
+     * la tenuta del loro primo cambio.
      *
      * Le chiamate partono in parallelo: in serie sarebbero una dozzina di
      * round-trip verso ViaggiaTreno e la lista resterebbe grigia per secondi.
+     *
+     * **La coincidenza si guarda su ogni riga, non solo su quelle gia' passate
+     * in tabella.** Il 18/09/2026 l'elenco dava il REG 2987 delle 23:56 da Porta
+     * Garibaldi a +31, con otto minuti di cambio a Milano Centrale, e non diceva
+     * altro: che il cambio saltasse lo diceva solo la pagina del viaggio. Quel
+     * +31 era a sua volta sbagliato (vedi `TrainStatusRepository.nonPartitoVuolDireFermo`),
+     * ma la lacuna era vera: qualunque ritardo oltre il margine del cambio,
+     * l'elenco lo taceva. Viene in un secondo giro, a stato gia' a schermo:
+     * costa una chiamata solo dove il ritardo fa saltare il cambio (vedi
+     * [coincidenzaDi]), e non deve tenere ferme le altre righe. Un treno
+     * soppresso non ha coincidenze da perdere: la sua riga e' gia' barrata.
+     *
+     * Ogni giro scrive solo i campi suoi, sulla riga com'e' in quel momento:
+     * vedi [JourneyRow.conTempoRealeDi].
      */
     private fun enrich(rows: List<JourneyRow>) {
         // Ogni riga vale per il proprio giorno: quelle di domani non si chiedono.
@@ -594,12 +756,23 @@ class ResultsViewModel(
         if (interrogabili.isEmpty()) return
 
         viewModelScope.launch {
-            val enriched = coroutineScope {
-                interrogabili.map { row -> async { conStato(row).first } }.awaitAll()
+            val letture = coroutineScope {
+                interrogabili.map { row -> async { conStato(row) } }.awaitAll()
             }
-            val byKey = enriched.associateBy { it.key }
+            val lette = letture.associate { (riga, _) -> riga.key to riga }
             _state.update { s ->
-                s.copy(journeys = s.journeys.map { byKey[it.key] ?: it })
+                s.copy(journeys = s.journeys.map { r -> lette[r.key]?.let(r::conTempoRealeDi) ?: r })
+            }
+
+            val coincidenze = coroutineScope {
+                letture
+                    .filter { (riga, _) -> riga.state != TrainState.CANCELLED }
+                    .map { (riga, stato) -> async { riga.key to coincidenzaDi(riga.journey, stato) } }
+                    .awaitAll()
+            }.filter { (_, c) -> c != Coincidenza.REGGE }.toMap()
+            if (coincidenze.isEmpty()) return@launch
+            _state.update { s ->
+                s.copy(journeys = s.journeys.map { r -> coincidenze[r.key]?.let { r.copy(coincidenza = it) } ?: r })
             }
         }
     }
@@ -615,7 +788,7 @@ class ResultsViewModel(
             ?: return row.copy(loadingStatus = false) to null
         val number = leg.trainNumber
             ?: return row.copy(loadingStatus = false) to null
-        val giorno = row.journey.departure.toLocalDate()
+        val giorno = leg.departure.toLocalDate()
         val status = runCatching {
             /*
              * Data e stazione di salita sono della tratta, non della ricerca: lo
@@ -699,6 +872,13 @@ class ResultsViewModel(
 
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15
+
+        /**
+         * Le attese prima di ogni nuova ricerca dei prezzi: vedi [riprovaPrezzi].
+         * Crescenti, perche' i buchi di Le Frecce vengono a grappoli; in tutto
+         * una quindicina di secondi, piu' i tre o quattro di ogni ricerca.
+         */
+        val ATTESE_PREZZI = listOf(1_000L, 4_000L, 10_000L)
 
         /**
          * Grazia sui viaggi misti: si tengono anche se il feeder e' partito da

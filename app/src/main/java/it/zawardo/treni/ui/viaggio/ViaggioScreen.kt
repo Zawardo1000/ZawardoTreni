@@ -81,6 +81,7 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.variazione
 import it.zawardo.treni.domain.model.binarioDaMostrare
 import it.zawardo.treni.domain.model.dopoLaDiscesa
 import it.zawardo.treni.domain.model.indiceFermata
@@ -90,6 +91,7 @@ import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.ui.TrattaViaggio
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.BinarioPillola
+import it.zawardo.treni.ui.common.avvisiDaMostrare
 import it.zawardo.treni.ui.common.onLateColor
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.lateBackground
@@ -505,7 +507,7 @@ private fun SchedaTratta(
             }
         }
 
-        status?.notice?.let {
+        status?.avvisiDaMostrare()?.forEach {
             Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.tertiary)
         }
 
@@ -1152,7 +1154,8 @@ private fun ScartoBreve(status: TrainStatus?) {
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,
         )
-        anomalia != null && status.state != TrainState.NOT_DEPARTED -> Text(
+        // Una variazione la dice gia' l'etichetta accanto al numero: qui resta il ritardo.
+        anomalia != null && status.state != TrainState.NOT_DEPARTED && !status.state.variazione -> Text(
             anomalia,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,

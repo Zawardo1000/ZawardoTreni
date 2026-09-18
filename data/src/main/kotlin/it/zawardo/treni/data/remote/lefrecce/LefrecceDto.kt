@@ -34,7 +34,7 @@ data class CoordinatesDto(
 data class SearchResponseDto(
     val searchId: String = "",
     val totalSolutions: Int = 0,
-    /** Il searchId scade circa 10 minuti dopo: oltre, `/solutions` risponde 410. */
+    /** Il searchId scade 15 minuti dopo: oltre, `/solutions` risponde 410. */
     val expirationDate: String? = null,
 )
 
@@ -136,4 +136,69 @@ data class ClassificationDto(
     val type: String? = null,
     /** Testo leggibile: "Autobus", "Urbano", "Frecciarossa"... */
     val classification: String? = null,
+)
+
+// ------------------------------------------------ la ricerca del sito
+
+/**
+ * La ricerca come la fa il sito di Trenitalia: vedi `LefrecceApi.soluzioniDelSito`.
+ * Tutti i campi espliciti, senza valori di default: il JSON dell'app non scrive i
+ * default, e il sito li manda tutti.
+ */
+@Serializable
+data class RichiestaSito(
+    val departureLocationId: Long,
+    val arrivalLocationId: Long,
+    /** Ora locale senza fuso, come la scrive il sito: `2026-09-19T08:00:00.000`. */
+    val departureTime: String,
+    val adults: Int,
+    val children: Int,
+    val criteria: CriteriSito,
+    val advancedSearchRequest: RicercaAvanzataSito,
+)
+
+@Serializable
+data class CriteriSito(
+    val frecceOnly: Boolean,
+    val regionalOnly: Boolean,
+    val intercityOnly: Boolean,
+    val tourismOnly: Boolean,
+    val noChanges: Boolean,
+    val order: String,
+    val offset: Int,
+    /** Il sito ne restituisce dieci, qualunque sia il limite: si pagina con [offset]. */
+    val limit: Int,
+)
+
+@Serializable
+data class RicercaAvanzataSito(val bestFare: Boolean)
+
+@Serializable
+data class RispostaSito(val solutions: List<VoceSito> = emptyList())
+
+@Serializable
+data class VoceSito(val solution: SoluzioneSito? = null)
+
+@Serializable
+data class SoluzioneSito(
+    val departureTime: String? = null,
+    /** `SALEABLE`, o `NOT_SALEABLE` per un biglietto che adesso non si compra. */
+    val status: String? = null,
+    val trains: List<TrenoSito> = emptyList(),
+    val price: PrezzoSito? = null,
+)
+
+@Serializable
+data class TrenoSito(
+    val acronym: String? = null,
+    /** Il numero del treno; null sul tratto urbano. */
+    val name: String? = null,
+    /** Il tratto urbano, che il prezzo non comprende ("not included in the price"). */
+    val urban: Boolean = false,
+)
+
+@Serializable
+data class PrezzoSito(
+    val amount: Double? = null,
+    val hideAmount: Boolean = false,
 )

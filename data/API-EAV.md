@@ -19,7 +19,7 @@ di qualunque altra fonte già integrata nell'app.
 Endpoint unico, scoperto dal codice di `/teleindicatori/`:
 
 ```
-POST https://orariotreni.eavsrl.it/teleindicatori/ws_getData.php
+POST https://orariotreni.eavsrl.it/teleindicatori/ws_getData_pis.php
 Content-Type: application/x-www-form-urlencoded
 
 tipoLista=P&codLoc=1&visualizzazione=mobile
@@ -32,9 +32,27 @@ tipoLista=P&codLoc=1&visualizzazione=mobile
 | `visualizzazione` | `mobile` → 40 corse; qualunque altro valore o assente → 10 | **è un interruttore, non un numero**: `100` dà 10 |
 | `device` | ignorato | il sito manda `M01T1M`, ma qualunque valore o l'assenza non cambia nulla |
 
+> **Aggiornamento 18/09/2026.** Il file si chiamava `ws_getData.php` e ora risponde 404:
+> EAV l'ha rinominato `ws_getData_pis.php`, lasciando identici parametri, `codLoc` e HTML
+> (verificato su tutte le 126 stazioni col tabellone, partenze e arrivi, senza chiavi né
+> cookie). Il sito prepara anche `ws_getData_moova.php`, che vuole gli `idLocMoova`
+> (`TNPNTS…`) al posto dei `codLoc` e che il sito in produzione **non usa**: righe che
+> sconfinano nel giorno dopo senza data, treni già partiti ancora in lista, binari
+> inaffidabili (tutti gli arrivi di Porta Nolana al binario 1), ritardi diversi da quelli
+> dell'altro endpoint nello stesso minuto. In cambio sulle partenze dà `Ferma a:` con le
+> fermate restanti, ma a orario di tabella, per nome e senza capolinea sulla Cumana. Nessun
+> endpoint per singola corsa e nessun parametro di data, su nessuno dei due.
+>
+> Le notizie per corsa di `www.eavsrl.it/wp-json/wp/v2/posts?categories=41` (ritardi e
+> soppressioni col motivo) sono ferme al 13/09/2026: EAV rimanda a `orariotreni.eavsrl.it`.
+
 **Insidie verificate:**
 
-- **GET non funziona.** Risponde 200 con un corpo vuoto di 246 byte. Serve POST.
+- **GET non funziona.** Il 28/08/2026 rispondeva 200 con un corpo vuoto di 246 byte; dal
+  18/09/2026 con una pagina "Lista non disponibile" senza righe. Serve POST.
+- **"IN RITARDO" senza minuti.** In `informazioni` c'è "IN RITARDO - DELAYED" e nella cella
+  del ritardo `RIT.` invece di un numero: in ritardo, di quanto non si sa. Il 18/09/2026
+  Dazio ne elencava venti del mattino alle 18:12.
 - **Nessun parametro di data.** `data`, `giorno`, `dataRif` vengono ignorati: la risposta
   è sempre "adesso". Per una data futura serve il GTFS.
 - **Stazione inesistente non è un errore**: 200 con corpo vuoto. Va distinto dal caso

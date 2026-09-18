@@ -89,6 +89,32 @@ fun TrainStatus.conBinariDa(altra: TrainStatus): TrainStatus {
 }
 
 /**
+ * Porta su una corsa il perche' della sua variazione, e gli avvisi di
+ * circolazione, da un'altra lettura della stessa corsa.
+ *
+ * Il percorso lo sa ViaggiaTreno, il perche' solo Trenord: nel REG 2833 del
+ * 18/09/2026, deviato su Sesto S.Giovanni, ViaggiaTreno scriveva cosa cambiava
+ * e Trenord "Richiesta Impresa Ferroviaria". Si prende con la stessa chiamata
+ * dei binari, quindi non costa niente.
+ *
+ * Solo se le due letture sono **la stessa corsa**: almeno una fermata in
+ * comune, per stazione e orario di tabella, come in [conBinariDa]. Lo stesso
+ * numero puo' essere di due treni diversi, e il motivo della soppressione di un
+ * altro treno sarebbe peggio di nessun motivo.
+ */
+fun TrainStatus.conAvvisiDa(altra: TrainStatus): TrainStatus {
+    if (altra.motivo == null && altra.avvisi.isEmpty()) return this
+    val stessaCorsa = stops.any { fermata ->
+        altra.stops.any { stessaStazione(fermata.stationCode, it.stationCode) && fermata.eLaStessaFermataDi(it) }
+    }
+    if (!stessaCorsa) return this
+    return copy(
+        motivo = motivo ?: altra.motivo,
+        avvisi = (avvisi + altra.avvisi).distinct(),
+    )
+}
+
+/**
  * Il binario di una riga di tabellone, aggiornato con quello della corsa stessa.
  *
  * **Il tabellone arriva dopo il dettaglio.** Confrontate il 14/09/2026 le
@@ -163,6 +189,11 @@ private val QUALIFICATORI = mapOf(
     "OVEST" to "ovest",
     "E" to "est",
     "EST" to "est",
+    // Scritti per esteso come EST e OVEST, e visti cosi' il 18/09/2026: "7 Sud"
+    // a Salerno, "1 NORD" a Ivrea. Solo le parole intere: "N" e "S" da sole
+    // nessuno le ha ancora viste su un binario.
+    "SUD" to "sud",
+    "NORD" to "nord",
     // Roma Termini, 14/09/2026: "20 BIS", un binario che si chiama cosi'.
     "BIS" to "bis",
     // Bologna Centrale, 14/09/2026: i binari del piazzale ovest scritti "IV-PO",

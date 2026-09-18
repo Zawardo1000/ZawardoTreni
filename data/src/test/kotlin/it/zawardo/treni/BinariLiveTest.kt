@@ -111,7 +111,7 @@ class BinariLiveTest {
      * Centrale, coi binari "19 AV" della stazione sotterranea e quelli dei
      * piazzali scritti "III-EST" e "IV-PO".
      */
-    private val paroleAmmesse = setOf("tronco", "ovest", "est", "bis", "AV")
+    private val paroleAmmesse = setOf("tronco", "ovest", "est", "sud", "nord", "bis", "AV")
 
     /**
      * Grafie viste e lasciate cosi' di proposito.

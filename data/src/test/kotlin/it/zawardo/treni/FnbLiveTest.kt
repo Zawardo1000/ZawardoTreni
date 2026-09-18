@@ -8,6 +8,7 @@ import it.zawardo.treni.domain.model.TrainState
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -43,7 +44,17 @@ class FnbLiveTest {
             )
         }
 
-        assertTrue("il tabellone non ha restituito corse", righe.isNotEmpty())
+        /*
+         * A tarda sera le partenze finiscono prima degli arrivi: il 18/09/2026
+         * alle 23:03 Bari Centrale non aveva piu' partenze e ancora cinque arrivi.
+         * Se il servizio risponde con gli arrivi, le partenze vuote sono l'orario,
+         * non un guasto; vuoto tutto, invece, e' un guasto.
+         */
+        if (righe.isEmpty()) {
+            val arrivi = fnb.board(bariCentrale, arrivals = true)
+            assertTrue("il tabellone non ha restituito corse, ne' in partenza ne' in arrivo", arrivi.isNotEmpty())
+            assumeTrue("a quest'ora da Bari Centrale non parte piu' niente", false)
+        }
         assertTrue(
             "sono passate righe senza numero di treno",
             righe.all { it.trainRef.number.isNotBlank() },

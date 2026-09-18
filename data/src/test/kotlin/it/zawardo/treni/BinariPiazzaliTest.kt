@@ -105,6 +105,19 @@ class BinariPiazzaliTest {
     }
 
     /**
+     * Salerno, 18/09/2026: il REG 5959 in arrivo al "7 Sud"; a Ivrea il REG 2736
+     * ripartiva dal "1 NORD". La parola si legge, e il numero nudo resta un altro
+     * binario: la regola di sempre.
+     */
+    @Test
+    fun `sud e nord sono qualifiche come est e ovest`() {
+        assertEquals("7 sud", binarioPulito("7 Sud"))
+        assertEquals("1 nord", binarioPulito("1 NORD"))
+        assertTrue(stessoBinario("7 Sud", "7 SUD"))
+        assertFalse("il numero nudo e' un altro binario", stessoBinario("7 Sud", "7"))
+    }
+
+    /**
      * Il piazzale ovest di Bologna scritto "PO": il 19595 aveva "2 OVEST"
      * programmato e "VI-PO" effettivo, un cambio vero dal 2 al 6.
      */

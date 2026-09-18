@@ -44,7 +44,7 @@ internal object EavStations {
     const val PREFIX = "EAV"
 
     data class Stazione(
-        /** Id EAV: il `codLoc` di `ws_getData.php`, e nel GTFS lo stesso piu' 6000. */
+        /** Id EAV: il `codLoc` di `ws_getData_pis.php`, e nel GTFS lo stesso piu' 6000. */
         val id: Int,
         val nome: String,
         /** Sigle delle linee che ci fermano, separate da virgola: `L1,L4,L6`. */
@@ -269,7 +269,7 @@ internal object EavStations {
     fun byId(id: Int): Stazione? = PER_ID[id]
 
     /**
-     * L'id da passare a `ws_getData.php`, estratto dal codice sintetico.
+     * L'id da passare a `ws_getData_pis.php`, estratto dal codice sintetico.
      * Null quando il codice non e' EAV: cosi' il chiamante non spende la
      * richiesta per scoprirlo.
      */
