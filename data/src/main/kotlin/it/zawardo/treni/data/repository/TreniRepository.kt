@@ -18,6 +18,7 @@ import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.conBinariDa
+import it.zawardo.treni.domain.model.conRitardoDaFermo
 import it.zawardo.treni.domain.model.matchesCategory
 import it.zawardo.treni.domain.model.stessaStazione
 import java.time.Duration
@@ -422,13 +423,18 @@ class TrainStatusRepository(
      *
      * Restituisce null quando ViaggiaTreno risponde 204: succede sempre per date
      * diverse da oggi, e talvolta per corse soppresse o riprogrammate.
+     *
+     * Un treno fermo all'origine oltre la sua ora esce col ritardo che ha
+     * davvero, non con lo zero di ViaggiaTreno: vedi `conRitardoDaFermo`. Qui e
+     * non nel mapper, perche' e' il solo punto da cui passano tutte le corse
+     * ViaggiaTreno e perche' vuole l'ora di adesso.
      */
     suspend fun status(ref: TrainRef): TrainStatus? = withContext(Dispatchers.IO) {
         val resp = runCatching {
             viaggiaTreno.andamentoTreno(ref.originCode, ref.number, ref.departureDateMillis)
         }.getOrElse { return@withContext null }
         if (!resp.isSuccessful || resp.code() == 204) return@withContext null
-        resp.body()?.toTrainStatus()
+        resp.body()?.toTrainStatus()?.conRitardoDaFermo(LocalDateTime.now(ROME))
     }
 
     /**
@@ -640,9 +646,10 @@ class TrainStatusRepository(
 
     suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
         withContext(Dispatchers.IO) {
+            val adesso = LocalDateTime.now(ROME)
             runCatching { viaggiaTreno.partenze(stationCode, at.format(boardFormat)) }
                 .getOrDefault(emptyList())
-                .mapNotNull { it.toBoardEntry() }
+                .mapNotNull { it.toBoardEntry()?.conRitardoDaFermo(stationCode, adesso) }
         }
 
     suspend fun arrivals(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =

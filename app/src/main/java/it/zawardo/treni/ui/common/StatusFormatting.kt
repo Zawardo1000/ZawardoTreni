@@ -122,6 +122,17 @@ fun stateLabel(state: TrainState): String? = when (state) {
     TrainState.REGULAR, TrainState.DELAYED -> null
 }
 
+/**
+ * Vero per un treno fermo all'origine oltre la sua ora: lo stato da solo non
+ * basta, serve anche il numero.
+ *
+ * «Non ancora partito» su un treno che doveva partire nove minuti fa racconta
+ * meta' della storia, e la meta' meno utile. Il ritardo lo calcola
+ * `conRitardoDaFermo`, perche' ViaggiaTreno lo lascia a zero.
+ */
+fun fermoInRitardo(state: TrainState, delayMinutes: Int?): Boolean =
+    state == TrainState.NOT_DEPARTED && (delayMinutes ?: 0) > 0
+
 /** Colore dello stato: gli stati anomali vincono sul colore del ritardo. */
 @Composable
 @ReadOnlyComposable

@@ -91,6 +91,7 @@ import it.zawardo.treni.ui.theme.Cifre
 import java.time.Duration
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.delayLabel
+import it.zawardo.treni.ui.common.fermoInRitardo
 import it.zawardo.treni.ui.common.stateColor
 import it.zawardo.treni.ui.common.stateLabel
 import java.time.LocalDate
@@ -107,12 +108,18 @@ private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIA
 /**
  * Le colonne di stato e prezzo in fondo alla scheda: vedi `JourneyCard`.
  *
- * Misurate sulle scritte piu' larghe che ci finiscono — «non partito» e
- * «Soppresso» da una parte, «vendita chiusa» con l'icona dall'altra — e
- * minime, non fisse: una scritta imprevista allarga la sua scheda invece di
- * andare a capo a meta' parola.
+ * Misurate sulle scritte piu' larghe che ci finiscono spesso — «non partito»
+ * da una parte, «vendita chiusa» con l'icona dall'altra — e minime, non fisse:
+ * una scritta piu' larga, come il bollo «Soppresso», allarga la sua scheda
+ * invece di andare a capo a meta' parola.
+ *
+ * Quella dello stato era di 84 dp, e i due treni di un viaggio con un cambio
+ * andavano a capo per quattro: «RE8 2820 › S8 24834» ne chiede 151, e ne
+ * restavano 147 (misurato il 18/09/2026 su 411 dp di schermo). A 72, con 6 fra
+ * le colonne, ci stanno anche la sigla di quattro lettere e i numeri a cinque
+ * cifre, e ritardo e prezzo, allineati a destra, non si muovono.
  */
-private val COLONNA_STATO = 84.dp
+private val COLONNA_STATO = 72.dp
 private val COLONNA_PREZZO = 104.dp
 
 /** Ritardo e prezzo: cifre tabulari come gli orari, perche' stiano in colonna. */
@@ -448,22 +455,35 @@ private fun JourneyCard(
                      * quella di tabella, come su ogni altra scheda.
                      */
                     if (row.partenzaStimata != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Schedule,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = lateColor(),
-                            )
-                            Text(
-                                "In ritardo · fai ancora in tempo",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = lateColor(),
-                                fontWeight = FontWeight.Bold,
-                            )
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Schedule,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = lateColor(),
+                                )
+                                Text(
+                                    "In ritardo · fai ancora in tempo",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = lateColor(),
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            // Il primo treno si prende, ma al cambio arriva dopo
+                            // la coincidenza: si propone contando su un recupero,
+                            // e chi la sceglie deve saperlo.
+                            if (row.coincidenzaARischio) {
+                                Text(
+                                    "Coincidenza a ${j.legs.first().to.name} a rischio",
+                                    Modifier.padding(top = 2.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = lateColor(),
+                                )
+                            }
                         }
                     }
                 }
@@ -540,7 +560,7 @@ private fun JourneyCard(
              * il posto anche vuote, perche' e' il posto fisso a farle leggere
              * come colonne.
              */
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Tratte(j, Modifier.weight(1f).alignByBaseline(), onApri)
                 Box(
                     Modifier.widthIn(min = COLONNA_STATO).alignByBaseline(),
@@ -751,6 +771,17 @@ private fun StatoSoluzione(row: JourneyRow) {
             val anomalia = stateLabel(stato)
             val minuti = row.delayMinutes ?: 0
             when {
+                // Fermo all'origine oltre la sua ora: il ritardo prima di tutto,
+                // e sotto perche' non si muove. Vedi `fermoInRitardo`.
+                fermoInRitardo(stato, minuti) -> Column(horizontalAlignment = Alignment.End) {
+                    Text(delayLabel(minuti), style = CIFRE_CODA, color = lateColor())
+                    Text(
+                        "non partito",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 anomalia != null -> Text(
                     // Nell'elenco la versione corta: «Non ancora partito» da solo
                     // mandava a capo le sigle di un viaggio con un cambio.

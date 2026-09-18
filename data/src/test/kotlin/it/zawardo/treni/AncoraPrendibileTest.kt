@@ -1,5 +1,6 @@
 package it.zawardo.treni
 
+import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.Station
@@ -7,6 +8,7 @@ import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.coincidenza
 import it.zawardo.treni.domain.model.coincidenzaRegge
 import it.zawardo.treni.domain.model.partenzaAncoraUtile
 import org.junit.Assert.assertEquals
@@ -163,20 +165,87 @@ class AncoraPrendibileTest {
         assertNull(viaggio(reg5385).partenzaAncoraUtile(corsa(stato = TrainState.CANCELLED), ora("10:10")))
     }
 
+    private val perSiracusa = { partenza: String -> Leg("3871", "REG", catania, siracusa, ora(partenza), ora("12:05")) }
+
+    /** Il treno per Siracusa, visto a Catania: in ritardo, gia' partito o soppresso. */
+    private fun siracusano(
+        partenza: String,
+        ritardo: Int = 0,
+        partito: Boolean = false,
+        stato: TrainState = if (ritardo > 0) TrainState.DELAYED else TrainState.REGULAR,
+    ) = TrainStatus(
+        number = "3871",
+        category = "REG",
+        label = "REG 3871",
+        origin = "CATANIA CENTRALE",
+        destination = "SIRACUSA",
+        delayMinutes = ritardo,
+        state = stato,
+        lastDetectionStation = null,
+        lastDetectionTime = null,
+        notice = null,
+        stops = listOf(
+            fermata(
+                1, "CATANIA CENTRALE", catania.rfiCode!!, null, partenza,
+                if (partito) StopStatus.DONE else StopStatus.FUTURE,
+                ritardo = ritardo.toLong(),
+                partenzaReale = if (partito) partenza else null,
+            ),
+            fermata(2, "SIRACUSA", siracusa.rfiCode!!, "12:05", null, ritardo = ritardo.toLong()),
+        ),
+    )
+
     /**
-     * Arrivando a Catania alle 10:47 invece che alle 10:37, il cambio per un
-     * treno delle 10:45 e' perso: quella soluzione non si fa, per quanto il
-     * primo treno si prenda ancora.
+     * Il primo treno si prende ancora, e la coincidenza e' un'altra domanda:
+     * arrivando a Catania alle 10:47 invece che alle 10:37, un cambio per le
+     * 10:55 regge.
      */
     @Test
-    fun `se il ritardo costa la coincidenza la soluzione non si prende`() {
-        val perSiracusa = { partenza: String -> Leg("3871", "REG", catania, siracusa, ora(partenza), ora("12:05")) }
+    fun `la coincidenza col margine regge`() {
+        val j = viaggio(reg5385, perSiracusa("10:55"))
+        assertEquals(ora("10:11"), j.partenzaAncoraUtile(corsa(), ora("10:10")))
+        assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(), secondo = null))
+    }
 
-        assertNull(viaggio(reg5385, perSiracusa("10:45")).partenzaAncoraUtile(corsa(), ora("10:10")))
+    /**
+     * Persa di poco si propone lo stesso: il primo treno puo' recuperare, il
+     * secondo puo' aspettare o essere in ritardo anche lui. Deciso il
+     * 18/09/2026 dopo il RE 2824 a Monza.
+     */
+    @Test
+    fun `persa di due minuti la coincidenza e' a rischio, non persa`() {
+        assertEquals(Coincidenza.A_RISCHIO, viaggio(reg5385, perSiracusa("10:45")).coincidenza(corsa(), null))
+    }
+
+    /** A +25 si arriva a Catania alle 11:02, diciassette minuti dopo il treno delle 10:45. */
+    @Test
+    fun `persa di un quarto d'ora la coincidenza e' persa`() {
+        assertEquals(Coincidenza.PERSA, viaggio(reg5385, perSiracusa("10:45")).coincidenza(corsa(ritardo = 25), null))
+    }
+
+    /** Il caso di Monza: la coincidenza reggeva, perche' era in ritardo anche il secondo. */
+    @Test
+    fun `se il secondo e' in ritardo anche lui la coincidenza regge`() {
+        val j = viaggio(reg5385, perSiracusa("10:45"))
+        assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(), siracusano("10:45", ritardo = 8)))
         assertEquals(
-            ora("10:11"),
-            viaggio(reg5385, perSiracusa("10:55")).partenzaAncoraUtile(corsa(), ora("10:10")),
+            "un minuto di ritardo del secondo non basta a recuperare i tre di margine",
+            Coincidenza.A_RISCHIO,
+            j.coincidenza(corsa(), siracusano("10:45", ritardo = 1)),
         )
+    }
+
+    @Test
+    fun `il secondo gia' partito o soppresso fa perdere la coincidenza`() {
+        val j = viaggio(reg5385, perSiracusa("10:45"))
+        assertEquals(Coincidenza.PERSA, j.coincidenza(corsa(), siracusano("10:45", partito = true)))
+        assertEquals(Coincidenza.PERSA, j.coincidenza(corsa(), siracusano("10:45", stato = TrainState.CANCELLED)))
+    }
+
+    /** Un diretto non ha coincidenze da perdere. */
+    @Test
+    fun `un diretto regge sempre`() {
+        assertEquals(Coincidenza.REGGE, viaggio(reg5385).coincidenza(corsa(ritardo = 40), null))
     }
 
     @Test

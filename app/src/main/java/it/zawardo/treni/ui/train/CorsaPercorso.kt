@@ -54,6 +54,7 @@ import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.ui.common.BinarioPillola
 import it.zawardo.treni.ui.common.delayLabel
+import it.zawardo.treni.ui.common.fermoInRitardo
 import it.zawardo.treni.ui.common.lateColor
 import it.zawardo.treni.ui.common.scartoColor
 import it.zawardo.treni.ui.common.stateColor
@@ -167,6 +168,7 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val anomalia = stateLabel(status.state)
+        val fermo = fermoInRitardo(status.state, status.delayMinutes)
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             when {
                 // Senza tempo reale nessuna cifra: vedi il commento in [DettagliCorsa].
@@ -176,7 +178,7 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
                     fontWeight = FontWeight.SemiBold,
                     color = scheme.onSurfaceVariant,
                 )
-                anomalia != null -> Text(
+                anomalia != null && !fermo -> Text(
                     anomalia,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
@@ -191,7 +193,11 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
                     )
                     if (status.delayMinutes != 0) {
                         Text(
-                            if (status.delayMinutes > 0) "  di ritardo" else "  di anticipo",
+                            when {
+                                fermo -> "  non ancora partito"
+                                status.delayMinutes > 0 -> "  di ritardo"
+                                else -> "  di anticipo"
+                            },
                             Modifier.alignByBaseline(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = scheme.onSurfaceVariant,
@@ -244,8 +250,12 @@ internal fun ColumnScope.DettagliCorsa(
      */
     if (conStato) {
         Text(
-            if (!status.realtime) "Orario previsto"
-            else stateLabel(status.state) ?: delayLabel(status.delayMinutes),
+            when {
+                !status.realtime -> "Orario previsto"
+                fermoInRitardo(status.state, status.delayMinutes) ->
+                    delayLabel(status.delayMinutes) + " · non ancora partito"
+                else -> stateLabel(status.state) ?: delayLabel(status.delayMinutes)
+            },
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = if (!status.realtime) MaterialTheme.colorScheme.onSurfaceVariant

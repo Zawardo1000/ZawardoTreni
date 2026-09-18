@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.repository.chiaveSoluzione
+import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.Journey
@@ -13,6 +14,7 @@ import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.coincidenza
 import it.zawardo.treni.domain.model.declaredState
 import it.zawardo.treni.domain.model.fermataA
 import it.zawardo.treni.domain.model.partenzaAncoraUtile
@@ -52,6 +54,11 @@ data class JourneyRow(
      * Vedi `ResultsViewModel.cercaAncoraPrendibili`.
      */
     val partenzaStimata: LocalDateTime? = null,
+    /**
+     * Su una di quelle soluzioni, la coincidenza che coi ritardi di adesso si
+     * perde di poco: si propone lo stesso, ma va detto. Vedi `coincidenza`.
+     */
+    val coincidenzaARischio: Boolean = false,
 ) {
     /** Stabile fra un refresh e l'altro: evita che la lista salti sotto le dita. */
     val key: String
@@ -488,9 +495,10 @@ class ResultsViewModel(
      * Si cerca da [FINESTRA_RITARDI] prima dell'ora chiesta — una ricerca in
      * piu', non una per treno — e di quelle soluzioni si interroga il primo
      * treno con la stessa chiamata che ogni riga fa gia' per il suo ritardo.
-     * Restano quelle la cui partenza stimata cade dall'ora cercata in poi, e con
-     * la coincidenza ancora in piedi se c'e' un cambio: vedi
-     * `partenzaAncoraUtile`.
+     * Restano quelle la cui partenza stimata cade dall'ora cercata in poi
+     * (`partenzaAncoraUtile`), e se c'e' un cambio quelle la cui coincidenza
+     * regge o si perde di poco: queste ultime escono dichiarate a rischio. Vedi
+     * [coincidenzaDi].
      *
      * Solo attorno ad adesso ([ritardiContano]): il ritardo di un treno di
      * stamattina non dice niente di quello delle 17, e di un giorno che non e'
@@ -513,8 +521,14 @@ class ResultsViewModel(
                 candidate.map { riga ->
                     async {
                         val (arricchita, stato) = conStato(riga)
-                        riga.journey.partenzaAncoraUtile(stato, departure)
-                            ?.let { arricchita.copy(partenzaStimata = it) }
+                        val partenza = riga.journey.partenzaAncoraUtile(stato, departure)
+                            ?: return@async null
+                        val coincidenza = coincidenzaDi(riga.journey, stato)
+                        if (coincidenza == Coincidenza.PERSA) return@async null
+                        arricchita.copy(
+                            partenzaStimata = partenza,
+                            coincidenzaARischio = coincidenza == Coincidenza.A_RISCHIO,
+                        )
                     }
                 }.awaitAll().filterNotNull()
             }
@@ -527,6 +541,32 @@ class ResultsViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * La coincidenza di una soluzione ancora prendibile, chiedendo il secondo
+     * treno solo quando serve.
+     *
+     * Se col secondo in orario il cambio regge, il suo ritardo non potrebbe che
+     * allargarlo: la chiamata non cambierebbe niente, e non parte. Parte quando
+     * la coincidenza sembra persa, perche' il secondo puo' essere in ritardo
+     * anche lui — era il caso del 17/09/2026 a Monza. Se non risponde resta la
+     * stima col secondo in orario.
+     */
+    private suspend fun coincidenzaDi(j: Journey, primo: TrainStatus?): Coincidenza {
+        val inOrario = j.coincidenza(primo, secondo = null)
+        if (inOrario == Coincidenza.REGGE) return inOrario
+        val poi = j.legs.getOrNull(1)?.takeIf { it.isTrain } ?: return inOrario
+        val numero = poi.trainNumber ?: return inOrario
+        val secondo = runCatching {
+            trains.statusByNumber(
+                trainNumber = numero,
+                date = poi.departure.toLocalDate(),
+                boardingCode = poi.from.rfiCode,
+                boardingAt = poi.departure,
+            )
+        }.getOrNull() ?: return inOrario
+        return j.coincidenza(primo, secondo)
     }
 
     /**
@@ -602,7 +642,17 @@ class ResultsViewModel(
              */
             state = row.journey.declaredState?.takeIf { it.soppressione }
                 ?: status?.state ?: row.state,
-            delayMinutes = status?.delayMinutes ?: row.delayMinutes,
+            delayMinutes = when {
+                status == null -> row.delayMinutes
+                /*
+                 * Fermo all'origine, ViaggiaTreno non misura niente: il suo
+                 * ritardo e' al piu' il minimo di `conRitardoDaFermo`. Se
+                 * Trenord ne annuncia di piu' sulla soluzione, vale il suo.
+                 */
+                status.state == TrainState.NOT_DEPARTED ->
+                    maxOf(status.delayMinutes, row.journey.delayMinutes ?: 0)
+                else -> status.delayMinutes
+            },
         )
         return arricchita to status
     }

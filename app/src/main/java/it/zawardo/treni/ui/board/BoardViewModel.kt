@@ -12,6 +12,7 @@ import it.zawardo.treni.domain.model.SuggerimentiStazioni
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.conBinarioDa
+import it.zawardo.treni.domain.model.conRitardoDa
 import it.zawardo.treni.domain.model.stessaStazione
 import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.terminus
@@ -646,7 +647,10 @@ class BoardViewModel : ViewModel() {
                     s.copy(
                         entries = s.entries.map { riga ->
                             if (key(riga) != chiave) return@map riga
-                            val conBinario = stazione?.let { riga.conBinarioDa(corsa, it) } ?: riga
+                            // Un treno fermo all'origine: la riga lo porta a zero,
+                            // la corsa col ritardo che ha davvero.
+                            val conBinario = (stazione?.let { riga.conBinarioDa(corsa, it) } ?: riga)
+                                .conRitardoDa(corsa)
                             // Lo stesso nome in un'altra grafia non e' una correzione:
                             // resta quella del tabellone, gia' resa leggibile.
                             if (vera == null || vera.equals(riga.direction, ignoreCase = true)) conBinario

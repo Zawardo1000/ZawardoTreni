@@ -87,55 +87,109 @@ fun TrainStatus.arrivoStimatoA(codice: String?, previsto: LocalDateTime): LocalD
 private val MARGINE_CAMBIO: Duration = Duration.ofMinutes(3)
 
 /**
+ * Quanto ritardo al cambio si conta che venga riassorbito: il primo treno che
+ * recupera per strada, il secondo che lo aspetta.
+ *
+ * Dieci minuti, deciso con l'utente il 18/09/2026. Oltre, la soluzione si
+ * tacerebbe comunque: un treno che arriva un quarto d'ora dopo la partenza
+ * della coincidenza non la prende.
+ */
+private val RECUPERO: Duration = Duration.ofMinutes(10)
+
+/**
  * La coincidenza regge ancora, con il primo treno che arriva ad [arrivo]
- * invece che all'ora di tabella.
+ * invece che all'ora di tabella, e il secondo che parte a [partenzaSecondo].
  *
  * Si chiede un margine, **mai piu' di quanto ne lasciasse l'orario**: il cambio
  * che Le Frecce pianifica in due minuti sulla stessa banchina resta valido con
- * due, uno da dieci ne vuole almeno [MARGINE_CAMBIO].
- *
- * Il secondo treno si considera in orario. Se e' in ritardo anche lui la
- * coincidenza magari regge, ma saperlo vorrebbe dire interrogarlo, e qui si
- * preferisce tacere una soluzione possibile che proporne una persa.
+ * due, uno da dieci ne vuole almeno [MARGINE_CAMBIO]. Il margine si misura
+ * sull'orario di tabella dei due treni, perche' e' quello a dire quanto sia
+ * lungo il cambio a piedi; il ritardo del secondo sposta solo la scadenza.
  */
-fun coincidenzaRegge(arrivo: LocalDateTime, primo: Leg, secondo: Leg): Boolean {
+fun coincidenzaRegge(
+    arrivo: LocalDateTime,
+    primo: Leg,
+    secondo: Leg,
+    partenzaSecondo: LocalDateTime = secondo.departure,
+): Boolean {
     val pianificato = Duration.between(primo.arrival, secondo.departure)
     val margine = minOf(MARGINE_CAMBIO, maxOf(pianificato, Duration.ZERO))
-    return !arrivo.plus(margine).isAfter(secondo.departure)
+    return !arrivo.plus(margine).isAfter(partenzaSecondo)
 }
 
 /**
  * La partenza stimata di una soluzione gia' passata in tabella prima di
- * [dalle], se la si prende ancora; null altrimenti.
+ * [dalle], se il primo treno lo si prende ancora; null altrimenti.
  *
  * [primo] e' lo stato del primo treno. Senza — una corsa che ViaggiaTreno non
  * conosce — resta il ritardo che Trenord dichiara sulla soluzione stessa: non
  * dice se il treno sia gia' partito, ma una stima che cade dopo [dalle] parla
  * di un treno che non puo' esserlo.
  *
- * Su un viaggio con cambio non basta arrivare in tempo al primo treno: il suo
- * ritardo puo' costare la coincidenza, e una soluzione che non si puo' fare non
- * e' "ancora prendibile". Vedi [coincidenzaRegge].
+ * Su un viaggio con cambio non basta: il ritardo del primo treno puo' costare la
+ * coincidenza. Quello lo dice [coincidenza], a parte, perche' per saperlo puo'
+ * servire interrogare anche il secondo treno.
  */
 fun Journey.partenzaAncoraUtile(primo: TrainStatus?, dalle: LocalDateTime): LocalDateTime? {
     if (cancelled) return null
     val salita = legs.firstOrNull()?.takeIf { it.isTrain } ?: return null
 
-    val partenza: LocalDateTime
-    val arrivo: LocalDateTime
-    if (primo != null) {
-        partenza = primo.partenzaStimataDa(salita.from.rfiCode, salita.departure) ?: return null
-        arrivo = primo.arrivoStimatoA(salita.to.rfiCode, salita.arrival)
-            ?: salita.arrival.plus(Duration.between(salita.departure, partenza))
+    val partenza = if (primo != null) {
+        primo.partenzaStimataDa(salita.from.rfiCode, salita.departure) ?: return null
     } else {
         val ritardo = delayMinutes?.takeIf { it > 0 } ?: return null
-        partenza = salita.departure.plusMinutes(ritardo.toLong())
-        arrivo = salita.arrival.plusMinutes(ritardo.toLong())
+        salita.departure.plusMinutes(ritardo.toLong())
     }
 
     // Al minuto, come la ricerca: "adesso" porta anche i secondi.
     if (partenza.isBefore(dalle.withSecond(0).withNano(0))) return null
-    val poi = legs.getOrNull(1)
-    if (poi != null && !coincidenzaRegge(arrivo, salita, poi)) return null
     return partenza
+}
+
+/** Come sta la coincidenza di un viaggio il cui primo treno e' in ritardo. */
+enum class Coincidenza {
+    REGGE,
+
+    /** Coi ritardi di adesso si perde, ma di poco: vedi [RECUPERO]. */
+    A_RISCHIO,
+
+    PERSA,
+}
+
+/**
+ * La coincidenza al primo cambio, col ritardo che il primo treno ha adesso.
+ *
+ * Il secondo treno e' [secondo]; senza, lo si considera in orario. Chi chiama
+ * lo interroga solo se in orario la coincidenza non reggerebbe: se regge
+ * gia' cosi', il suo ritardo non puo' che allargarla.
+ *
+ * **Una coincidenza persa di poco si propone lo stesso**, dichiarata a rischio.
+ * Il 17/09/2026 il RE 2824 delle 12:20 da Milano Centrale, con cambio a Monza,
+ * partiva in ritardo, e l'S8 della coincidenza lo era anche lui: con due treni
+ * in ritardo sulla stessa linea, tacere la soluzione era la risposta sbagliata.
+ * Cosi' si decide fino a
+ * [RECUPERO] oltre la partenza del secondo; piu' in la', o col secondo gia'
+ * partito dal cambio o soppresso, e' persa davvero.
+ */
+fun Journey.coincidenza(primo: TrainStatus?, secondo: TrainStatus?): Coincidenza {
+    val salita = legs.firstOrNull() ?: return Coincidenza.REGGE
+    val poi = legs.getOrNull(1) ?: return Coincidenza.REGGE
+
+    val ritardo = (primo?.delayMinutes ?: delayMinutes ?: 0).coerceAtLeast(0)
+    val arrivo = primo?.arrivoStimatoA(salita.to.rfiCode, salita.arrival)
+        ?: salita.arrival.plusMinutes(ritardo.toLong())
+
+    val partenzaPoi = when {
+        secondo == null -> poi.departure
+        secondo.state == TrainState.CANCELLED -> return Coincidenza.PERSA
+        // Una corsa che non passa di li' e' quella sbagliata: resta la tabella.
+        secondo.fermataA(poi.from.rfiCode, poi.departure.toLocalTime()) == null -> poi.departure
+        else -> secondo.partenzaStimataDa(poi.from.rfiCode, poi.departure) ?: return Coincidenza.PERSA
+    }
+
+    return when {
+        coincidenzaRegge(arrivo, salita, poi, partenzaPoi) -> Coincidenza.REGGE
+        !arrivo.isAfter(partenzaPoi.plus(RECUPERO)) -> Coincidenza.A_RISCHIO
+        else -> Coincidenza.PERSA
+    }
 }
