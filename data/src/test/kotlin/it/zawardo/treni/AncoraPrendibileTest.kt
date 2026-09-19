@@ -279,19 +279,37 @@ class AncoraPrendibileTest {
     }
 
     /**
-     * Dopo il treno, un tratto a piedi o urbano non ha un'ora di partenza da
-     * mancare: il cambio vero e' piu' in la', e quanto serva per arrivarci il
-     * margine non lo sa. Prima si confrontava l'arrivo con l'inizio della
-     * camminata, e ogni minuto di ritardo diventava una coincidenza a rischio.
+     * Dopo il treno, un tratto urbano non ha un'ora di partenza da mancare —
+     * la metropolitana passa ogni pochi minuti — e li' la coincidenza non si
+     * giudica.
      */
     @Test
-    fun `dopo un tratto a piedi o urbano la coincidenza non si giudica`() {
-        val piedi = Leg(null, null, catania, catania, ora("10:37"), ora("10:45"), kind = TransportKind.WALK)
+    fun `dopo un tratto urbano la coincidenza non si giudica`() {
         val urbano = Leg(null, "UB", catania, Station("S12333", 0L, "Catania Borgo"), ora("10:40"), ora("10:50"))
-        for (j in listOf(viaggio(reg5385, piedi, perSiracusa("10:50")), viaggio(reg5385, urbano))) {
-            assertNull(j.primoCambio())
-            assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(ritardo = 40), null))
-        }
+        val j = viaggio(reg5385, urbano)
+        assertNull(j.primoCambio())
+        assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(ritardo = 40), null))
+    }
+
+    /**
+     * Una camminata nel cambio non e' la tratta dopo: si scavalca, e i suoi
+     * minuti sono il margine minimo (deciso con l'utente il 19/09/2026: «quei
+     * cinque minuti hanno senso solo in caso di cambi»). Arrivando a Catania alle
+     * 10:47 con otto minuti a piedi, il treno delle 10:50 non si prende; senza
+     * contare la camminata, tre minuti di margine sarebbero bastati.
+     */
+    @Test
+    fun `la camminata nel cambio si scavalca e conta i suoi minuti`() {
+        val piedi = Leg(null, null, catania, catania, ora("10:37"), ora("10:45"), kind = TransportKind.WALK)
+        val j = viaggio(reg5385, piedi, perSiracusa("10:50"))
+        assertEquals(reg5385 to perSiracusa("10:50"), j.primoCambio())
+        assertEquals(1, j.changes)
+        assertEquals(Coincidenza.REGGE, j.coincidenza(corsa(ritardo = 0), null))
+        assertEquals(
+            "10:47 piu' otto minuti a piedi e' dopo le 10:50",
+            Coincidenza.A_RISCHIO,
+            j.coincidenza(corsa(ritardo = 10), null),
+        )
     }
 
     @Test

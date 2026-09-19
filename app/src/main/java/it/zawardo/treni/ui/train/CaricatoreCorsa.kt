@@ -5,6 +5,7 @@ import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.soloOrarioPrevistoPer
 import it.zawardo.treni.domain.model.stessaStazione
 import kotlinx.coroutines.flow.first
@@ -95,7 +96,34 @@ internal class CaricatoreCorsa(
          * Del futuro nessuno conosce il tempo reale, nemmeno le fonti che per
          * quel giorno rispondono: quel che torna e' orario, e come tale va detto.
          */
-        return if (date.isAfter(LocalDate.now())) status?.perGiornoFuturo() else status
+        if (status == null || !date.isAfter(LocalDate.now())) return status
+        val futuro = status.perGiornoFuturo()
+        return if (status.realtime) futuro.conBinariDiTabellaDaOggi(sources) else futuro
+    }
+
+    /**
+     * I binari di tabella di un giorno futuro, dalla corsa di oggi, quando chi
+     * ha risposto non ne ha nemmeno uno.
+     *
+     * Trenord risponde per qualunque giorno, ma coi soli binari effettivi, che
+     * per domani non esistono ancora: il 19/09/2026 il REG 2613 di domani si
+     * apriva con zero binari, mentre la corsa di oggi li aveva programmati su
+     * tutte e undici le fermate. Una Freccia, che Trenord non conosce, i binari
+     * li aveva gia': li porta [previstoDaOggi]. Qui si prendono solo i
+     * programmati, accoppiati per stazione e orario come in `conBinariDa`: sono
+     * orario, e restano «previsto».
+     */
+    private suspend fun TrainStatus.conBinariDiTabellaDaOggi(sources: Set<DataSource>): TrainStatus {
+        if (stops.any { it.scheduledPlatform != null }) return this
+        val oggi = runCatching { realtime(LocalDate.now(), sources) }.getOrNull() ?: return this
+        // Come in [previstoDaOggi]: una corsa che non passa da dove si sale e' un altro treno.
+        if (boardingCode != null && oggi.stops.none { stessaStazione(it.stationCode, boardingCode) }) return this
+        val completa = conBinariDa(oggi.soloOrarioPrevistoPer(giorno = date))
+        if (completa.stops.none { it.scheduledPlatform != null }) return this
+        // Da dove vengono va detto, come nella nota di [previstoDaOggi].
+        return completa.copy(
+            notice = listOfNotNull(notice, "Binari di tabella dalla corsa di oggi.").joinToString(" "),
+        )
     }
 
     /**

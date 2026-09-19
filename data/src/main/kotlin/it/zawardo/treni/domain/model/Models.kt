@@ -40,7 +40,22 @@ data class Station(
      * [locationId] diventa quello che Le Frecce sa instradare. Altrimenti se stessa.
      */
     fun perNazionale(): Station = idNazionale?.let { copy(locationId = it) } ?: this
+
+    /**
+     * L'identificativo che Le Frecce sa instradare, se c'e': ne' zero, ne' uno
+     * inventato per una rete fuori-RFI. Chiasso nell'orario svizzero ha il codice
+     * RFI ma un id suo, e mandato a Trenitalia non avrebbe trovato niente.
+     */
+    val idLeFrecce: Long?
+        get() = perNazionale().locationId.takeIf { it in 1 until PRIMO_ID_FUORI_RFI }
 }
+
+/**
+ * Il primo identificativo della fascia inventata per le reti fuori-RFI: sotto
+ * stanno quelli veri del nazionale. Vedi le `LOCATION_ID_BASE` dei repository
+ * fuori-RFI (9,0·10⁹ …).
+ */
+const val PRIMO_ID_FUORI_RFI = 9_000_000_000L
 
 /** Una stazione vicina a un punto, con la distanza in linea d'aria in chilometri. */
 data class NearbyStation(
@@ -91,6 +106,13 @@ data class Journey(
      * sono ne' quella da cui sali ne' quella a cui scendi.
      */
     val partiallyCancelled: Boolean = false,
+    /**
+     * La corsa si fa, ma salta la fermata da cui sali o quella a cui scendi: il
+     * treno limitato. Per questo viaggio non serve, e [cancelled] e' vero; ma
+     * soppresso non e', e la riga dice «Variato» (19/09/2026: l'S5 24543 era
+     * soppressa da Varese a Rho Fiera e circolava da li' a Treviglio).
+     */
+    val variato: Boolean = false,
     val delayMinutes: Int? = null,
     /**
      * Il prezzo piu' basso di questa soluzione, quando la sorgente lo pubblica.
@@ -139,9 +161,22 @@ data class Journey(
      * perche'. Vedi `VenditaChiusa` nella lista dei risultati.
      */
     val venditaChiusa: Boolean = false,
+    /**
+     * I biglietti che compongono [price], quando sono piu' d'uno: vedi
+     * `tratteDaBiglietto`. Vuota per la soluzione che si compra con un
+     * biglietto solo, cioe' quasi sempre.
+     */
+    val biglietti: List<Biglietto> = emptyList(),
 ) {
-    val changes: Int get() = (legs.size - 1).coerceAtLeast(0)
-    val isDirect: Boolean get() = legs.size <= 1
+    /**
+     * Le tratte fatte con un mezzo: le camminate no. Passare a piedi dalla
+     * superficie di Porta Garibaldi al Passante non e' un cambio, e un treno che
+     * comincia li' e' diretto (deciso con l'utente il 19/09/2026): la camminata
+     * conta solo dentro un cambio, per il tempo che ci vuole.
+     */
+    val mezzi: List<Leg> get() = legs.filterNot { it.isWalk }
+    val changes: Int get() = (mezzi.size - 1).coerceAtLeast(0)
+    val isDirect: Boolean get() = mezzi.size <= 1
 
     /** Se nessuna tratta e' un treno, non c'e' alcun tempo reale da mostrare. */
     val hasTrain: Boolean get() = legs.any { it.isTrain }
@@ -173,6 +208,13 @@ data class Price(
     val currency: String = "EUR",
     /** Falso quando quel prezzo esiste ma il biglietto non e' acquistabile ora. */
     val saleable: Boolean = true,
+    /**
+     * Vero solo quando la fonte dice che i posti sono finiti: `soldOut` della
+     * porta dell'app, `SOLD_OUT` di quella del sito. Non vendibile non vuol dire
+     * esaurito: `NOT_SALEABLE`, `saleable` falso e `inhibited` dicono che quel
+     * biglietto adesso non si vende, e scriverci «esaurito» era falso.
+     */
+    val esaurito: Boolean = false,
 ) {
     /** `52,00 €`, con la virgola che si usa scrivendo in italiano. */
     val formatted: String
@@ -227,6 +269,12 @@ data class Leg(
      * piedi, che una fonte non ce l'ha.
      */
     val source: DataSource? = null,
+    /**
+     * Chi vende il biglietto di questa tratta, quando la fonte lo dice: Trenord
+     * lo scrive per treno (`train_operator`), e su una sua soluzione con dentro
+     * un EuroCity di Trenitalia i biglietti sono due. Vedi `tratteDaBiglietto`.
+     */
+    val venditore: DataSource? = null,
 ) {
     /** Solo i treni si possono seguire in tempo reale. */
     val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
@@ -326,10 +374,10 @@ val Journey.prezzoDaTrenord: Boolean
 /**
  * Se il prezzo dei treni e' il prezzo di tutto: vero quando la soluzione e' fatta
  * solo di treni. Con un tratto urbano o in autobus e' un prezzo parziale, e il
- * biglietto di quel tratto resta fuori.
+ * biglietto di quel tratto resta fuori. Una camminata no: non ha biglietto.
  */
 val Journey.soloTreni: Boolean
-    get() = legs.all { it.isTrain }
+    get() = legs.all { it.isTrain || it.isWalk }
 
 /** Vero per gli stati che dicono "questa corsa, tutta o in parte, non si fa". */
 val TrainState.soppressione: Boolean

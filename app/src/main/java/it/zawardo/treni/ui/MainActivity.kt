@@ -226,10 +226,21 @@ private fun TreniApp(
 ) {
     val nav = rememberNavController()
 
+    /*
+     * Dalla notifica si riusa la schermata in cima solo se e' **la stessa**
+     * corsa: toccarla due volte non deve impilare due dettagli uguali. Se e'
+     * un'altra se ne apre una nuova. `launchSingleTop` da solo guarda il tipo di
+     * schermata, non la corsa: riusava il dettaglio di un altro treno cambiandogli
+     * gli argomenti, e il suo ViewModel restava quello di prima — il 19/09/2026 il
+     * REG 2613 di domani, aperto sopra quello di oggi, ne mostrava il percorso.
+     */
     val requested by pendingTrain.collectAsState()
     LaunchedEffect(requested) {
         requested?.let {
-            nav.navigate(it) { launchSingleTop = true }
+            val inCima = nav.currentBackStackEntry
+                ?.takeIf { e -> e.destination.hasRoute<TrainRoute>() }
+                ?.toRoute<TrainRoute>()
+            nav.navigate(it) { launchSingleTop = inCima == it }
             pendingTrain.value = null
         }
     }
@@ -237,7 +248,10 @@ private fun TreniApp(
     val requestedViaggio by pendingViaggio.collectAsState()
     LaunchedEffect(requestedViaggio) {
         requestedViaggio?.let {
-            nav.navigate(it) { launchSingleTop = true }
+            val inCima = nav.currentBackStackEntry
+                ?.takeIf { e -> e.destination.hasRoute<ViaggioRoute>() }
+                ?.toRoute<ViaggioRoute>()
+            nav.navigate(it) { launchSingleTop = inCima == it }
             pendingViaggio.value = null
         }
     }

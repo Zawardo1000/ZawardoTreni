@@ -1,5 +1,8 @@
 package it.zawardo.treni.ui.board
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -415,14 +418,6 @@ private fun BoardRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (!cancelled && (entry.delayMinutes != 0 || entry.state == TrainState.DELAYED)) {
-                    Text(
-                        // In ritardo senza cifra: EAV a volte lo dice senza dire di quanto.
-                        "  " + if (entry.delayMinutes != 0) delayLabel(entry.delayMinutes) else "in ritardo",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = if (entry.delayMinutes != 0) stateColor(entry.state, entry.delayMinutes) else lateColor(),
-                    )
                 }
                 if (cancelled) {
                     Text(
@@ -436,10 +431,34 @@ private fun BoardRow(
             }
         }
 
+        /*
+         * Il ritardo in una colonna sua, allineato a destra, come nell'elenco.
+         *
+         * Stava attaccato alla sigla del treno, «REG 2619  +2 min», e si spostava
+         * con la sua lunghezza: scorrendo il tabellone i ritardi non stavano in
+         * colonna (segnalato il 19/09/2026). La colonna e' larga quanto «+888
+         * min» col carattere del telefono, e tiene il posto anche vuota.
+         * Soppressioni e orario previsto restano sotto la sigla: sono frasi, non
+         * cifre da confrontare.
+         */
+        Box(Modifier.widthIn(min = larghezzaRitardo()), contentAlignment = Alignment.CenterEnd) {
+            if (entry.realtime && !cancelled && (entry.delayMinutes != 0 || entry.state == TrainState.DELAYED)) {
+                Text(
+                    // In ritardo senza cifra: EAV a volte lo dice senza dire di quanto.
+                    if (entry.delayMinutes != 0) delayLabel(entry.delayMinutes) else "in ritardo",
+                    style = CIFRE_RITARDO,
+                    color = if (entry.delayMinutes != 0) stateColor(entry.state, entry.delayMinutes) else lateColor(),
+                    maxLines = 1,
+                )
+            }
+        }
+
         Column(
             // Minima e non fissa: un binario dal nome lungo allarga la colonna
             // invece di andare a capo a meta' parola.
-            Modifier.widthIn(min = 52.dp),
+            Modifier
+                .padding(start = 12.dp)
+                .widthIn(min = 52.dp),
             horizontalAlignment = Alignment.End,
         ) {
             /*
@@ -467,6 +486,19 @@ private fun BoardRow(
                 )
             }
         }
+    }
+}
+
+/** Il ritardo nel tabellone: le cifre tabulari dell'elenco dei risultati. */
+private val CIFRE_RITARDO = Cifre.riga.copy(fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
+
+/** Quanto e' larga la colonna del ritardo: «+888 min», misurato col carattere vero. */
+@Composable
+private fun larghezzaRitardo(): Dp {
+    val misura = rememberTextMeasurer()
+    val densita = LocalDensity.current
+    return remember(densita) {
+        with(densita) { misura.measure("+888 min", CIFRE_RITARDO).size.width.toDp() }
     }
 }
 

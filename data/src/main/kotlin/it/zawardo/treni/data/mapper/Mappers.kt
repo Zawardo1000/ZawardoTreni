@@ -91,6 +91,23 @@ fun SolutionDto.toJourney(): Journey? {
              */
             val linea = mean?.trainDescription?.trim()?.substringBefore(' ')
                 ?.takeIf { it.matches(Regex("S\\d+")) }
+            /*
+             * «WK» e' una camminata: Le Frecce la chiama «Urbano» come il tram o
+             * la metropolitana («UB»), ma e' il passaggio a piedi fra due stazioni
+             * gemelle, come Porta Garibaldi e il suo Passante. Una camminata non
+             * e' un mezzo e non ha un numero: il «Urb» che porta non lo e'.
+             */
+            if (cls?.acronym.equals(CAMMINATA, ignoreCase = true)) {
+                return@mapNotNull Leg(
+                    trainNumber = null,
+                    category = null,
+                    from = from,
+                    to = to,
+                    departure = node.departureTime.parseIso() ?: dep,
+                    arrival = node.arrivalTime.parseIso() ?: arr,
+                    kind = TransportKind.WALK,
+                )
+            }
             Leg(
                 trainNumber = mean?.name?.takeIf { it.isNotBlank() },
                 category = linea ?: cls?.acronym,
@@ -107,14 +124,38 @@ fun SolutionDto.toJourney(): Journey? {
             )
         }
 
+    // Le camminate in testa e in coda non si contano: vedi [senzaCamminateAgliEstremi].
+    val mezzi = legs.senzaCamminateAgliEstremi()
+    if (mezzi.isEmpty()) return null
+    val partenza = mezzi.first().departure
+    val arrivo = mezzi.last().arrival
     return Journey(
-        departure = dep,
-        arrival = arr,
-        duration = if (totalDuration > 0) Duration.ofMillis(totalDuration) else Duration.between(dep, arr),
-        legs = legs,
+        departure = partenza,
+        arrival = arrivo,
+        duration = when {
+            partenza != dep || arrivo != arr -> Duration.between(partenza, arrivo)
+            totalDuration > 0 -> Duration.ofMillis(totalDuration)
+            else -> Duration.between(dep, arr)
+        },
+        legs = mezzi,
         price = toPrice(),
     )
 }
+
+/** La sigla con cui la porta dell'app di Le Frecce segna una camminata. */
+private const val CAMMINATA = "WK"
+
+/**
+ * Le tratte senza le camminate in testa e in coda.
+ *
+ * Due stazioni gemelle nello stesso luogo — la superficie di Porta Garibaldi e
+ * il suo Passante — per partenza e arrivo sono una stazione sola (deciso con
+ * l'utente il 19/09/2026): chi cerca puo' essere gia' sulla banchina giusta, e
+ * il viaggio comincia col treno. I minuti a piedi contano solo in un cambio, e
+ * li' la camminata resta.
+ */
+fun List<Leg>.senzaCamminateAgliEstremi(): List<Leg> =
+    dropWhile { it.isWalk }.dropLastWhile { it.isWalk }
 
 /**
  * Il prezzo della soluzione, quando c'e' ed e' lecito mostrarlo.
@@ -157,6 +198,15 @@ fun SolutionDto.toJourney(): Journey? {
  * 16 volte su 16, regionali Trenord compresi, mentre questa porta dell'app li
  * perdeva in 3 ricerche su 16 e ai regionali lombardi quasi sempre.
  */
+/**
+ * La sigla del treno come la scrive ViaggiaTreno, senza gli spazi di contorno.
+ * Per le Frecce `compNumeroTreno` arriva « FR 9712», con la categoria vuota
+ * davanti (19/09/2026): nel tabellone la sigla partiva uno spazio piu' in la'
+ * di quella dei regionali, e non stava in colonna.
+ */
+internal fun etichettaTreno(grezza: String?): String? =
+    grezza?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotEmpty() }
+
 private fun SolutionDto.toPrice(): Price? {
     val cifra = (totalAmount?.amount ?: totalPrice)?.trim()?.takeIf { it.isNotBlank() } ?: return null
     if (totalAmount?.showPrice == false) return null
@@ -168,6 +218,7 @@ private fun SolutionDto.toPrice(): Price? {
         // Vendibile finche' non e' detto il contrario: i tre flag arrivano null
         // sulle soluzioni che il BFF non tratta commercialmente.
         saleable = saleable != false && soldOut != true && inhibited != true,
+        esaurito = soldOut == true,
     )
 }
 
@@ -284,7 +335,7 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
     return TrainStatus(
         number = numeroTreno.toString(),
         category = categoria?.takeIf { it.isNotBlank() },
-        label = compNumeroTreno?.takeIf { it.isNotBlank() }
+        label = etichettaTreno(compNumeroTreno)
             ?: listOfNotNull(categoria, numeroTreno.toString()).joinToString(" "),
         origin = origine?.let(::nomeLeggibile),
         destination = destinazione?.let(::nomeLeggibile),
@@ -311,7 +362,7 @@ fun TabelloneVoceDto.toBoardEntry(): BoardEntry? {
             departureDateMillis = millis,
             originName = origine?.let(::nomeLeggibile),
         ),
-        label = compNumeroTreno?.takeIf { it.isNotBlank() }
+        label = etichettaTreno(compNumeroTreno)
             ?: listOfNotNull(categoria, numeroTreno.toString()).joinToString(" "),
         category = categoria?.takeIf { it.isNotBlank() },
         direction = (destinazione ?: origine)?.let(::nomeLeggibile),

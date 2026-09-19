@@ -123,6 +123,19 @@ data class TrenordJourneyDto(
     val train: TrenordTrainDto? = null,
     @SerialName("pass_list") val stops: List<TrenordStopDto> = emptyList(),
     @SerialName("journey_type") val journeyType: String? = null,
+    /** Sui tratti a piedi, `journey_type` "walk": quanto e verso dove. */
+    val walk: TrenordWalkDto? = null,
+)
+
+/**
+ * Un tratto a piedi di una soluzione Trenord: da Porta Garibaldi al Passante,
+ * 214 metri e cinque minuti. Non ha fermate, solo la durata ("00:05:00").
+ */
+@Serializable
+data class TrenordWalkDto(
+    val length: String? = null,
+    val duration: String? = null,
+    val direction: String? = null,
 )
 
 @Serializable
@@ -136,6 +149,12 @@ data class TrenordTrainDto(
     val delay: Int? = null,
     /** Falso quando la corsa non e' tracciata: non va spacciata per "in orario". */
     @SerialName("has_live_info") val hasLiveInfo: Boolean = false,
+    /**
+     * Dove Trenord da' la corsa: "N" non partita, "V" in viaggio, "A" arrivata.
+     * Sondato il 18-19/09/2026; puo' valere per un'altra corsa dello stesso
+     * numero, vedi `ritardoDichiarato`.
+     */
+    val status: String? = null,
     @SerialName("train_operator") val operator: String? = null,
     /**
      * Perche' la corsa e' soppressa in tutto o in parte: "Richiesta Impresa

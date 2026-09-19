@@ -9,6 +9,7 @@ import it.zawardo.treni.data.remote.trenord.TrenordStationDto
 import it.zawardo.treni.data.remote.trenord.TrenordStopDto
 import it.zawardo.treni.data.remote.trenord.TrenordTrainDto
 import it.zawardo.treni.data.remote.trenord.TrenordAlertDto
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.JourneySource
 import it.zawardo.treni.domain.model.Leg
@@ -156,7 +157,52 @@ private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): 
         arrival = combine(date, last.scheduledArrival, last.arrivalDayOffset ?: 0) ?: fallback,
         kind = t.kind(),
         kindLabel = t.category,
+        venditore = t.venditore(),
     )
+}
+
+/**
+ * Le tratte con le camminate che stanno **in mezzo** a due mezzi: quelle di un
+ * cambio, il cui tempo serve alla coincidenza. Quelle in testa e in coda non ci
+ * sono: una camminata di Trenord non ha fermate, e `toLeg` la scarta.
+ *
+ * Trenord la dichiara con la sola durata (`walk.duration`): parte quando arriva
+ * il mezzo prima e va da li' alla stazione del mezzo dopo.
+ */
+private fun conCamminateNeiCambi(tratte: List<Pair<TrenordJourneyDto, Leg?>>): List<Leg> {
+    val esito = mutableListOf<Leg>()
+    tratte.forEachIndexed { i, (journey, leg) ->
+        if (leg != null) {
+            esito += leg
+            return@forEachIndexed
+        }
+        val minuti = parseDuration(journey.walk?.duration) ?: return@forEachIndexed
+        val prima = esito.lastOrNull() ?: return@forEachIndexed
+        val dopo = tratte.drop(i + 1).firstNotNullOfOrNull { it.second } ?: return@forEachIndexed
+        esito += Leg(
+            trainNumber = null,
+            category = null,
+            from = prima.to,
+            to = dopo.from,
+            departure = prima.arrival,
+            arrival = prima.arrival.plus(minuti),
+            kind = TransportKind.WALK,
+        )
+    }
+    return esito
+}
+
+/**
+ * Chi vende il biglietto di questo treno, da `train_operator`: "TRENORD",
+ * "TRENORD$:$FNM3" per i suoi treni sulla rete Ferrovienord, "TRENITALIA" per
+ * l'EuroCity dentro una sua soluzione. Null se non si sa: una tratta di cui non
+ * si sa chi la venda non si prezza.
+ */
+private fun TrenordTrainDto.venditore(): DataSource? = when {
+    operator == null -> null
+    operator.startsWith("TRENORD", ignoreCase = true) -> DataSource.TRENORD
+    operator.startsWith("TRENITALIA", ignoreCase = true) -> DataSource.TRENITALIA
+    else -> null
 }
 
 /**
@@ -170,7 +216,7 @@ private fun TrenordJourneyDto.toLeg(date: LocalDate?, fallback: LocalDateTime): 
  * nemmeno il record, `cercaNumeroTreno` non lo trova e `andamentoTreno`
  * risponde 204. Quel flag sulle fermate e' l'unica cosa che lo dice.
  */
-private enum class Soppressione { NESSUNA, PARZIALE, TOTALE }
+private enum class Soppressione { NESSUNA, PARZIALE, LIMITATA, TOTALE }
 
 private fun TrenordJourneyDto.soppressione(): Soppressione {
     /*
@@ -184,14 +230,15 @@ private fun TrenordJourneyDto.soppressione(): Soppressione {
     val tratta = ridden()
     return when {
         tratta.isEmpty() -> Soppressione.NESSUNA
-        tratta.all { it.cancelled } -> Soppressione.TOTALE
+        // Soppressa e' la corsa intera: tutte le fermate che Trenord elenca.
+        stops.all { it.cancelled } -> Soppressione.TOTALE
         /*
          * Salta la fermata da cui sali o quella a cui scendi: e' il treno
          * limitato che non arriva piu' fin li'. La corsa esiste ancora, ma per
          * te vale quanto una soppressione, ed e' meglio dirlo che lasciartela
-         * prendere.
+         * prendere. Soppressa pero' non e': e' variata.
          */
-        tratta.first().cancelled || tratta.last().cancelled -> Soppressione.TOTALE
+        tratta.all { it.cancelled } || tratta.first().cancelled || tratta.last().cancelled -> Soppressione.LIMITATA
         tratta.any { it.cancelled } -> Soppressione.PARZIALE
         else -> Soppressione.NESSUNA
     }
@@ -201,26 +248,73 @@ fun TrenordSolutionDto.toJourney(): Journey? {
     val date = parseDate(date)
     val dep = combine(date, departureTime, departureDayOffset) ?: return null
     val arr = combine(date, arrivalTime, arrivalDayOffset) ?: return null
-    val legs = journeys.mapNotNull { it.toLeg(date, dep) }
+    val legs = conCamminateNeiCambi(journeys.map { it to it.toLeg(date, dep) })
     if (legs.isEmpty()) return null
+
+    /*
+     * I tratti a piedi in testa e in coda non si contano: la soluzione parte
+     * col primo mezzo e arriva con l'ultimo. Trenord da Milano Porta Garibaldi
+     * mette cinque minuti a piedi fino al Passante: il 19/09/2026 la soluzione
+     * dell'S5 24531 diceva 10:20, l'ora di uscire dalla stazione di superficie,
+     * e il treno partiva alle 10:25. Col ritardo accanto, «10:20 +3» si leggeva
+     * come un treno gia' partito, mentre dal Passante era ancora li'. Chi cerca
+     * puo' essere gia' sulla banchina giusta (deciso con l'utente): conta il
+     * treno. In mezzo, invece, la camminata resta: vedi [conCamminateNeiCambi].
+     */
+    val partenza = legs.first().departure
+    val arrivo = legs.last().arrival
 
     val soppressioni = journeys.map { it.soppressione() }
 
     return Journey(
-        departure = dep,
-        arrival = arr,
-        duration = parseDuration(duration) ?: Duration.between(dep, arr),
+        departure = partenza,
+        arrival = arrivo,
+        duration = if (partenza == dep && arrivo == arr) {
+            parseDuration(duration) ?: Duration.between(dep, arr)
+        } else {
+            Duration.between(partenza, arrivo)
+        },
         legs = legs,
         source = JourneySource.TRENORD,
-        cancelled = cancelled || soppressioni.any { it == Soppressione.TOTALE },
+        cancelled = cancelled || soppressioni.any { it == Soppressione.TOTALE || it == Soppressione.LIMITATA },
         partiallyCancelled = soppressioni.any { it == Soppressione.PARZIALE },
-        // `delay` e' attendibile solo quando il flag lo dichiara: altrimenti e'
-        // assenza di dato, non assenza di ritardo.
-        delayMinutes = delay?.takeIf { delayDefined },
+        variato = !cancelled && soppressioni.none { it == Soppressione.TOTALE } &&
+            soppressioni.any { it == Soppressione.LIMITATA },
+        delayMinutes = ritardoDichiarato(),
         price = toPrice(),
         venditaChiusa = saleability?.saleable == false && saleability.reason == PARTENZA_PASSATA,
     )
 }
+
+/**
+ * Il ritardo che Trenord dichiara sulla soluzione, se e' di questa corsa.
+ *
+ * `delay` vale solo col flag `delay_defined`: senza e' assenza di dato, non
+ * assenza di ritardo. E nemmeno col flag basta. La notte del 18-19/09/2026 le
+ * sole soluzioni non ancora partite con un ritardo dichiarato portavano quello
+ * di un'altra corsa: il REG 10911 delle 00:15 era a +5 con `status` "A",
+ * arrivato, e l'ultimo rilevamento del giorno prima; il RE 2211 delle 05:05 a +2
+ * con `has_live_info` falso, in tre risposte su otto identiche. Nell'elenco
+ * uscivano come «+2 non partito» su un treno che partiva cinque ore dopo. Il
+ * mattino dopo, su quindici soluzioni in partenza fra zero e tre ore, nessuna
+ * dichiarava un ritardo.
+ *
+ * Quindi conta solo se Trenord segue il primo treno dal vivo e non lo da' per
+ * arrivato. Il caso per cui serve resta: un treno fermo all'origine e' "N" dal
+ * vivo, e il suo ritardo e' proprio quello che ViaggiaTreno non scrive.
+ *
+ * Il primo **treno**, non la prima tratta: Varese-Brescia delle 10:10 comincia
+ * con dieci minuti a piedi fino a Varese Nord, una tratta senza numero e senza
+ * tempo reale, e col primo della lista il ritardo non sarebbe contato mai.
+ */
+private fun TrenordSolutionDto.ritardoDichiarato(): Int? {
+    if (!delayDefined) return null
+    val primo = journeys.firstOrNull { !it.train?.id.isNullOrBlank() }?.train ?: return null
+    if (!primo.hasLiveInfo || primo.status == ARRIVATA) return null
+    return delay
+}
+
+private const val ARRIVATA = "A"
 
 /**
  * Il motivo con cui Trenord dice che il biglietto non si vende piu' perche' la

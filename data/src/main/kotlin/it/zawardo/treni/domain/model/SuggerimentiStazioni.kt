@@ -9,8 +9,9 @@ package it.zawardo.treni.domain.model
  * Mostrarle tutte confonde, e fa scrivere "senza dati in tempo reale" su una
  * stazione che i dati li ha, solo dalla versione sbagliata.
  *
- * La regola: **dove piu' versioni coincidono per posizione, se ne tiene una
- * sola, la migliore.** Migliore significa piu' tracciabile:
+ * La regola: **dove una versione senza codice coincide per posizione con una
+ * che il codice ce l'ha, si tiene questa.** Fra piu' versioni della stessa
+ * stazione vince la piu' tracciabile:
  *
  *  1. codice RFI vero (`S…`/`Z…`): la rete nazionale, il caso piu' ricco;
  *  2. codice sintetico di una rete fuori-RFI (`EAV…`, `ARST…`): ha il suo
@@ -20,6 +21,22 @@ package it.zawardo.treni.domain.model
  *
  * Le versioni senza codice vanno anche **in fondo** alla lista: restano
  * selezionabili, ma sotto quelle che danno qualcosa.
+ *
+ * **Due codici diversi sono due stazioni, anche a pochi metri.** Ognuna ha il
+ * suo tabellone, e nasconderne una la toglie dall'app. La vicinanza da sola
+ * fondeva tutto quello che stava entro 250 metri: il 19/09/2026 scrivendo
+ * «garibaldi» non si trovava Milano Porta Garibaldi Passante, e con lei
+ * mancavano Novara Nord, Messina Marittima, Bari Centrale di Ferrotramviaria,
+ * Napoli Garibaldi della Circumvesuviana, Sassari e Nuoro di ARST, Locarno e
+ * Domodossola della Vigezzina: tutte coperte dalla stazione accanto, che i
+ * loro treni non li ha.
+ *
+ * **Lo stesso codice RFI e' la stessa stazione**, anche lontano dalle coordinate
+ * o senza: la cache locale non sempre le ha, e le fonti scrivono i nomi a modo
+ * loro — Trenord «Rho Fiera Milano», Le Frecce «Rho-Fiera Milano». Una voce
+ * sola, col **nome della rete nazionale** (chiesto il 19/09/2026): a Chiasso la
+ * voce resta quella svizzera, che il tabellone lo compone di due fonti, ma il
+ * nome e' quello italiano.
  */
 object SuggerimentiStazioni {
 
@@ -34,7 +51,9 @@ object SuggerimentiStazioni {
 
         val tenute = mutableListOf<Station>()
         for (s in ordinate) {
-            val i = tenute.indexOfFirst { coincidono(it, s, sogliaMetri) }
+            val i = tenute.indexOfFirst {
+                stessoCodiceRfi(it, s) || (senzaCodice(it, s) && coincidono(it, s, sogliaMetri))
+            }
             if (i < 0) {
                 tenute.add(s)
                 continue
@@ -47,6 +66,10 @@ object SuggerimentiStazioni {
             if (tenuta.idNazionale == null && sintetica(tenuta) && !sintetica(s)) {
                 tenute[i] = tenuta.copy(idNazionale = s.locationId)
             }
+            // Stesso codice RFI: il nome e' quello della rete nazionale.
+            if (stessoCodiceRfi(tenuta, s) && sintetica(tenuta) && !sintetica(s)) {
+                tenute[i] = tenute[i].copy(name = s.name)
+            }
         }
 
         return tenute
@@ -54,17 +77,8 @@ object SuggerimentiStazioni {
             .sortedWith(compareByDescending<Station> { it.trackable }.thenBy { it.name.lowercase() })
     }
 
-    /**
-     * Il primo [Station.locationId] della fascia sintetica.
-     *
-     * Sotto questa soglia stanno gli id veri del nazionale (Le Frecce, RFI);
-     * da qui in su gli id inventati per le reti fuori-RFI, che Le Frecce non
-     * conosce. Vedi le `LOCATION_ID_BASE` dei repository fuori-RFI (9,0·10⁹ …).
-     */
-    private const val PRIMO_ID_SINTETICO = 9_000_000_000L
-
-    /** Vero se l'id e' inventato per una rete fuori-RFI, non un id del nazionale. */
-    private fun sintetica(s: Station): Boolean = s.locationId >= PRIMO_ID_SINTETICO
+    /** Vero se l'id e' inventato per una rete fuori-RFI, non un id del nazionale: vedi [PRIMO_ID_FUORI_RFI]. */
+    private fun sintetica(s: Station): Boolean = s.locationId >= PRIMO_ID_FUORI_RFI
 
     /** Quanto e' "ricca" una versione della stazione: piu' alto, meglio e'. */
     private fun qualita(s: Station): Int = when {
@@ -72,6 +86,13 @@ object SuggerimentiStazioni {
         s.rfiCode.startsWith("S") || s.rfiCode.startsWith("Z") -> 2
         else -> 1 // codice sintetico fuori-RFI
     }
+
+    /** Almeno una delle due non ha codice: la sola che la vicinanza puo' togliere. */
+    private fun senzaCodice(a: Station, b: Station): Boolean = a.rfiCode == null || b.rfiCode == null
+
+    /** Due versioni col codice RFI vero uguale: la stessa stazione, comunque la si scriva. */
+    private fun stessoCodiceRfi(a: Station, b: Station): Boolean =
+        qualita(a) == 2 && qualita(b) == 2 && a.rfiCode.equals(b.rfiCode, ignoreCase = true)
 
     /** Due versioni sono la stessa stazione se sono vicine: stesso nodo, fonti diverse. */
     private fun coincidono(a: Station, b: Station, sogliaMetri: Double): Boolean {

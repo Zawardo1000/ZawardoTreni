@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.graphics.compositeOver
@@ -58,6 +57,9 @@ import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -65,6 +67,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
+import it.zawardo.treni.domain.model.comeDistinguerlaDa
+import it.zawardo.treni.domain.model.nomeDelCambio
 import it.zawardo.treni.ui.TrainRoute
 import it.zawardo.treni.ui.ViaggioRoute
 import it.zawardo.treni.ui.comeJson
@@ -114,21 +118,22 @@ private val DATE = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIAN)
 
 /**
- * Le colonne di stato e prezzo in fondo alla scheda: vedi `JourneyCard`.
+ * Le colonne di stato e prezzo in fondo alla scheda: vedi [RigaColonne].
  *
- * Misurate sulle scritte piu' larghe che ci finiscono spesso — «non partito»
- * da una parte, «vendita chiusa» con l'icona dall'altra — e minime, non fisse:
- * una scritta piu' larga, come il bollo «Soppresso», allarga la sua scheda
- * invece di andare a capo a meta' parola.
+ * Larghe quanto le scritte piu' larghe che ci finiscono di solito — «non
+ * partito» da una parte, «intero viaggio» dall'altra — **misurate col carattere
+ * del telefono**, non scritte in dp: con il testo ingrandito nelle impostazioni
+ * crescono anche loro, e le colonne restano colonne. Minime, non fisse: una
+ * scritta piu' larga, come il bollo «Soppresso», allarga la sua scheda invece di
+ * andare a capo a meta' parola.
  *
- * Quella dello stato era di 84 dp, e i due treni di un viaggio con un cambio
- * andavano a capo per quattro: «RE8 2820 › S8 24834» ne chiede 151, e ne
- * restavano 147 (misurato il 18/09/2026 su 411 dp di schermo). A 72, con 6 fra
- * le colonne, ci stanno anche la sigla di quattro lettere e i numeri a cinque
- * cifre, e ritardo e prezzo, allineati a destra, non si muovono.
+ * Prima erano 72 e 104 dp, e la seconda era misurata su «vendita chiusa» con
+ * l'icona, che sta solo sulle schede rosse dei treni gia' passati in tabella.
+ * Il 19/09/2026 sul Pixel 7 «intero viaggio» ne occupava 70: gli altri 34 li
+ * pagavano i treni, che andavano a capo.
  */
-private val COLONNA_STATO = 72.dp
-private val COLONNA_PREZZO = 104.dp
+private val SCRITTA_STATO = "non partito"
+private val SCRITTA_PREZZO = "intero viaggio"
 private val SPAZIO_COLONNE = 6.dp
 
 /** Ritardo e prezzo: cifre tabulari come gli orari, perche' stiano in colonna. */
@@ -335,7 +340,7 @@ fun ResultsScreen(
                     }
 
                     items(state.journeys, key = { it.key }) { row ->
-                        JourneyCard(row, requestedDate = departure.toLocalDate()) { tratta ->
+                        JourneyCard(row, requestedDate = departure.toLocalDate(), cercata = from) { tratta ->
                             apri(row.journey, tratta, onOpenTrain, onOpenViaggio)
                         }
                     }
@@ -392,6 +397,8 @@ fun ResultsScreen(
 private fun JourneyCard(
     row: JourneyRow,
     requestedDate: LocalDate,
+    /** La stazione di partenza cercata: il binario, se e' di un'altra, lo dice. */
+    cercata: Station,
     /** L'indice della tratta toccata; `0` quando si tocca la scheda altrove. */
     onApri: (Int) -> Unit,
 ) {
@@ -462,7 +469,8 @@ private fun JourneyCard(
     ) {
         Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 12.dp)) {
 
-            val stazioneDelCambio = j.primoCambio()?.first?.to?.name.orEmpty()
+            // Dove si scende e, fra due gemelle, dove si risale: vedi `nomeDelCambio`.
+            val stazioneDelCambio = j.primoCambio()?.let { (primo, poi) -> nomeDelCambio(primo.to, poi.from) }.orEmpty()
             if (otherDay || j.assembled || ancoraInTempo || cambioSaltato) {
                 Row(
                     Modifier.padding(bottom = 8.dp),
@@ -606,9 +614,17 @@ private fun JourneyCard(
                  */
                 if (j.hasTrain) {
                     MatriceBiglietto(Modifier.padding(start = 12.dp).height(56.dp))
+                    /*
+                     * Il binario e' del primo treno, alla sua stazione, che non e'
+                     * sempre quella cercata: cercando Milano Porta Garibaldi le S5
+                     * partono dal Passante, e «binario 1» senz'altro manderebbe al
+                     * binario 1 di superficie. Sotto, allora, di quale stazione e'
+                     * (vedi `comeDistinguerlaDa`).
+                     */
+                    val altrove = j.legs.firstOrNull { it.isTrain }?.from?.comeDistinguerlaDa(cercata)
                     // Minima e non fissa: un binario dal nome lungo allarga la
                     // colonna invece di andare a capo a meta' parola.
-                    Box(Modifier.widthIn(min = 64.dp), contentAlignment = Alignment.Center) {
+                    Column(Modifier.widthIn(min = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         BinarioPillola(
                             row.scheduledPlatform,
                             row.actualPlatform,
@@ -616,6 +632,18 @@ private fun JourneyCard(
                             segnaposto = true,
                             conSigla = true,
                         )
+                        if (altrove != null) {
+                            Text(
+                                altrove,
+                                Modifier.padding(top = 3.dp).widthIn(max = 96.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = scheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
@@ -639,6 +667,7 @@ private fun JourneyCard(
              * come colonne.
              */
             RigaColonne(
+                colonne = larghezzeColonne(),
                 treni = { Tratte(j, Modifier, onApri) },
                 stato = { StatoSoluzione(row) },
                 prezzo = {
@@ -685,11 +714,15 @@ private fun OrarioReale(quando: LocalDateTime?, scarto: Int?) {
     )
 }
 
-/** «36 min · diretto», «1h 13 · 1 cambio, Treviglio». */
+/**
+ * «36 min · diretto», «1h 13 · 1 cambio, Treviglio». Con una camminata fra due
+ * gemelle i nomi sono due, «1 cambio, Napoli P. Garibaldi › Centrale»: vedi
+ * `nomeDelCambio`.
+ */
 private fun riassunto(j: Journey): String {
     val cambi = when {
         j.isDirect -> "diretto"
-        j.changes == 1 -> "1 cambio, " + j.legs.first().to.name
+        j.changes == 1 -> "1 cambio, " + nomeDelCambio(j.mezzi[0].to, j.mezzi[1].from)
         else -> "${j.changes} cambi"
     }
     return formatDuration(j.duration.toMinutes()) + " · " + cambi
@@ -704,7 +737,8 @@ private fun LineaViaggio(j: Journey, fondo: Color, modifier: Modifier) {
     val linea = MaterialTheme.colorScheme.outlineVariant
     val punto = MaterialTheme.colorScheme.outline
     val totale = Duration.between(j.departure, j.arrival).toMinutes().coerceAtLeast(1)
-    val cambi = j.legs.dropLast(1).map { leg ->
+    // Un pallino per cambio: la camminata di un cambio non ne fa un altro.
+    val cambi = j.mezzi.dropLast(1).map { leg ->
         (Duration.between(j.departure, leg.arrival).toMinutes().toFloat() / totale).coerceIn(0.1f, 0.9f)
     }
     Canvas(modifier) {
@@ -799,28 +833,58 @@ private fun Tratte(j: Journey, modifier: Modifier, onApri: (Int) -> Unit) {
     }
 }
 
+/** Quanto sono larghe, al minimo, le colonne di stato e prezzo: vedi [SCRITTA_STATO]. */
+private data class Colonne(val stato: Int, val prezzo: Int)
+
+/**
+ * Le larghezze delle colonne, misurate con gli stili veri delle scritte.
+ * Si ricalcolano solo se cambiano densita' o dimensione del testo.
+ */
+@Composable
+private fun larghezzeColonne(): Colonne {
+    val misura = rememberTextMeasurer()
+    val tipi = MaterialTheme.typography
+    val densita = LocalDensity.current
+    return remember(densita, tipi) {
+        fun largo(testo: String, stile: TextStyle) = misura.measure(testo, stile).size.width
+        Colonne(
+            stato = maxOf(
+                largo(SCRITTA_STATO, tipi.labelLarge.copy(fontWeight = FontWeight.Medium)),
+                largo("+888 min", CIFRE_CODA),
+            ),
+            prezzo = maxOf(
+                largo(SCRITTA_PREZZO, tipi.labelSmall),
+                largo("888,88 €", CIFRE_CODA),
+                // La scheda rossa del treno gia' passato in tabella: vedi [VenditaChiusa].
+                largo(VENDITA_CHIUSA, tipi.labelSmall.copy(fontWeight = FontWeight.SemiBold)),
+                largo(ORARIO_PASSATO, tipi.labelSmall),
+            ),
+        )
+    }
+}
+
 /**
  * La riga in fondo alla scheda: treni, stato, prezzo.
  *
- * Stato e prezzo sono colonne, e tengono il loro posto anche vuote: cosi'
- * ritardi e prezzi stanno in colonna da una scheda all'altra, e scorrendo
- * l'elenco si leggono come su un tabellone (segnalato il 14/09/2026).
+ * Stato e prezzo sono colonne allineate a destra, e tengono il loro posto anche
+ * vuote: cosi' ritardi e prezzi stanno in colonna da una scheda all'altra, e
+ * scorrendo l'elenco si leggono come su un tabellone (segnalato il 14/09/2026).
  *
- * Ma il posto vuoto di una colonna non vale una riga in piu' per i treni: con
- * due treni le sigle devono stare su una riga (chiesto l'11/09/2026), e con le
- * colonne fisse ci stavano solo sugli schermi larghi. Il 18/09/2026 «RE 2822 ›
- * S8 24838» chiedeva 151 dp e su un telefono di 390 dp ne aveva 134, mentre la
- * colonna del prezzo, vuota, ne teneva 104.
+ * I treni devono stare su una riga, se possono (chiesto l'11/09/2026). Per
+ * farceli stare possono prendersi il vuoto della colonna dello stato, che sta a
+ * **sinistra** della scritta: la scritta, allineata a destra, non si muove. Il
+ * vuoto del prezzo invece no. Sta a destra dello stato, e cederlo spostava lo
+ * stato: il 19/09/2026 in Varese-Brescia «non partito» non stava piu' in
+ * colonna. E si cede solo se basta: se i treni andrebbero a capo comunque, le
+ * colonne restano come sono. Tranne quando lo stato e' vuoto, come sui viaggi
+ * misti: li' non si sposta niente, e i treni si prendono anche il vuoto del
+ * prezzo, pur di andare a capo una volta di meno.
  *
- * Quindi le colonne stanno ferme finche' i treni ci stanno. Quando non ci
- * starebbero cedono **il loro vuoto** — prima il prezzo, che manca spesso, poi
- * lo stato — e mai quello che scrivono. Solo se non basta nemmeno cosi' i treni
- * vanno a capo, che e' il caso estremo.
- *
- * Tutte e tre sulla stessa linea di base, come prima.
+ * Tutte e tre sulla stessa linea di base.
  */
 @Composable
 private fun RigaColonne(
+    colonne: Colonne,
     treni: @Composable () -> Unit,
     stato: @Composable () -> Unit,
     prezzo: @Composable () -> Unit,
@@ -837,17 +901,23 @@ private fun RigaColonne(
         val testoStato = subcompose(Parte.STATO) { Box { stato() } }.single().measure(libero)
         val testoPrezzo = subcompose(Parte.PREZZO) { Box { prezzo() } }.single().measure(libero)
 
-        var colonnaStato = maxOf(testoStato.width, COLONNA_STATO.roundToPx())
-        var colonnaPrezzo = maxOf(testoPrezzo.width, COLONNA_PREZZO.roundToPx())
+        var colonnaStato = maxOf(testoStato.width, colonne.stato)
+        var colonnaPrezzo = maxOf(testoPrezzo.width, colonne.prezzo)
         val manca = inRiga.width + colonnaStato + colonnaPrezzo + 2 * spazio - larghezza
-        if (manca > 0) {
-            val dalPrezzo = minOf(manca, colonnaPrezzo - testoPrezzo.width)
-            colonnaPrezzo -= dalPrezzo
-            colonnaStato -= minOf(manca - dalPrezzo, colonnaStato - testoStato.width)
+        val dalloStato = colonnaStato - testoStato.width
+        if (testoStato.width == 0) {
+            // Stato vuoto, come sui viaggi misti: niente si sposta, e i treni si
+            // prendono il vuoto che serve anche solo per andare a capo una volta di meno.
+            val cede = minOf(manca.coerceAtLeast(0), dalloStato + colonnaPrezzo - testoPrezzo.width)
+            val primaDalloStato = minOf(cede, dalloStato)
+            colonnaStato -= primaDalloStato
+            colonnaPrezzo -= cede - primaDalloStato
+        } else if (manca in 1..dalloStato) {
+            colonnaStato -= manca
         }
         val colonnaTreni = (larghezza - colonnaStato - colonnaPrezzo - 2 * spazio).coerceAtLeast(0)
 
-        // Solo nel caso estremo i treni si rimisurano, e vanno a capo.
+        // Se non ci stanno nemmeno cosi', i treni vanno a capo.
         val treniMisurati = if (inRiga.width <= colonnaTreni) {
             inRiga
         } else {
@@ -910,8 +980,9 @@ private fun StatoSoluzione(row: JourneyRow) {
 
         row.loadingStatus -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
 
+        // Barrata in tutti e due i casi; la parola dice quale dei due.
         stato == TrainState.CANCELLED -> Text(
-            "Soppresso",
+            if (row.variato) "Variato" else "Soppresso",
             Modifier
                 .background(lateColor(), RoundedCornerShape(6.dp))
                 .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -919,6 +990,36 @@ private fun StatoSoluzione(row: JourneyRow) {
             fontWeight = FontWeight.SemiBold,
             color = onLateColor(),
         )
+
+        /*
+         * Salta delle fermate, o cambia strada, ma sali e scendi dove previsto:
+         * il treno ti porta, e la riga non si barra. «Variato» in verde, come
+         * «in orario», perche' e' un'informazione e non un allarme; quali
+         * fermate, lo dice il dettaglio (deciso con l'utente il 19/09/2026). Il
+         * ritardo, se c'e', resta sopra.
+         */
+        stato == TrainState.PARTIALLY_CANCELLED || stato == TrainState.DIVERTED -> {
+            val minuti = row.delayMinutes ?: 0
+            if (minuti != 0) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(delayLabel(minuti), style = CIFRE_CODA, color = scartoColor(minuti))
+                    Text(
+                        "variato",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = earlyColor(),
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                Text(
+                    "Variato",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = earlyColor(),
+                )
+            }
+        }
 
         stato != null -> {
             val anomalia = stateLabel(stato)
@@ -998,31 +1099,28 @@ private fun StatoSoluzione(row: JourneyRow) {
 @Composable
 private fun VenditaChiusa() {
     val colore = MaterialTheme.colorScheme.onSurfaceVariant
+    /*
+     * Nella colonna del prezzo e non piu' larga: con l'icona e «per questo
+     * orario» ne chiedeva 99 dp, allargava la colonna solo su questa scheda e lo
+     * stato non stava piu' in colonna con le altre (19/09/2026). E in carattere
+     * piccolo come «intero viaggio», perche' la colonna e' la stessa per tutte le
+     * schede: piu' grande, la pagavano i treni di ogni riga. Vedi
+     * [larghezzeColonne], che la misura.
+     */
     Column(horizontalAlignment = Alignment.End) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(
-                Icons.Filled.ConfirmationNumber,
-                contentDescription = null,
-                modifier = Modifier.size(15.dp),
-                tint = colore,
-            )
-            Text(
-                "vendita chiusa",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colore,
-            )
-        }
         Text(
-            "per questo orario",
+            VENDITA_CHIUSA,
             style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
             color = colore,
         )
+        Text(ORARIO_PASSATO, style = MaterialTheme.typography.labelSmall, color = colore)
     }
 }
+
+private const val VENDITA_CHIUSA = "vendita chiusa"
+private const val ORARIO_PASSATO = "orario passato"
+
 
 /**
  * Il prezzo compare solo quando c'e'.
@@ -1048,10 +1146,19 @@ private fun Prezzo(j: Journey) {
         )
         // Sotto la cifra e non accanto: accanto allargava la colonna, e il
         // ritardo di quella scheda usciva dalla colonna delle altre.
+        // Esaurito solo quando la fonte lo dice: non vendibile e' un'altra cosa.
         if (!p.saleable) {
-            Text("esaurito", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+            Text(
+                if (p.esaurito) "esaurito" else "non in vendita",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+            )
         }
         val etichetta = when {
+            // La somma di piu' biglietti, uno per venditore: va detto, o sembrerebbe
+            // un biglietto solo. Vedi `tratteDaBiglietto`.
+            j.biglietti.size == 2 -> "due biglietti"
+            j.biglietti.size > 2 -> "${j.biglietti.size} biglietti"
             // Su un misto, il pezzo di un operatore.
             j.price == null && j.assembled -> "solo " + operatoreParziale(j)
             // Il tratto urbano nel prezzo non c'e': prima questa scheda diceva

@@ -3,6 +3,7 @@ package it.zawardo.treni.ui.results
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.data.repository.chiavePrezzoLeFrecce
 import it.zawardo.treni.data.repository.chiaveSoluzione
 import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.DataSource
@@ -13,6 +14,7 @@ import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.ServiceAlert
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.coincidenza
@@ -21,8 +23,10 @@ import it.zawardo.treni.domain.model.fermataA
 import it.zawardo.treni.domain.model.prezzoDaTrenord
 import it.zawardo.treni.domain.model.soloTreni
 import it.zawardo.treni.domain.model.partenzaAncoraUtile
+import it.zawardo.treni.domain.model.prezzoTotale
 import it.zawardo.treni.domain.model.primoCambio
 import it.zawardo.treni.domain.model.soppressione
+import it.zawardo.treni.domain.model.tratteDaBiglietto
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -42,6 +46,12 @@ data class JourneyRow(
     val journey: Journey,
     val loadingStatus: Boolean = false,
     val state: TrainState? = null,
+    /**
+     * Col [state] soppresso, la corsa si fa ma non da dove sali o fin dove
+     * scendi: barrata come una soppressa, perche' per questo viaggio non serve,
+     * ma detta «Variato». Vedi `Journey.variato`.
+     */
+    val variato: Boolean = false,
     val delayMinutes: Int? = null,
     /**
      * Il binario da cui parti: la fermata di salita del **primo** treno.
@@ -89,18 +99,22 @@ data class JourneyRow(
     fun conTempoRealeDi(letta: JourneyRow): JourneyRow = copy(
         loadingStatus = letta.loadingStatus,
         state = letta.state,
+        variato = letta.variato,
         delayMinutes = letta.delayMinutes,
         scheduledPlatform = letta.scheduledPlatform,
         actualPlatform = letta.actualPlatform,
     )
 
     /**
-     * Una soluzione Le Frecce senza prezzo, di quelle che una ricerca nuova puo'
-     * riempire. Non i misti, il cui prezzo e' parziale per costruzione.
+     * Una soluzione senza prezzo che una richiesta in corso puo' riempire: Le
+     * Frecce, con una ricerca nuova, o da piu' biglietti (`tratteDaBiglietto`).
+     * Non i misti, il cui prezzo e' parziale per costruzione.
      */
     val aspettaPrezzo: Boolean
-        get() = journey.source == JourneySource.LEFRECCE && !journey.assembled &&
-            journey.price == null && journey.partialPrice == null
+        get() = (
+            journey.source == JourneySource.LEFRECCE && !journey.assembled &&
+                journey.price == null && journey.partialPrice == null
+            ) || journey.tratteDaBiglietto() != null
 
     /** Stabile fra un refresh e l'altro: evita che la lista salti sotto le dita. */
     val key: String
@@ -266,6 +280,7 @@ class ResultsViewModel(
             }
             enrich(rows)
             prezziDeiTreni(rows)
+            prezziInPiuBiglietti(rows)
             cercaAncoraPrendibili()
             cercaAltreSoluzioni(direttoMigliore = list.minByOrNull { it.duration }?.duration)
             if (outcome.prezziAssenti) riprovaPrezzi(departure, PAGE, rows)
@@ -355,11 +370,11 @@ class ResultsViewModel(
      * che porta prezzi: e' una ricerca riuscita, e quel che li' resta senza
      * prezzo non e' in vendita.
      *
-     * **Solo quando mancano tutti**, non quando ne manca qualcuno. Da quando la
-     * ricerca prende i prezzi anche dal sito di Trenitalia (vedi
-     * `LefrecceApi.soluzioniDelSito`), una lista tutta senza prezzi vuol dire
-     * che non hanno risposto ne' l'app ne' il sito; le singole righe senza sono
-     * biglietti che Trenitalia li' non vende, e per quelle c'e' [prezziDeiTreni].
+     * **Quando lo dice la ricerca** (`SearchOutcome.prezziAssenti`): con la
+     * lista dalla porta dell'app, se mancano tutti; con la lista dal sito, se
+     * manca a una soluzione che comincia a piedi, che il sito non prezza e l'app
+     * si'. Il nuovo tentativo chiede a tutte e due; quel che resta senza sono
+     * biglietti che Trenitalia li' non vende, e per quelli c'e' [prezziDeiTreni].
      *
      * Intanto le righe senza prezzo mostrano una rotella al suo posto, come la
      * pillola del binario mentre lo si chiede. Si segnano solo le [righe] di
@@ -380,9 +395,11 @@ class ResultsViewModel(
                     _state.update { s ->
                         s.copy(
                             journeys = s.journeys.map { riga ->
-                                if (riga.journey.price != null) return@map riga
-                                val prezzo = prezzi[chiaveSoluzione(riga.journey)] ?: return@map riga
-                                riga.copy(journey = riga.journey.copy(price = prezzo))
+                                // Un prezzo gia' noto resta, tranne la somma di piu' biglietti:
+                                // il prezzo intero che la fonte vende vale di piu' della nostra somma.
+                                if (riga.journey.price != null && riga.journey.biglietti.isEmpty()) return@map riga
+                                val prezzo = prezzi[chiavePrezzoLeFrecce(riga.journey)] ?: return@map riga
+                                riga.copy(journey = riga.journey.copy(price = prezzo, biglietti = emptyList()))
                             },
                         )
                     }
@@ -425,6 +442,39 @@ class ResultsViewModel(
                                 journey = if (viaggio.soloTreni) viaggio.copy(price = prezzo)
                                 else viaggio.copy(partialPrice = prezzo),
                             )
+                        },
+                    )
+                }
+            } finally {
+                segnaPrezzoInArrivo(chiavi, -1)
+            }
+        }
+    }
+
+    /**
+     * Il prezzo delle soluzioni da comprare con piu' biglietti, uno per
+     * venditore: vedi `JourneyRepository.bigliettiSeparati`. In sottofondo come
+     * [prezziDeiTreni], con la rotella al posto del prezzo. Il prezzo e' la somma,
+     * e la scheda dice che i biglietti sono due.
+     */
+    private fun prezziInPiuBiglietti(righe: List<JourneyRow>) {
+        val daComporre = righe.filter { it.journey.tratteDaBiglietto() != null }
+        if (daComporre.isEmpty()) return
+        val chiavi = daComporre.map { it.key }.toSet()
+        viewModelScope.launch {
+            segnaPrezzoInArrivo(chiavi, +1)
+            try {
+                val biglietti = runCatching {
+                    journeys.bigliettiSeparati(daComporre.map { it.journey }, noti = listOf(from, to))
+                }.getOrDefault(emptyMap())
+                if (biglietti.isEmpty()) return@launch
+                _state.update { s ->
+                    s.copy(
+                        journeys = s.journeys.map { riga ->
+                            if (riga.journey.price != null) return@map riga
+                            val questi = biglietti[chiaveSoluzione(riga.journey)] ?: return@map riga
+                            val totale = questi.prezzoTotale() ?: return@map riga
+                            riga.copy(journey = riga.journey.copy(price = totale, biglietti = questi))
                         },
                     )
                 }
@@ -565,6 +615,7 @@ class ResultsViewModel(
             }
             enrich(rows)
             prezziDeiTreni(rows)
+            prezziInPiuBiglietti(rows)
             riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE, rows) }
         }
     }
@@ -574,15 +625,24 @@ class ResultsViewModel(
         val current = _state.value
         if (current.loadingLater || current.noMoreLater) return
         val last = current.journeys.lastOrNull()?.journey?.departure ?: return
+        /*
+         * Da un po' prima dell'ultima: le fonti contano la partenza dall'inizio
+         * della camminata in testa, e noi dal treno (vedi
+         * `senzaCamminateAgliEstremi`). Chiedendo da un minuto dopo l'ultimo
+         * treno, un'S6 delle 10:28 con la camminata dalle 10:23, dopo un'S5 delle
+         * 10:25, non la restituiva nessuno. Quelle gia' in elenco si scartano per
+         * chiave.
+         */
+        val da = last.minusMinutes(CAMMINATA_IN_TESTA_MAX)
 
         viewModelScope.launch {
             _state.update { it.copy(loadingLater = true) }
 
             val esito = runCatching {
-                journeys.searchAll(from, to, last.plusMinutes(1), limit = WIDE_PAGE, sources = sources)
+                journeys.searchAll(from, to, da, limit = WIDE_PAGE, sources = sources)
             }.getOrNull()
             val batch = esito?.journeys.orEmpty().applyDirectFilter()
-                .filter { it.departure.isAfter(last) }
+                .filter { !it.departure.isBefore(last) }
             // Una finestra vuota per un guasto non dice che dopo non c'e' niente:
             // il pulsante resta, e riprovare tocca a chi guarda.
             val guasto = esito == null || esito.nazionaleNonRisponde
@@ -614,7 +674,8 @@ class ResultsViewModel(
             }
             enrich(rows)
             prezziDeiTreni(rows)
-            if (esito?.prezziAssenti == true) riprovaPrezzi(last.plusMinutes(1), WIDE_PAGE, rows)
+            prezziInPiuBiglietti(rows)
+            if (esito?.prezziAssenti == true) riprovaPrezzi(da, WIDE_PAGE, rows)
         }
     }
 
@@ -627,7 +688,7 @@ class ResultsViewModel(
      * anche quando l'interrogazione successiva non trovera' nulla.
      */
     private fun Journey.toRow(): JourneyRow {
-        val row = JourneyRow(this, state = declaredState, delayMinutes = delayMinutes)
+        val row = JourneyRow(this, state = declaredState, variato = variato, delayMinutes = delayMinutes)
         return row.copy(loadingStatus = row.realtimeNow)
     }
 
@@ -671,6 +732,8 @@ class ResultsViewModel(
                 candidate.map { riga ->
                     async {
                         val (arricchita, stato) = conStato(riga)
+                        // Soppresso, o variato fino a non servire piu': non si prende.
+                        if (arricchita.state == TrainState.CANCELLED) return@async null
                         val partenza = riga.journey.partenzaAncoraUtile(stato, departure)
                             ?: return@async null
                         val coincidenza = coincidenzaDi(riga.journey, stato)
@@ -804,6 +867,16 @@ class ResultsViewModel(
             )
         }.getOrNull()?.let { conBinarioDiSalita(it, leg, giorno) }
         val salita = status?.fermataDiSalita(leg)
+        /*
+         * La corsa c'e', ma la fermata da cui sali o quella a cui scendi e'
+         * soppressa: il treno limitato, che oggi nasce dopo o finisce prima. Per
+         * questo viaggio non serve, come una soppressione, ma soppresso non e'.
+         * Trenord lo dichiara sulla soluzione; per gli altri lo dice ViaggiaTreno
+         * sulla fermata.
+         */
+        val discesa = status?.fermataA(leg.to.rfiCode, leg.arrival.toLocalTime())
+        val salitaSoppressa = status != null && status.state != TrainState.CANCELLED &&
+            (salita?.status == StopStatus.CANCELLED || discesa?.status == StopStatus.CANCELLED)
         val arricchita = row.copy(
             loadingStatus = false,
             scheduledPlatform = salita?.scheduledPlatform,
@@ -814,7 +887,9 @@ class ResultsViewModel(
              * non e' una smentita.
              */
             state = row.journey.declaredState?.takeIf { it.soppressione }
+                ?: TrainState.CANCELLED.takeIf { salitaSoppressa }
                 ?: status?.state ?: row.state,
+            variato = row.journey.variato || (salitaSoppressa && row.journey.declaredState?.soppressione != true),
             delayMinutes = when {
                 status == null -> row.delayMinutes
                 /*
@@ -872,6 +947,12 @@ class ResultsViewModel(
 
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15
+
+        /**
+         * Quanto puo' durare una camminata in testa, che le fonti contano nella
+         * partenza e noi no: vedi `loadLater`. Quelle fra gemelle sono di 5-8.
+         */
+        const val CAMMINATA_IN_TESTA_MAX = 10L
 
         /**
          * Le attese prima di ogni nuova ricerca dei prezzi: vedi [riprovaPrezzi].

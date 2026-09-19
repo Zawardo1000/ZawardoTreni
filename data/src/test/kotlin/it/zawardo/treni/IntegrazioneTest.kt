@@ -741,6 +741,22 @@ class IntegrazioneTest {
             limitatoOltre.toJourney()?.declaredState == TrainState.CANCELLED,
         )
         assertTrue(
+            "ma la corsa si fa, prima di dove sali: e' variata, non soppressa",
+            limitatoOltre.toJourney()?.variato == true,
+        )
+        // Tutte le fermate soppresse: la corsa non c'e' proprio.
+        val soppressa = corsa(
+            listOf(
+                fermata("1703", "O", "19:40:00", soppressa = true),
+                fermata("1645", "start", "20:02:00", soppressa = true),
+                fermata("1205", "end", "21:18:00", soppressa = true),
+            ),
+        )
+        assertTrue(
+            "soppressa per intero e' soppressa, non variata",
+            soppressa.toJourney()?.let { it.declaredState == TrainState.CANCELLED && !it.variato } == true,
+        )
+        assertTrue(
             "una fermata saltata dentro il tuo percorso e' una soppressione parziale",
             saltaInMezzo.toJourney()?.declaredState == TrainState.PARTIALLY_CANCELLED,
         )

@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.Handshake
@@ -122,6 +123,23 @@ fun AboutScreen(onBack: () -> Unit) {
             }
 
             HorizontalDivider()
+
+            Section(
+                icon = Icons.Outlined.AutoAwesome,
+                title = "Cosa trovi qui che altrove no",
+                body = "• Tutte le ferrovie in una ricerca: Trenitalia, Trenord e Italo " +
+                    "insieme, più quelle che le app nazionali non vedono — la " +
+                    "Circumvesuviana e le altre linee EAV, Ferrotramviaria, la " +
+                    "Vigezzina–Centovalli e le linee S del Ticino, le ferrovie sarde. " +
+                    "E viaggi che cambiano gestore per strada, come Sorrento–Roma con " +
+                    "la Circumvesuviana e poi la Freccia o Italo (beta).\n\n" +
+                    "• Il treno in ritardo che fai ancora in tempo a prendere te lo " +
+                    "propongo nella ricerca normale, anche se in orario è già partito. " +
+                    "E per ogni soluzione ti dico se la coincidenza regge coi ritardi di " +
+                    "adesso, se è a rischio o se è persa.\n\n" +
+                    "• I binari li prendo da due fonti insieme, ViaggiaTreno e Trenord, e " +
+                    "li vedi già nell'elenco dei risultati.",
+            )
 
             Section(
                 icon = Icons.Outlined.Lock,

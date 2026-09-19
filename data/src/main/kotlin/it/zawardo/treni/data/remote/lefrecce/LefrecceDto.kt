@@ -182,10 +182,22 @@ data class VoceSito(val solution: SoluzioneSito? = null)
 @Serializable
 data class SoluzioneSito(
     val departureTime: String? = null,
-    /** `SALEABLE`, o `NOT_SALEABLE` per un biglietto che adesso non si compra. */
+    val arrivalTime: String? = null,
+    /** `SALEABLE`, `SOLD_OUT`, o `NOT_SALEABLE` per un biglietto che adesso non si compra. */
     val status: String? = null,
     val trains: List<TrenoSito> = emptyList(),
     val price: PrezzoSito? = null,
+    /** Le tratte, con stazioni per nome e orari: il codice delle stazioni no. */
+    val nodes: List<NodoSito> = emptyList(),
+)
+
+@Serializable
+data class NodoSito(
+    val origin: String? = null,
+    val destination: String? = null,
+    val departureTime: String? = null,
+    val arrivalTime: String? = null,
+    val train: TrenoSito? = null,
 )
 
 @Serializable
@@ -195,6 +207,12 @@ data class TrenoSito(
     val name: String? = null,
     /** Il tratto urbano, che il prezzo non comprende ("not included in the price"). */
     val urban: Boolean = false,
+    /** "WK" sulla camminata ("Walking route"), "UB" sul trasporto urbano vero. */
+    val logoId: String? = null,
+    /** "S5 TRENORD 24537": da qui la sigla della linea S. */
+    val description: String? = null,
+    val denomination: String? = null,
+    val trainCategory: String? = null,
 )
 
 @Serializable

@@ -18,6 +18,7 @@ import it.zawardo.treni.domain.model.Station
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 import java.time.LocalDateTime
@@ -123,5 +124,20 @@ class PrezziDelSitoTest {
         val viaggi = JourneyRepository(BffFinto(dellApp) { throw IOException("giu'") }).search(milano, brescia, quando)
         assertEquals("le soluzioni restano", 2, viaggi.size)
         viaggi.forEach { assertNull(it.price) }
+    }
+
+    /**
+     * Esaurito e non vendibile non sono la stessa cosa. Il 19/09/2026 il sito
+     * dava `SOLD_OUT` a «Urbano › RE 36 › Urbano › FR 9723» da Varese; e
+     * `NOT_SALEABLE` dice che quel biglietto adesso non si vende, non che i posti
+     * siano finiti. L'app scriveva «esaurito» su tutti e due.
+     */
+    @Test
+    fun `esaurito solo quando il sito dice SOLD_OUT`() = runBlocking {
+        fun conStato(stato: String) = JourneyRepository(BffFinto(dellApp) { delSito.map { it.copy(status = stato) } })
+        val esauriti = conStato("SOLD_OUT").search(milano, brescia, quando).map { it.price!! }
+        assertTrue(esauriti.all { !it.saleable && it.esaurito })
+        val nonInVendita = conStato("NOT_SALEABLE").search(milano, brescia, quando).map { it.price!! }
+        assertTrue(nonInVendita.all { !it.saleable && !it.esaurito })
     }
 }

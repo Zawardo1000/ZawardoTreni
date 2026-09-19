@@ -111,9 +111,11 @@ fun coincidenzaRegge(
     primo: Leg,
     secondo: Leg,
     partenzaSecondo: LocalDateTime = secondo.departure,
+    /** I minuti a piedi fra i due treni: il margine non puo' essere di meno. */
+    aPiedi: Duration = Duration.ZERO,
 ): Boolean {
     val pianificato = Duration.between(primo.arrival, secondo.departure)
-    val margine = minOf(MARGINE_CAMBIO, maxOf(pianificato, Duration.ZERO))
+    val margine = maxOf(aPiedi, minOf(MARGINE_CAMBIO, maxOf(pianificato, Duration.ZERO)))
     return !arrivo.plus(margine).isAfter(partenzaSecondo)
 }
 
@@ -153,16 +155,24 @@ fun Journey.partenzaAncoraUtile(primo: TrainStatus?, dalle: LocalDateTime): Loca
  * Il primo **treno**, non la prima tratta: «Urbano › RE 10911» comincia col
  * tratto urbano, e il ritardo che si conosce e' quello del treno. La tratta dopo
  * deve partire a un'ora fissa, come un treno o un bus sostitutivo. Il tratto
- * urbano no, perche' la metropolitana passa ogni pochi minuti; e nemmeno il
- * tratto a piedi, dopo il quale il cambio vero e' con la tratta successiva, a
- * una distanza che il margine di [coincidenzaRegge] non conosce. Li' la
- * coincidenza non si giudica, invece di giudicarla male.
+ * urbano no, perche' la metropolitana passa ogni pochi minuti, e li' la
+ * coincidenza non si giudica, invece di giudicarla male. Una camminata invece
+ * non e' la tratta dopo: si scavalca, e i suoi minuti li conta
+ * [camminataAlPrimoCambio].
  */
 fun Journey.primoCambio(): Pair<Leg, Leg>? {
     val i = legs.indexOfFirst { it.isTrain }
     if (i < 0) return null
-    val poi = legs.getOrNull(i + 1)?.takeIf { !it.isWalk && !it.urbano } ?: return null
+    val poi = legs.drop(i + 1).firstOrNull { !it.isWalk }?.takeIf { !it.urbano } ?: return null
     return legs[i] to poi
+}
+
+/** I minuti a piedi fra le due tratte del [primoCambio]. */
+fun Journey.camminataAlPrimoCambio(): Duration {
+    val (primo, poi) = primoCambio() ?: return Duration.ZERO
+    return legs.subList(legs.indexOf(primo) + 1, legs.indexOf(poi))
+        .filter { it.isWalk }
+        .fold(Duration.ZERO) { tot, l -> tot + Duration.between(l.departure, l.arrival) }
 }
 
 /** Come sta la coincidenza di un viaggio il cui primo treno e' in ritardo. */
@@ -218,7 +228,7 @@ fun Journey.coincidenza(primo: TrainStatus?, secondo: TrainStatus?): Coincidenza
     }
 
     return when {
-        coincidenzaRegge(arrivo, salita, poi, partenzaPoi) -> Coincidenza.REGGE
+        coincidenzaRegge(arrivo, salita, poi, partenzaPoi, camminataAlPrimoCambio()) -> Coincidenza.REGGE
         !arrivo.isAfter(partenzaPoi.plus(RECUPERO)) -> Coincidenza.A_RISCHIO
         else -> Coincidenza.PERSA
     }

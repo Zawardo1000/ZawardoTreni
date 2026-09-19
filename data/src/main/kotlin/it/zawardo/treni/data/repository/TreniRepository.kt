@@ -6,15 +6,21 @@ import it.zawardo.treni.data.mapper.toBoardEntry
 import it.zawardo.treni.data.mapper.toJourney
 import it.zawardo.treni.data.mapper.toStation
 import it.zawardo.treni.data.mapper.toTrainStatus
+import it.zawardo.treni.domain.model.nomeLeggibile
+import it.zawardo.treni.domain.model.TransportKind
+import it.zawardo.treni.data.mapper.senzaCamminateAgliEstremi
 import it.zawardo.treni.data.remote.lefrecce.CriteriSito
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
+import it.zawardo.treni.data.remote.lefrecce.LocationDto
 import it.zawardo.treni.data.remote.lefrecce.RicercaAvanzataSito
 import it.zawardo.treni.data.remote.lefrecce.RichiestaSito
+import it.zawardo.treni.data.remote.lefrecce.SolutionDto
 import it.zawardo.treni.data.remote.lefrecce.SoluzioneSito
 import it.zawardo.treni.data.remote.viaggiatreno.InfomobilitaParser
 import it.zawardo.treni.data.remote.viaggiatreno.NotiziaCorsa
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
+import it.zawardo.treni.domain.model.Biglietto
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
@@ -31,6 +37,7 @@ import it.zawardo.treni.domain.model.conRitardoDaFermo
 import it.zawardo.treni.domain.model.matchesCategory
 import it.zawardo.treni.domain.model.prezzoDaTrenord
 import it.zawardo.treni.domain.model.stessaStazione
+import it.zawardo.treni.domain.model.tratteDaBiglietto
 import it.zawardo.treni.domain.model.vedePartireDa
 import java.io.IOException
 import java.time.Duration
@@ -172,8 +179,11 @@ data class SearchOutcome(
     val journeys: List<Journey> = emptyList(),
     val alerts: List<ServiceAlert> = emptyList(),
     /**
-     * Le Frecce ha risposto senza alcun prezzo. E' intermittente, e la stessa
-     * ricerca rifatta poco dopo puo' riportarli: vedi [JourneyRepository.prezziLeFrecce].
+     * Ci sono soluzioni di Le Frecce senza prezzo che un'altra lettura puo'
+     * dare: vedi [JourneyRepository.prezziLeFrecce]. Dalla porta del sito, una
+     * che comincia a piedi — il sito quelle non le prezza, l'app si'. Dalla
+     * porta dell'app, che manchino tutti: e' intermittente, e poco dopo possono
+     * tornare.
      */
     val prezziAssenti: Boolean = false,
     /**
@@ -271,26 +281,46 @@ class JourneyRepository(
     ): List<Journey> = cercaLeFrecce(from, to, departure, limit).journeys
 
     /**
-     * Una ricerca **nuova** su Le Frecce, per i soli prezzi, per chiave di
-     * soluzione (vedi [chiaveSoluzione]).
+     * I prezzi di Le Frecce per chiave di prezzo (vedi [chiavePrezzoLeFrecce]),
+     * chiesti alle due porte insieme: vale quello di chi lo ha.
      *
-     * Serve quando la prima e' tornata tutta senza prezzi
-     * ([SearchOutcome.prezziAssenti]). Misurato l'11/09/2026 su Varese-Brescia:
-     * la stessa ricerca ripetuta ha dato 8 prezzi, poi 0, poi 0; per il giorno
-     * dopo 0, 8, 0. Nella stessa sessione, stessa tratta e stessa ora ridanno lo
-     * stesso `searchId` (verificato il 18/09/2026): a riportare i prezzi e' il
-     * tempo che passa — lo stesso `searchId`, riletto a una decina di secondi di
-     * distanza, e' passato da 4 prezzi a nessuno e di nuovo a 4.
+     * Serve alle soluzioni rimaste senza ([SearchOutcome.prezziAssenti]), e le
+     * due porte perdono prezzi diversi. Il sito non prezza le soluzioni che
+     * cominciano con una camminata: Milano Porta Garibaldi-Melzo, il 19/09/2026,
+     * tutte senza, e l'app le dava a 3,00 €. L'app li perde a intermittenza:
+     * Varese-Brescia, l'11/09/2026, la stessa ricerca ripetuta ha dato 8 prezzi,
+     * poi 0, poi 0; e nella stessa sessione, stessa tratta e stessa ora, ridanno
+     * lo stesso `searchId`, che riletto a una decina di secondi di distanza e'
+     * passato da 4 prezzi a nessuno e di nuovo a 4 (18/09/2026).
      */
     suspend fun prezziLeFrecce(
         from: Station,
         to: Station,
         departure: LocalDateTime,
         limit: Int = 10,
-    ): Map<String, Price> =
-        cercaLeFrecce(from.perNazionale(), to.perNazionale(), departure, limit).journeys
-            .mapNotNull { j -> j.price?.let { chiaveSoluzione(j) to it } }
+    ): Map<String, Price> = withContext(Dispatchers.IO) {
+        val da = from.perNazionale()
+        val a = to.perNazionale()
+        val dalSito = async {
+            val pagine = (0 until pagineDelSitoPer(limit)).map { pagina ->
+                async { paginaDelSito(da, a, departure, offset = pagina * SOLUZIONI_PER_PAGINA) }
+            }.map { it.await() }
+            dalSito(pagine, da, a, limit)?.journeys.orEmpty()
+        }
+        val dallApp = async {
+            try {
+                dallaPortaDellApp(da, a, departure, limit).second
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        (dallApp.await() + dalSito.await())
+            .mapNotNull { j -> j.price?.let { chiavePrezzoLeFrecce(j) to it } }
+            .distinctBy { it.first }
             .toMap()
+    }
 
     /**
      * Il prezzo dei treni delle soluzioni Le Frecce che un prezzo non hanno,
@@ -345,6 +375,109 @@ class JourneyRepository(
         return prezzi
     }
 
+    /**
+     * I biglietti delle soluzioni da comprare da piu' venditori
+     * ([tratteDaBiglietto]), per chiave di soluzione: ogni tratta prezzata da chi
+     * la vende, e solo se lo sono tutte.
+     *
+     * La parte Trenord la prezza Trenord, cercandola da sola e prendendo la sua
+     * soluzione con gli stessi treni, come in [prezziDeiTreni]. La parte
+     * Trenitalia il sito di Trenitalia, che prezza tutto (vedi
+     * [conPrezziDelSito]), riconoscendo la soluzione per partenza e treni. Il
+     * 19/09/2026, Varese-Brescia delle 10:10: 6,30 € Trenord fino a Milano
+     * Centrale, 23,50 € l'EC 301 fino a Brescia.
+     *
+     * [noti] sono le stazioni della ricerca, che l'identificativo di Le Frecce ce
+     * l'hanno: vedi [perLeFrecce]. Una tratta comune a piu' soluzioni si prezza
+     * una volta.
+     */
+    suspend fun bigliettiSeparati(viaggi: List<Journey>, noti: List<Station>): Map<String, List<Biglietto>> {
+        val perTratta = mutableMapOf<String, Biglietto?>()
+        val esito = mutableMapOf<String, List<Biglietto>>()
+        for (viaggio in viaggi) {
+            val tratte = viaggio.tratteDaBiglietto() ?: continue
+            val biglietti = tratte.map { tratta ->
+                val chiave = tratta.joinToString(",") { "${it.trainNumber}@${it.departure}" }
+                if (chiave !in perTratta) perTratta[chiave] = bigliettoDi(tratta, noti)
+                perTratta[chiave]
+            }
+            if (biglietti.all { it != null }) esito[chiaveSoluzione(viaggio)] = biglietti.filterNotNull()
+        }
+        return esito
+    }
+
+    private suspend fun bigliettoDi(tratta: List<Leg>, noti: List<Station>): Biglietto? {
+        val venditore = tratta.first().venditore ?: return null
+        val prezzo = when (venditore) {
+            DataSource.TRENORD -> prezzoTrenord(tratta)
+            DataSource.TRENITALIA -> prezzoTrenitalia(tratta, noti)
+            else -> null
+        } ?: return null
+        return Biglietto(venditore, prezzo)
+    }
+
+    private suspend fun prezzoTrenord(tratta: List<Leg>): Price? {
+        val trenord = trenord ?: return null
+        val da = tratta.first().from
+        val a = tratta.last().to
+        if (!trenord.covers(da, a)) return null
+        return trenord.search(da, a, tratta.first().departure).journeys
+            .firstOrNull { it.haGliStessiTreniDi(tratta) }
+            ?.price
+    }
+
+    private suspend fun prezzoTrenitalia(tratta: List<Leg>, noti: List<Station>): Price? {
+        val da = perLeFrecce(tratta.first().from, noti) ?: return null
+        val a = perLeFrecce(tratta.last().to, noti) ?: return null
+        val partenza = tratta.first().departure
+        val chiave = chiavePrezzo(partenza, tratta.mapNotNull { it.trainNumber })
+        return paginaDelSito(da, a, partenza, offset = 0)
+            ?.firstOrNull { sito ->
+                sito.partenza()?.let { chiavePrezzo(it, sito.trains.mapNotNull { t -> t.name }) } == chiave
+            }
+            ?.prezzo()
+    }
+
+    /** Gli identificativi di Le Frecce gia' trovati, per codice RFI: vedi [perLeFrecce]. */
+    private val idLeFrecce = ConcurrentHashMap<String, Long>()
+
+    /**
+     * La stazione con l'identificativo di Le Frecce, per chiederle un prezzo.
+     *
+     * Le stazioni di Trenord non ce l'hanno, e ricavarlo dal codice RFI e' gia'
+     * risultato falso: Milano Dateo e' S01650 ma 830001665 (vedi `toStation` nei
+     * mapper Trenord). Si prende da una stazione della ricerca, se e' la stessa;
+     * altrimenti lo si chiede per nome e si tiene solo il risultato col codice
+     * RFI uguale. Null se non lo si trova: meglio nessun prezzo che quello di
+     * un'altra stazione.
+     *
+     * Per nome intero, e se non basta per la prima parola: i nomi delle due
+     * fonti non coincidono. Trenord scrive «Rho Fiera Milano», Le Frecce
+     * «Rho-Fiera Milano», e cercando «rho fiera» non torna niente mentre «rho» la
+     * trova (19/09/2026). E' il codice RFI a dire quale sia, non il nome.
+     */
+    private suspend fun perLeFrecce(stazione: Station, noti: List<Station>): Station? {
+        stazione.idLeFrecce?.let { return stazione.copy(locationId = it) }
+        val rfi = stazione.rfiCode ?: return null
+        noti.firstOrNull { it.idLeFrecce != null && stessaStazione(it.rfiCode, rfi) }
+            ?.let { return stazione.copy(locationId = it.idLeFrecce!!) }
+        idLeFrecce[rfi]?.let { return stazione.copy(locationId = it) }
+        val primaParola = stazione.name.split(' ', '-', '.', '\'').firstOrNull { it.isNotBlank() }
+        for (nome in listOfNotNull(stazione.name, primaParola).distinct()) {
+            val trovate = try {
+                lefrecce.locations(name = nome, limit = LUOGHI_PER_NOME)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return null
+            }
+            val id = trovate.firstOrNull { it.bdoCode == rfi }?.locationId ?: continue
+            idLeFrecce[rfi] = id
+            return stazione.copy(locationId = id)
+        }
+        return null
+    }
+
     /** Stessi treni, nello stesso ordine, in partenza entro un paio di minuti. */
     private fun Journey.haGliStessiTreniDi(treni: List<Leg>): Boolean {
         val suoi = legs.filter { it.isTrain }
@@ -392,9 +525,20 @@ class JourneyRepository(
     }
 
     /**
-     * La `/search` e la sua `/solutions`, sempre in coppia. Il `searchId` scade
-     * 15 minuti dopo, e nella stessa sessione stessa tratta e stessa ora ridanno
-     * lo stesso: le due chiamate restano insieme qui dentro e non si separano mai.
+     * Una ricerca su Le Frecce: dalla porta del sito, e dalla porta dell'app
+     * solo se quella non basta.
+     *
+     * **Il sito prima, perche' e' quattro volte piu' veloce.** Il 19/09/2026 la
+     * lista di Milano Porta Garibaldi-Melzo arrivava dopo 13-15 secondi, e quasi
+     * tutti erano della porta dell'app: `/app/search` e poi `/solutions`, due
+     * chiamate in fila, 5-10 secondi, fino a 11. La porta del sito da' soluzioni
+     * e prezzi in una chiamata sola, 1,3-1,7 secondi, e le soluzioni sono le
+     * stesse: tratte con stazioni e orari, numeri dei treni, prezzi. Le manca
+     * solo il codice delle stazioni, che si ricava dal nome: vedi [dalSito].
+     *
+     * La porta dell'app parte lo stesso, insieme, e si annulla appena il sito ha
+     * risposto: se il sito non risponde, o risponde qualcosa che non si sa
+     * leggere, c'e' gia' e si aspetta lei, come prima.
      */
     private suspend fun unaRicercaLeFrecce(
         from: Station,
@@ -402,43 +546,33 @@ class JourneyRepository(
         departure: LocalDateTime,
         limit: Int,
     ): RisultatoLeFrecce = withContext(Dispatchers.IO) {
-        // I prezzi dal sito, in parallelo, tutte le pagine che servono a [limit]:
-        // vedi [conPrezziDelSito].
+        // Le pagine che servono a [limit], tutte insieme: vedi [conPrezziDelSito].
         val pagineDelSito = (0 until pagineDelSitoPer(limit)).map { pagina ->
             async { paginaDelSito(from, to, departure, offset = pagina * SOLUZIONI_PER_PAGINA) }
         }
-
-        val session = lefrecce.search(
-            startLocationId = from.locationId,
-            endLocationId = to.locationId,
-            departureTime = departure.atZone(ROME).format(bffFormat),
-        )
-        // Anche una ricerca vera senza treni ha il suo searchId: senza, e' un guasto.
-        if (session.searchId.isBlank()) throw RispostaMonca("searchId vuoto")
-
-        /*
-         * Si chiede piu' del necessario e si tronca dopo il filtro.
-         *
-         * Alcune soluzioni non producono tratte utilizzabili e vengono scartate:
-         * chiedendone esattamente [limit] il risultato si assottigliava, e nei
-         * casi peggiori restava vuoto. Da fuori sembrava che la ricerca non
-         * trovasse nulla, e bastava spostare l'orario di un minuto perche'
-         * tornassero soluzioni diverse e "funzionasse".
-         */
-        val soluzioni = lefrecce.solutions(searchId = session.searchId, offset = 0, limit = limit * OVERFETCH)
-        if (soluzioni.isEmpty() && session.totalSolutions > 0) {
-            throw RispostaMonca("dichiarate ${session.totalSolutions} soluzioni, arrivate nessuna")
+        // Il ripiego, gia' in corsa: un suo guasto conta solo se serve.
+        val dallApp = async {
+            try {
+                Result.success(dallaPortaDellApp(from, to, departure, limit))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
-        val dellApp = soluzioni
-            .mapNotNull { it.toJourney() }
-            .filter { it.legs.isNotEmpty() }
-            .take(limit)
-        // Coi prezzi gia' tutti, il sito non aggiungerebbe niente: non lo si aspetta.
+
+        val pagine = pagineDelSito.map { it.await() }
+        dalSito(pagine, from, to, limit)?.let { dalSito ->
+            dallApp.cancel()
+            return@withContext dalSito
+        }
+
+        val (soluzioni, dellApp) = dallApp.await().getOrThrow()
+        // Coi prezzi gia' tutti, il sito non aggiungerebbe niente.
         val viaggi = if (dellApp.none { it.price == null }) {
-            pagineDelSito.forEach { it.cancel() }
             dellApp
         } else {
-            conPrezziDelSito(dellApp, from, to, departure, pagineDelSito.map { it.await() })
+            conPrezziDelSito(dellApp, from, to, departure, pagine)
         }
         RisultatoLeFrecce(
             journeys = viaggi,
@@ -451,6 +585,193 @@ class JourneyRepository(
             senzaPrezzi = viaggi.isNotEmpty() &&
                 viaggi.none { it.price != null } &&
                 soluzioni.all { it.totalAmount?.showPrice == false },
+        )
+    }
+
+    /**
+     * La `/search` e la sua `/solutions`, sempre in coppia. Il `searchId` scade
+     * 15 minuti dopo, e nella stessa sessione stessa tratta e stessa ora ridanno
+     * lo stesso: le due chiamate restano insieme qui dentro e non si separano mai.
+     *
+     * Le soluzioni arrivate e quelle utilizzabili, al piu' [limit].
+     */
+    private suspend fun dallaPortaDellApp(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        limit: Int,
+    ): Pair<List<SolutionDto>, List<Journey>> {
+        val session = lefrecce.search(
+            startLocationId = from.locationId,
+            endLocationId = to.locationId,
+            departureTime = departure.atZone(ROME).format(bffFormat),
+        )
+        // Anche una ricerca vera senza treni ha il suo searchId: senza, e' un guasto.
+        if (session.searchId.isBlank()) throw RispostaMonca("searchId vuoto")
+
+        /*
+         * Tante quante ne servono, e un'altra pagina solo se mancano.
+         *
+         * Alcune soluzioni non producono tratte utilizzabili e vengono scartate:
+         * chiedendone esattamente [limit] il risultato poteva assottigliarsi, e
+         * per questo se ne chiedevano tre volte tante in un colpo. Ma e' la
+         * quantita' a decidere il tempo: il 19/09/2026 `/solutions` impiegava 3,4
+         * secondi per 10 soluzioni, 7-9 per 24, 11 per 45, ed era quasi tutta
+         * l'attesa della lista. E sulle sei tratte misurate quel giorno, 144
+         * soluzioni, non ne era scartata nessuna. Le pagine dopo la prima invece
+         * costano poco, 0,6 secondi: il calcolo lo fa la prima. Quindi [limit]
+         * subito, e le pagine seguenti solo se dopo gli scarti ne restano meno,
+         * fino al tetto di prima ([OVERFETCH]).
+         */
+        val soluzioni = mutableListOf<SolutionDto>()
+        val usabili = mutableListOf<Journey>()
+        do {
+            val pagina = lefrecce.solutions(searchId = session.searchId, offset = soluzioni.size, limit = limit)
+            soluzioni += pagina
+            usabili += pagina.mapNotNull { it.toJourney() }.filter { it.legs.isNotEmpty() }
+            // Una pagina corta e' l'ultima: altre non ce ne sono.
+        } while (
+            pagina.size == limit && usabili.size < limit &&
+            soluzioni.size < minOf(session.totalSolutions, limit * OVERFETCH)
+        )
+        if (soluzioni.isEmpty() && session.totalSolutions > 0) {
+            throw RispostaMonca("dichiarate ${session.totalSolutions} soluzioni, arrivate nessuna")
+        }
+        return soluzioni to usabili.take(limit)
+    }
+
+    /**
+     * Le soluzioni della porta del sito, lette come quelle dell'app; null se non
+     * bastano e serve la porta dell'app.
+     *
+     * Null quando il sito non ha risposto, quando non ha soluzioni — un vuoto lo
+     * conferma la porta dell'app, che lo sa distinguere da un guasto — o quando
+     * una soluzione arriva senza tratte, che vuol dire una risposta diversa da
+     * quella che conosciamo.
+     *
+     * Le stazioni delle tratte arrivano per nome: vedi [stazioniPerNome].
+     */
+    private suspend fun dalSito(
+        pagine: List<List<SoluzioneSito>?>,
+        from: Station,
+        to: Station,
+        limit: Int,
+    ): RisultatoLeFrecce? {
+        val arrivate = pagine.takeWhile { it != null }.filterNotNull().flatten()
+        if (arrivate.isEmpty() || arrivate.any { it.nodes.isEmpty() }) return null
+        val nomi = arrivate.flatMap { s -> s.nodes.flatMap { listOfNotNull(it.origin, it.destination) } }.toSet()
+        // Col tempo contato, come le pagine: la porta dell'app e' gia' in corsa.
+        val stazioni = withTimeoutOrNull(ATTESA_NOMI_MS) { stazioniPerNome(nomi, noti = listOf(from, to)) }
+            ?: return null
+        val usate = arrivate.mapNotNull { sito -> sito.inViaggio(stazioni)?.let { sito to it } }.take(limit)
+        val viaggi = usate.map { it.second }
+        if (viaggi.isEmpty()) return null
+        /*
+         * Un treno con una stazione che il nome non ha fatto riconoscere
+         * resterebbe senza tempo reale, senza binario e senza coincidenza. La
+         * porta dell'app il codice ce l'ha: meglio lei, un po' piu' tardi.
+         */
+        if (viaggi.any { v -> v.legs.any { it.isTrain && (it.from.rfiCode == null || it.to.rfiCode == null) } }) return null
+        /*
+         * I prezzi si richiedono solo dove l'app li ha e il sito no: le soluzioni
+         * che cominciano a piedi. Le altre senza prezzo sono biglietti che
+         * Trenitalia li' non vende — la zona urbana di Milano — e richiederli tre
+         * volte costava tre ricerche e un quarto d'ora di rotella per niente;
+         * quelli li prezza Trenord (`prezziDeiTreni`).
+         */
+        val senzaPrezzi = usate.any { (sito, viaggio) ->
+            viaggio.price == null && sito.nodes.firstOrNull()?.train?.logoId == CAMMINATA_SITO
+        }
+        return RisultatoLeFrecce(journeys = viaggi, senzaPrezzi = senzaPrezzi)
+    }
+
+    /** Le stazioni gia' riconosciute per nome: vedi [stazioniPerNome]. */
+    private val stazioniRiconosciute = ConcurrentHashMap<String, Station>()
+
+    /**
+     * Le stazioni delle soluzioni del sito, dal loro nome.
+     *
+     * Il sito scrive le stazioni per nome e basta, «Milano Porta Garibaldi
+     * Passante», e il codice RFI serve al tempo reale. Quelle della ricerca si
+     * conoscono gia'; le altre, di solito una o due stazioni di cambio, si
+     * chiedono a Le Frecce per nome, insieme, e si tiene solo il risultato con lo
+     * stesso nome: i nomi vengono dallo stesso archivio. Ricordate per sempre,
+     * perche' una stazione non cambia nome da una ricerca all'altra. Una che non
+     * si trova resta senza codice, e la sua riga senza tempo reale.
+     */
+    private suspend fun stazioniPerNome(nomi: Set<String>, noti: List<Station>): Map<String, Station> {
+        fun chiave(nome: String) = nome.trim().lowercase(Locale.ITALIAN)
+        noti.forEach { stazioniRiconosciute.putIfAbsent(chiave(it.name), it) }
+        val mancanti = nomi.filterNot { stazioniRiconosciute.containsKey(chiave(it)) }
+        val porta = Semaphore(LUOGHI_INSIEME)
+        coroutineScope {
+            mancanti.map { nome ->
+                async {
+                    porta.withPermit {
+                        val trovate = try {
+                            lefrecce.locations(name = nome, limit = LUOGHI_PER_NOME)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            return@withPermit
+                        }
+                        trovate.filter { it.name.equals(nome, ignoreCase = true) }
+                            .sortedWith(compareByDescending<LocationDto> { it.bdoCode != null }.thenByDescending { it.visible })
+                            .firstOrNull()
+                            ?.let { stazioniRiconosciute[chiave(nome)] = it.toStation() }
+                    }
+                }
+            }.awaitAll()
+        }
+        return nomi.associateWith { nome ->
+            stazioniRiconosciute[chiave(nome)] ?: Station(null, 0L, nomeLeggibile(nome))
+        }
+    }
+
+    /**
+     * Una soluzione del sito come [Journey], con le stesse regole della porta
+     * dell'app (`SolutionDto.toJourney`): le stesse sigle, la linea S al posto di
+     * «SU», la camminata («WK») che non e' un mezzo e in testa e in coda non si
+     * conta, il trasporto urbano vero che resta «Urbano» col suo «Urb».
+     */
+    private fun SoluzioneSito.inViaggio(stazioni: Map<String, Station>): Journey? {
+        fun ora(t: String?) = t?.let {
+            runCatching { OffsetDateTime.parse(it).atZoneSameInstant(ROME).toLocalDateTime() }.getOrNull()
+        }
+        val tratte = nodes.map { nodo ->
+            val da = stazioni[nodo.origin] ?: return null
+            val a = stazioni[nodo.destination] ?: return null
+            val partenza = ora(nodo.departureTime) ?: return null
+            val arrivo = ora(nodo.arrivalTime) ?: return null
+            val treno = nodo.train
+            when {
+                treno?.logoId == CAMMINATA_SITO ->
+                    Leg(null, null, da, a, partenza, arrivo, kind = TransportKind.WALK)
+                treno == null || treno.urban ->
+                    Leg("Urb", "UB", da, a, partenza, arrivo, kind = TransportKind.OTHER, kindLabel = "Urbano")
+                else -> {
+                    val linea = treno.description?.trim()?.substringBefore(' ')?.takeIf { it.matches(Regex("S\\d+")) }
+                    val bus = treno.trainCategory?.contains("bus", ignoreCase = true) == true
+                    Leg(
+                        trainNumber = treno.name?.takeIf { it.isNotBlank() },
+                        category = linea ?: treno.acronym,
+                        from = da,
+                        to = a,
+                        departure = partenza,
+                        arrival = arrivo,
+                        kind = if (bus) TransportKind.BUS else TransportKind.TRAIN,
+                        kindLabel = treno.trainCategory,
+                    )
+                }
+            }
+        }.senzaCamminateAgliEstremi()
+        if (tratte.isEmpty()) return null
+        return Journey(
+            departure = tratte.first().departure,
+            arrival = tratte.last().arrival,
+            duration = Duration.between(tratte.first().departure, tratte.last().arrival),
+            legs = tratte,
+            price = prezzo(),
         )
     }
 
@@ -560,9 +881,15 @@ class JourneyRepository(
     /** Il sito scrive l'ora locale senza fuso, al contrario della `/search` dell'app. */
     private val orarioDelSito: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS")
 
-    private fun SoluzioneSito.partenza(): LocalDateTime? = departureTime?.let {
-        runCatching { OffsetDateTime.parse(it).atZoneSameInstant(ROME).toLocalDateTime() }.getOrNull()
-    }
+    /**
+     * La partenza del primo mezzo, come la conta il resto dell'app: il sito la
+     * conta dall'inizio della camminata in testa (vedi `senzaCamminateAgliEstremi`),
+     * e le soluzioni non si riconoscerebbero piu'.
+     */
+    private fun SoluzioneSito.partenza(): LocalDateTime? =
+        (nodes.firstOrNull { it.train?.logoId != CAMMINATA_SITO }?.departureTime ?: departureTime)?.let {
+            runCatching { OffsetDateTime.parse(it).atZoneSameInstant(ROME).toLocalDateTime() }.getOrNull()
+        }
 
     private fun SoluzioneSito.prezzo(): Price? {
         val p = price ?: return null
@@ -571,6 +898,8 @@ class JourneyRepository(
             amount = "%.2f".format(Locale.US, euro),
             currency = "EUR",
             saleable = status == "SALEABLE",
+            // Il sito distingue: `SOLD_OUT` e' esaurito, `NOT_SALEABLE` non si vende.
+            esaurito = status == "SOLD_OUT",
         )
     }
 
@@ -601,6 +930,10 @@ class JourneyRepository(
     }
 
     private companion object {
+        /** Come il sito segna una camminata: `logoId` "WK", «Walking route». */
+        const val CAMMINATA_SITO = "WK"
+
+        /** Il tetto delle soluzioni chieste per averne [limit] utilizzabili: vedi `unaRicercaLeFrecce`. */
         const val OVERFETCH = 3
 
         /** Quante soluzioni da' il sito per pagina, qualunque sia il limite chiesto. */
@@ -610,10 +943,22 @@ class JourneyRepository(
         const val PAGINE_DEL_SITO = 3
 
         /**
+         * Quante stazioni chiedere per nome in [perLeFrecce]: cercando per la
+         * sola prima parola ne tornano molte, «rho» anche Rhode-Saint-Genese.
+         */
+        const val LUOGHI_PER_NOME = 20
+
+        /** Quante stazioni si chiedono per nome insieme: vedi [stazioniPerNome]. */
+        const val LUOGHI_INSIEME = 4
+
+        /**
          * Quanto si aspetta una pagina del sito: il 18/09/2026 rispondeva in
          * 1-3 secondi, 4 al piu' lento su 40 richieste.
          */
         const val ATTESA_SITO_MS = 6_000L
+
+        /** Quanto aspettare i codici delle stazioni del sito, prima di ripiegare sull'app. */
+        const val ATTESA_NOMI_MS = 4_000L
 
         /** Le attese prima di ogni nuovo tentativo: vedi [cercaLeFrecce]. */
         val RIPROVE_LE_FRECCE = listOf(2_000L, 5_000L)
@@ -627,6 +972,19 @@ class JourneyRepository(
 fun chiaveSoluzione(j: Journey): String =
     j.departure.withSecond(0).withNano(0).toString() + "|" +
         j.legs.mapNotNull { it.trainNumber }.sorted().joinToString(",")
+
+/**
+ * La chiave con cui i prezzi di [JourneyRepository.prezziLeFrecce] si ritrovano
+ * sulle righe, qualunque porta li abbia dati: partenza al minuto e numeri dei
+ * treni, solo quelli in cifre. Il bus e il tratto urbano ognuna delle due porte
+ * li scrive a modo suo, e con [chiaveSoluzione] il prezzo di una riga del sito
+ * non si ritrovava fra quelli dell'app.
+ */
+fun chiavePrezzoLeFrecce(j: Journey): String =
+    j.departure.withSecond(0).withNano(0).toString() + "|" +
+        j.legs.mapNotNull { it.trainNumber }
+            .filter { n -> n.isNotEmpty() && n.all { it.isDigit() } }
+            .sorted().joinToString(",")
 
 /**
  * Unisce le soluzioni di Le Frecce e di Trenord eliminando i doppioni.

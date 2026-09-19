@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -77,7 +79,9 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.nomeDelCambio
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
@@ -202,7 +206,8 @@ fun ViaggioScreen(
                     append(primo.partenza.format(ORARIO))
                     append(" → ")
                     append(ultimo.arrivo.format(ORARIO))
-                    val cambi = tratte.size - 1
+                    // Le camminate non sono cambi: vedi `Journey.mezzi`.
+                    val cambi = tratte.count { !it.piedi } - 1
                     append(" · ")
                     append(if (cambi == 1) "1 cambio" else "$cambi cambi")
                 },
@@ -379,7 +384,7 @@ fun ViaggioScreen(
                         }
 
                         is RigaViaggio.NonTreno -> Box(Modifier.padding(horizontal = 16.dp)) {
-                            TrattaSenzaPercorso(state.tratte[riga.tratta].tratta)
+                            TrattaSenzaPercorso(state.tratte[riga.tratta].tratta, riga.cambio)
                         }
 
                         is RigaViaggio.Attesa -> Row(
@@ -631,35 +636,9 @@ private fun ChipStato(testo: String, grave: Boolean) {
 private fun CambioRiga(riga: RigaViaggio.Cambio) {
     val scheme = MaterialTheme.colorScheme
     val rosso = lateColor()
-    val tratteggio = scheme.outlineVariant
-    val raggio = 12.dp
-    val forma = RoundedCornerShape(raggio)
     val allarme = riga.saltato || riga.stretto
-    val bordo = if (allarme) {
-        Modifier.border(1.5.dp, rosso, forma)
-    } else {
-        // Tratteggiato: e' un passaggio fra due treni, non un oggetto a se'.
-        Modifier.drawBehind {
-            val w = 1.5.dp.toPx()
-            drawRoundRect(
-                color = tratteggio,
-                topLeft = Offset(w / 2, w / 2),
-                size = Size(size.width - w, size.height - w),
-                cornerRadius = CornerRadius(raggio.toPx()),
-                style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))),
-            )
-        }
-    }
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp)
-            .background(if (riga.saltato) lateBackground() else scheme.surfaceContainerLow, forma)
-            .then(bordo)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    RiquadroDiPassaggio(saltato = riga.saltato, allarme = allarme) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(
                 Icons.Filled.SwapHoriz,
@@ -735,39 +714,123 @@ private fun OrarioDelCambio(etichetta: String, quando: LocalDateTime, scarto: In
     }
 }
 
-/** Bus sostitutivo o trasferimento a piedi: non hanno percorso da interrogare. */
+/**
+ * Il riquadro di un passaggio fra due treni: il cambio, o la camminata che lo fa.
+ *
+ * Tratteggiato, perche' e' un passaggio e non un oggetto a se'; col bordo rosso
+ * quando il margine e' stretto, e anche col fondo quando non si fa piu' in tempo.
+ */
 @Composable
-private fun TrattaSenzaPercorso(tratta: TrattaViaggio) {
-    Card(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (tratta.piedi) Icons.AutoMirrored.Filled.DirectionsWalk
-                    else Icons.Filled.DirectionsBus,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    "  ${tratta.etichetta}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Text(
-                "${tratta.salitaNome} ${tratta.partenza.format(ORARIO)} → " +
-                    "${tratta.discesaNome} ${tratta.arrivo.format(ORARIO)}",
-                style = MaterialTheme.typography.bodyMedium,
+private fun RiquadroDiPassaggio(
+    saltato: Boolean,
+    allarme: Boolean,
+    contenuto: @Composable ColumnScope.() -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val rosso = lateColor()
+    val tratteggio = scheme.outlineVariant
+    val raggio = 12.dp
+    val forma = RoundedCornerShape(raggio)
+    val bordo = if (allarme) {
+        Modifier.border(1.5.dp, rosso, forma)
+    } else {
+        Modifier.drawBehind {
+            val w = 1.5.dp.toPx()
+            drawRoundRect(
+                color = tratteggio,
+                topLeft = Offset(w / 2, w / 2),
+                size = Size(size.width - w, size.height - w),
+                cornerRadius = CornerRadius(raggio.toPx()),
+                style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))),
             )
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+            .background(if (saltato) lateBackground() else scheme.surfaceContainerLow, forma)
+            .then(bordo)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        content = contenuto,
+    )
+}
+
+/**
+ * Bus sostitutivo o trasferimento a piedi: non hanno percorso da interrogare.
+ *
+ * La camminata fra due treni e' anche il loro cambio ([cambio]), e ne ha il
+ * riquadro: sotto, l'arrivo del primo e la partenza del secondo, veri quando si
+ * sanno, e il margine che resta **dopo** aver camminato. Il bus resta una scheda:
+ * e' un mezzo, non un passaggio.
+ */
+@Composable
+private fun TrattaSenzaPercorso(tratta: TrattaViaggio, cambio: RigaViaggio.Cambio? = null) {
+    val scheme = MaterialTheme.colorScheme
+    val aPiedi = Duration.between(tratta.partenza, tratta.arrivo).toMinutes()
+    val margine = cambio?.let { it.minuti - aPiedi }
+    val saltato = margine != null && margine < 0
+    val stretto = margine != null && !saltato && margine < MARGINE_STRETTO
+    val allarme = saltato || stretto
+
+    val contenuto: @Composable ColumnScope.() -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(
+                if (tratta.piedi) Icons.AutoMirrored.Filled.DirectionsWalk else Icons.Filled.DirectionsBus,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (saltato) lateColor() else if (tratta.piedi) scheme.primary else LocalContentColor.current,
+            )
+            Text(
+                tratta.etichetta,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (saltato) lateColor() else scheme.onSurface,
+            )
+        }
+        Text(
+            "${tratta.salitaNome} ${tratta.partenza.format(ORARIO)} → " +
+                "${tratta.discesaNome} ${tratta.arrivo.format(ORARIO)}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (cambio == null) {
             Text(
                 "Nessun tempo reale: di questa tratta esiste solo l'orario.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = scheme.onSurfaceVariant,
             )
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                OrarioDelCambio("arrivi", cambio.arrivo, cambio.scartoArrivo, cambio.reale)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OrarioDelCambio("parte", cambio.partenza, cambio.scartoPartenza, cambio.reale)
+                    binarioDaMostrare(cambio.binarioProgrammato, cambio.binarioEffettivo)?.let {
+                        Text(" · bin $it", style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Text(
+                when {
+                    saltato -> "Non ce la fai: il treno per ${cambio.verso} parte ${-margine!!} min prima che tu arrivi"
+                    stretto -> "Margine stretto · $margine min oltre la camminata"
+                    else -> "$margine min di margine oltre la camminata" + if (cambio.reale) "" else ", secondo l'orario"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (allarme) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (allarme) lateColor() else scheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    if (tratta.piedi) {
+        RiquadroDiPassaggio(saltato = saltato, allarme = allarme, contenuto = contenuto)
+    } else {
+        Card(
+            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            colors = CardDefaults.cardColors(containerColor = scheme.surfaceVariant),
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp), content = contenuto)
         }
     }
 }
@@ -856,7 +919,14 @@ private sealed interface RigaViaggio {
         val stretto: Boolean get() = !saltato && minuti < MARGINE_STRETTO
     }
 
-    data class NonTreno(val tratta: Int) : RigaViaggio {
+    data class NonTreno(
+        val tratta: Int,
+        /**
+         * Il cambio fra i due treni, quando questa e' la camminata che li separa:
+         * si controlla qui dentro, non in un blocco dopo che la ripeterebbe.
+         */
+        val cambio: Cambio? = null,
+    ) : RigaViaggio {
         override val chiave get() = "altro-$tratta"
     }
 
@@ -879,7 +949,20 @@ private fun righeDelViaggio(state: ViaggioUiState): List<RigaViaggio> {
     val primoTreno = state.tratte.indexOfFirst { it.tratta.treno }
     state.tratte.forEachIndexed { i, t ->
         if (!t.tratta.treno) {
-            righe += RigaViaggio.NonTreno(i)
+            /*
+             * Una camminata fra due treni e' il cambio, e lo dice lei: da dove, a
+             * dove, quanto, e se coi ritardi di adesso ce la fai. Un blocco
+             * «Cambio» dopo la ripeterebbe (19/09/2026). I minuti si contano fra
+             * i due treni, scavalcandola.
+             */
+            val prima = state.tratte.take(i).indexOfLast { !it.tratta.piedi }
+            val prossima = state.tratte.getOrNull(i + 1)
+            val fraDueTreni = t.tratta.piedi && prima >= 0 && state.tratte[prima].tratta.treno &&
+                prossima?.tratta?.treno == true
+            righe += RigaViaggio.NonTreno(
+                i,
+                cambio = if (fraDueTreni) cambio(prima, state.tratte[prima], prossima!!) else null,
+            )
             return@forEachIndexed
         }
 
@@ -995,12 +1078,18 @@ private fun cambio(i: Int, qui: TrattaUiState, poi: TrattaUiState): RigaViaggio.
     }
     val arrivo = discesa?.arrivoUtile()
     val partenza = salita?.partenzaUtile()
-    val reale = arrivo != null && partenza != null
+    // Reali solo se lo sono le due corse: di una corsa EAV o ARST gli orari ci
+    // sono, ma di tabella, e in verde sembrerebbero rilevati.
+    val reale = arrivo != null && partenza != null &&
+        qui.status?.realtime == true && poi.status?.realtime == true
     val minuti = if (reale) Duration.between(arrivo, partenza).toMinutes() else previsti
 
     return RigaViaggio.Cambio(
         dopo = i,
-        stazione = qui.tratta.discesaNome,
+        stazione = nomeDelCambio(
+            Station(qui.tratta.discesaRfi, 0, qui.tratta.discesaNome),
+            Station(poi.tratta.salitaRfi, 0, poi.tratta.salitaNome),
+        ),
         minuti = minuti,
         previsti = previsti,
         reale = reale,

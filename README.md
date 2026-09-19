@@ -6,6 +6,18 @@ App Android per orari e stato in tempo reale dei treni italiani.
 > Stato Italiane, Trenord S.r.l. o Italo – Nuovo Trasporto Viaggiatori S.p.A.
 > Nessuna vendita di biglietti.
 
+## Cosa ha che le altre non hanno
+
+- **Tutte le ferrovie, in una ricerca.** Trenitalia, Trenord e Italo insieme, più le reti
+  che le app nazionali non vedono: Circumvesuviana e le altre linee EAV, Ferrotramviaria,
+  Vigezzina–Centovalli e linee S del Ticino, le ferrovie sarde ARST. E viaggi che cambiano
+  gestore per strada (beta): Sorrento → Roma con Circumvesuviana più Freccia o Italo, vedi
+  [`data/VIAGGI-MISTI.md`](data/VIAGGI-MISTI.md).
+- **Il treno in ritardo che fai ancora in tempo a prendere** compare nella ricerca normale,
+  anche se in orario è già partito. Ogni soluzione dice se la coincidenza regge coi ritardi
+  di adesso, è a rischio o è persa.
+- **Binari più completi**, da ViaggiaTreno e Trenord insieme, già nell'elenco dei risultati.
+
 ## Cosa fa
 
 - Ricerca A→B con autocompletamento stazioni, data e ora (default: adesso)
@@ -147,7 +159,7 @@ a runtime.
 di funzionare, perché fallisce se i contratti sono cambiati.
 
 ```bash
-./gradlew :app:testDebugUnitTest --tests '*LiveApiTest*' -i
+./gradlew :data:test --tests '*LiveApiTest*' -i
 ```
 
 ## Privacy

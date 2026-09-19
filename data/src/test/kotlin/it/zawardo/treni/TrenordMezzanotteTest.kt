@@ -102,4 +102,62 @@ class TrenordMezzanotteTest {
         assertFalse("un biglietto che Trenord non vende e' un'altra cosa", conVendita(false, "OTHER_OPERATOR").venditaChiusa)
         assertFalse(conVendita(true, null).venditaChiusa)
     }
+
+    private fun conRitardo(
+        delay: Int,
+        definito: Boolean = true,
+        live: Boolean = true,
+        stato: String = "N",
+        aPiediPrima: Boolean = false,
+    ) = soluzione(
+        """
+        {"date": "20260919", "dep_time": "05:05:00", "arr_time": "05:53:00",
+         "delay": $delay, "delay_defined": $definito,
+         "journey_list": [
+          ${if (aPiediPrima) """{"journey_type": "walk", "train": {"train_category": "MXP", "has_live_info": false}},""" else ""}
+          {"train": {"train_id": "2211", "train_category": "RE", "has_live_info": $live, "status": "$stato"},
+           "pass_list": [
+            {"station": {"station_id": "S01700", "station_ori_name": "MILANO CENTRALE"}, "type": "start", "dep_time": "05:05:00"},
+            {"station": {"station_id": "S01690", "station_ori_name": "BERGAMO"}, "type": "end", "arr_time": "05:53:00"}]}
+         ]}
+        """,
+    ).toJourney()!!
+
+    /** La notte del 18-19/09/2026: il ritardo dichiarato era di un'altra corsa. */
+    @Test
+    fun `il ritardo dichiarato conta solo se e' di questa corsa`() {
+        assertEquals("fermo all'origine, seguito dal vivo", 7, conRitardo(7).delayMinutes)
+        assertEquals("RE 2211 delle 05:05, alle 00:27", null, conRitardo(2, live = false).delayMinutes)
+        assertEquals("REG 10911 delle 00:15, dato per arrivato", null, conRitardo(5, stato = "A").delayMinutes)
+        assertEquals("senza il flag non e' un dato", null, conRitardo(3, definito = false).delayMinutes)
+        assertEquals("il tratto a piedi in testa non conta: conta il primo treno", 7, conRitardo(7, aPiediPrima = true).delayMinutes)
+    }
+
+    /**
+     * Milano Porta Garibaldi - Melzo del 19/09/2026: cinque minuti a piedi fino al
+     * Passante, poi l'S5 24531 alle 10:25. La soluzione parte col treno, non con
+     * la camminata.
+     */
+    @Test
+    fun `il tratto a piedi in testa non si conta`() {
+        val viaggio = soluzione(
+            """
+            {"date": "20260919", "dep_time": "10:20:00", "arr_time": "10:59:00", "duration": "00:39:00",
+             "journey_list": [
+              {"journey_type": "walk", "train": {"train_category": "MXP"},
+               "walk": {"length": "214", "duration": "00:05:00", "direction": "MILANO PORTA GARIBALDI PASSANTE"}},
+              {"journey_type": "train", "train": {"train_id": "24531", "train_category": "S5"},
+               "pass_list": [
+                {"station": {"station_id": "S01647", "station_ori_name": "MILANO PORTA GARIBALDI PASSANTE"},
+                 "type": "start", "dep_time": "10:25:00", "is_journey": true},
+                {"station": {"station_id": "S01705", "station_ori_name": "MELZO"},
+                 "type": "end", "arr_time": "10:59:00", "is_journey": true}]}
+             ]}
+            """,
+        ).toJourney()!!
+        assertEquals(LocalDateTime.of(2026, 9, 19, 10, 25), viaggio.departure)
+        assertEquals(LocalDateTime.of(2026, 9, 19, 10, 59), viaggio.arrival)
+        assertEquals(java.time.Duration.ofMinutes(34), viaggio.duration)
+        assertEquals(listOf("24531"), viaggio.legs.map { it.trainNumber })
+    }
 }

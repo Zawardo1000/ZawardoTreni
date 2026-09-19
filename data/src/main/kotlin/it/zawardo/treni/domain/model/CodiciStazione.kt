@@ -40,3 +40,52 @@ fun stessaStazione(uno: String?, altro: String?): Boolean {
     val a = codiceStazione(uno) ?: return false
     return a == codiceStazione(altro)
 }
+
+/**
+ * Come distinguere la stazione di salita da quella cercata, o null se sono la
+ * stessa.
+ *
+ * Cercando Milano Porta Garibaldi, le S5 e le S6 partono dal Passante, sotto la
+ * superficie: le fonti ci arrivano da sole con una camminata, che in testa al
+ * viaggio non si conta (vedi `senzaCamminateAgliEstremi`). Ma il binario che
+ * l'elenco mostra e' quello del Passante, e «binario 1» cercando Garibaldi manda
+ * al binario 1 di superficie. Chiesto il 19/09/2026: accanto al binario va detto
+ * di quale stazione e'.
+ *
+ * Si mostra la parte del nome che l'altra non ha: «Passante» cercando
+ * Garibaldi, «Nord» cercando Varese, «Piazza Garibaldi» cercando Napoli
+ * Centrale, «Lambrate» cercando Milano Centrale. Quando il nome della salita e'
+ * tutto dentro quello cercato — il treno di superficie cercando il Passante —
+ * di parti in piu' non ce ne sono, e si mostra il nome intero. Vale per
+ * qualunque coppia, senza un elenco di stazioni gemelle e senza sapere quale
+ * delle due sia la principale.
+ */
+fun Station.comeDistinguerlaDa(cercata: Station): String? {
+    if (stessaStazione(rfiCode, cercata.rfiCode)) return null
+    val parole = name.trim().split(SPAZI).filter { it.isNotEmpty() }
+    val sue = parole.map(::pulita)
+    val altre = cercata.name.trim().split(SPAZI).filter { it.isNotEmpty() }.map(::pulita)
+    if (sue == altre) return null
+    val comuni = sue.zip(altre).takeWhile { (a, b) -> a == b }.size
+    val resto = parole.drop(comuni)
+    return (if (resto.isEmpty()) parole else resto).joinToString(" ")
+}
+
+private val SPAZI = Regex("\\s+")
+
+/** Una parola del nome senza maiuscole ne' punteggiatura: «C.le» e «c.le» sono uguali. */
+private fun pulita(parola: String): String = parola.lowercase().filter { it.isLetterOrDigit() }
+
+/**
+ * Come si chiama un cambio: la stazione dove si scende e, se si risale in
+ * un'altra, anche quella.
+ *
+ * Fra due gemelle la camminata non e' un cambio in piu' (vedi `Journey.mezzi`),
+ * ma il nome della stazione cambia, e va detto (chiesto il 19/09/2026): «Napoli
+ * P. Garibaldi › Centrale» dalla Circumvesuviana al Frecciarossa, «Milano Porta
+ * Garibaldi › Passante» dal regionale alla S5. Della seconda la sola parte che la
+ * distingue, come accanto al binario: vedi [comeDistinguerlaDa]. Nella stessa
+ * stazione, il suo nome e basta.
+ */
+fun nomeDelCambio(scesa: Station, salita: Station): String =
+    salita.comeDistinguerlaDa(scesa)?.let { "${scesa.name} › $it" } ?: scesa.name
