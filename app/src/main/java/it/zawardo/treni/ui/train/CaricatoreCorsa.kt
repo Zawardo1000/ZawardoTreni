@@ -335,9 +335,30 @@ internal class CaricatoreCorsa(
             }
         }
 
-        return trenord.takeIf { DataSource.TRENORD in sources }?.trainStatus(trainNumber, giorno)
+        /*
+         * I ripieghi vanno verificati contro **dove sali**: a Trenord la corsa si
+         * chiede col solo numero, e lo stesso numero e' spesso di due treni
+         * diversi — l'IC 657 per La Spezia e il Cadorna-Asso di Trenord (4 casi su
+         * 91 misurati il 19/09/2026). Senza questo controllo, quando ViaggiaTreno
+         * tace per un attimo la schermata — e la notifica di «Segui treno» —
+         * saltavano sull'altro treno, che spesso e' gia' arrivato.
+         */
+        return trenord.takeIf { DataSource.TRENORD in sources }
+            ?.trainStatus(trainNumber, giorno)
+            ?.takeIf { fermaDoveSali(it) }
             ?: italo.takeIf { DataSource.ITALO in sources }
                 ?.trainStatus(trainNumber, giorno, boardingCode, boardingName, alightingCode)
+                ?.takeIf { fermaDoveSali(it) }
+    }
+
+    /**
+     * Vero se la corsa passa dalla stazione da cui si sale — o se quella stazione
+     * non si conosce, e allora non c'e' niente da verificare: e' il caso della
+     * ricerca per numero, dove l'utente ha chiesto proprio quel numero.
+     */
+    private fun fermaDoveSali(corsa: TrainStatus): Boolean {
+        val dove = boardingCode?.takeIf { it.isNotBlank() } ?: return true
+        return corsa.stops.any { stessaStazione(it.stationCode, dove) }
     }
 
     /**

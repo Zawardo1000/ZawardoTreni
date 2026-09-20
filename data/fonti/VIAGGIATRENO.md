@@ -48,11 +48,11 @@ misurate: mediana e p90. Tutti gli endpoint sono in GET, salvo dove indicato.
 | 6 | `arrivi/{cod}/{orario}` | come sopra | `arrivi/S12328/Sun Sep 20 2026 09:00:00 GMT+0200` | Come (5), con `origine`, `compOrarioArrivo` e `binarioProgrammatoArrivoDescrizione` | Come (5): **da +1 a +8 funziona**, binario d'arrivo compreso | 0,58 / 1,33 s | sì |
 | 7 | `dettaglioViaggio/{codDa}/{codA}` | due codici `S…` (con i codici numerici risponde `[]`) | `dettaglioViaggio/S08409/S09218` | Treni diretti da A a B **in viaggio adesso**: partenza da A, arrivo in B, ritardo. `origine` contiene il nome di A, non l'origine vera, che sta in `codOrigine` | Solo adesso: circa 2 h 15 prima e 30 min dopo; nessuna data | 1,26 / 1,96 s | no |
 | 8 | `soluzioniViaggioNew/{da}/{a}/{yyyy-MM-ddTHH:mm:ss}` | codici senza `S` e senza zeri | `…/1700/5043/2026-09-20T08:00:00` | **404, per ogni data e ogni variante** di codice e formato. Sul mobile: «Could not find resource», cioè la risorsa non è registrata | Nessuna | — | no |
-| 9 | `autocompletaStazione/{testo}` | prefisso | `…/MILANO` | `text/plain` `NOME\|S01700` | — | 0,24 s | sì (ripiego) |
+| 9 | `autocompletaStazione/{testo}` | prefisso | `…/MILANO` | `text/plain` `NOME\|S01700` | — | 0,24 s | no (tolto il 20/09: mai cablato) |
 | 10 | `autocompletaStazioneImpostaViaggio/{testo}` | prefisso | `…/MILANO` | Identico a (9) | — | 1,2 s | no |
 | 11 | `autocompletaStazioneNTS/{testo}` | prefisso | `…/SARONNO` | `NOME\|830025119`: codici a 9 cifre, 83 più 7 cifre. Per RFI sono le cifre dell'`S…`; per FNM una numerazione propria (Saronno `S01933` diventa `…25119`, Cadorna `…25001`) | — | 0,50 s | no |
 | 12 | `cercaStazione/{testo}` | prefisso | `…/MILANO` | JSON `[{nomeLungo, nomeBreve, label, id}]` | — | 0,29 s | no |
-| 13 | `elencoStazioni/{reg}` | 0…22 | `elencoStazioni/1` | Registro con coordinate, `tipoStazione` e zoom della mappa | — | 0,59 s; fino a 170 KB | sì |
+| 13 | `elencoStazioni/{reg}` | 0…22 | `elencoStazioni/1` | Registro con coordinate, `tipoStazione` e zoom della mappa | — | 0,59 s; fino a 170 KB | no (tolto il 20/09: il registro lo riempie Le Frecce) |
 | 14 | `elencoStazioniCitta/{cod}` | codice `S…` (un nome dà `[]`) | `…/S01700` | Le stazioni della stessa città (Milano: 13) | — | 0,34 s | no |
 | 15 | `dettaglioStazione/{cod}/{reg}` | codice e regione | `…/S01700/1` | Come una voce di (13), più `latMappaCitta` e `mappaCitta` (vuoti) | — | 0,24 s | no |
 | 16 | `getCoordinateStazione/{cod}` | codice | `…/S01700` | `lat` e `lon`: le stesse di (13) | — | 0,25 s | no |
@@ -233,7 +233,7 @@ buone: l'app non li guarda, e controlla invece `startValidity`/`endValidity`.
 3. **`codiceCliente` sulle righe del tabellone e sulla corsa.** 63 vuol dire
    Trenord. Oggi il tabellone scarica l'orario di stazione Trenord anche per sapere
    quali treni siano suoi; il dato è già nella riga di ViaggiaTreno. Serve anche a
-   distinguere Tper (18) e gli EC DB-ÖBB (64). Il DTO non lo legge.
+   distinguere Tper (18) e gli EC DB-ÖBB (64). Il DTO lo legge sulla corsa (`codiceCliente`), non sulla riga di tabellone.
 4. **`/resteasy/news/infomobility` in JSON con `trainTags`**, al posto di
    ricostruire le corse dai link dell'HTML (`InfomobilitaParser`): è strutturato,
    filtrabile lato server e comprende i lavori. Limite: `trainTags` ha solo il

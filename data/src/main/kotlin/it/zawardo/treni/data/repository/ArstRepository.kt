@@ -126,7 +126,7 @@ class ArstRepository(
                 label = "Treno " + p.corsa.id,
                 category = o.linee[p.corsa.linea] ?: p.corsa.linea,
                 direction = if (arrivals) p.origine else p.corsa.destinazione,
-                scheduledTime = orologio(minuti),
+                scheduledTime = GtfsCsv.orologio(minuti),
                 /*
                  * Zero perche' il modello vuole un intero, non perche' il treno
                  * sia in orario: [BoardEntry.realtime] falso dice che quello
@@ -313,9 +313,6 @@ class ArstRepository(
             abs(sua.partenza % MINUTI_AL_GIORNO - minuti)
         }
     }
-
-    /** Minuti dalla mezzanotte in `HH:mm`: la regola sta in [GtfsCsv], con l'altro orario imbarcato. */
-    private fun orologio(minuti: Int): String = GtfsCsv.orologio(minuti)
 
     /** L'id numerico dietro un codice sintetico, null se non e' ARST. */
     private fun idStazione(codice: String?): Int? {

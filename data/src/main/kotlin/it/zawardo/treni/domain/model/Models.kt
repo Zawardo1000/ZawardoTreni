@@ -438,7 +438,9 @@ data class TrainStatus(
      */
     val motivo: String? = null,
     /**
-     * Gli avvisi di circolazione che Trenord attacca alla corsa: spiegano il
+     * Il «perche'» della corsa, da **quattro fonti**: le notizie di ViaggiaTreno,
+     * le note SmartCaring dei regionali Trenitalia, gli alert che Trenord attacca
+     * alla corsa e le notizie delle sue direttrici. Spiegano il
      * ritardo quando il ritardo ha una causa sola, per esempio "Circolazione
      * fortemente rallentata, per accertamenti delle forze dell'ordine nella
      * stazione di MILANO ROGOREDO", che il 18/09/2026 stava su 61 corse lombarde

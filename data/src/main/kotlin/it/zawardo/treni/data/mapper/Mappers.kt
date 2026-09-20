@@ -158,6 +158,15 @@ fun List<Leg>.senzaCamminateAgliEstremi(): List<Leg> =
     dropWhile { it.isWalk }.dropLastWhile { it.isWalk }
 
 /**
+ * La sigla del treno come la scrive ViaggiaTreno, senza gli spazi di contorno.
+ * Per le Frecce `compNumeroTreno` arriva « FR 9712», con la categoria vuota
+ * davanti (19/09/2026): nel tabellone la sigla partiva uno spazio piu' in la'
+ * di quella dei regionali, e non stava in colonna.
+ */
+internal fun etichettaTreno(grezza: String?): String? =
+    grezza?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotEmpty() }
+
+/**
  * Il prezzo della soluzione, quando c'e' ed e' lecito mostrarlo.
  *
  * Tre condizioni, e servono tutte e tre:
@@ -198,15 +207,6 @@ fun List<Leg>.senzaCamminateAgliEstremi(): List<Leg> =
  * 16 volte su 16, regionali Trenord compresi, mentre questa porta dell'app li
  * perdeva in 3 ricerche su 16 e ai regionali lombardi quasi sempre.
  */
-/**
- * La sigla del treno come la scrive ViaggiaTreno, senza gli spazi di contorno.
- * Per le Frecce `compNumeroTreno` arriva « FR 9712», con la categoria vuota
- * davanti (19/09/2026): nel tabellone la sigla partiva uno spazio piu' in la'
- * di quella dei regionali, e non stava in colonna.
- */
-internal fun etichettaTreno(grezza: String?): String? =
-    grezza?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotEmpty() }
-
 private fun SolutionDto.toPrice(): Price? {
     val cifra = (totalAmount?.amount ?: totalPrice)?.trim()?.takeIf { it.isNotBlank() } ?: return null
     if (totalAmount?.showPrice == false) return null

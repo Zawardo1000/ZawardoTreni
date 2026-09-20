@@ -234,4 +234,3 @@ class ViaggioViewModel(
     }
 }
 
-/** L'ora di salita e discesa nel messaggio di una corsa futura senza fermate. */

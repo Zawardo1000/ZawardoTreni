@@ -131,7 +131,22 @@ data class JourneyRow(
      * Bus sostitutivi e collegamenti urbani non esistono su ViaggiaTreno.
      * Lasciare "stato in aggiornamento" all'infinito sarebbe una bugia.
      */
-    val realtimePossible: Boolean get() = journey.hasTrain
+    val realtimePossible: Boolean get() = journey.hasTrain && !senzaTempoReale
+
+    /**
+     * Vero quando per questa riga un tempo reale **non arrivera' mai**, e non
+     * perche' manchi adesso: le reti che non lo pubblicano (ARST lo dichiara,
+     * EAV e Ferrotramviaria lo hanno solo sul tabellone della fermata) e i viaggi
+     * composti da noi, che si leggono corsa per corsa aprendoli.
+     *
+     * Serve a non scrivere «stato non disponibile» dove la risposta giusta e'
+     * «senza tempo reale»: la prima si legge come un guasto, e su una tratta
+     * tutta ARST comparirebbe su ogni riga.
+     */
+    private val senzaTempoReale: Boolean
+        get() = journey.assembled ||
+            journey.legs.firstOrNull { it.isTrain }?.source
+                ?.let { it != DataSource.TRENITALIA && it != DataSource.TRENORD } == true
 
     /**
      * Il tempo reale vale per il giorno della **soluzione**, non per quello
@@ -176,6 +191,17 @@ data class ResultsUiState(
      * mostrate senza spiegazione, sembrano un guasto dell'app.
      */
     val noSameDayResults: Boolean = false,
+    /**
+     * L'ora dell'ultima corsa di oggi, quando la lista esce vuota perche' sono
+     * **gia' passate tutte**.
+     *
+     * Vale sulle reti che un orario ce l'hanno ma il tempo reale no — ARST, e EAV
+     * fuori dal monitor: li' una corsa partita non si rincorre, quindi sparisce, e
+     * a fine giornata resta uno schermo che dice «nessun collegamento» come se la
+     * tratta non esistesse. Dire a che ora e' partita l'ultima e' la risposta che
+     * serve: domani mattina si riparte.
+     */
+    val ultimaCorsaDelGiorno: LocalDateTime? = null,
     /** Avvisi di servizio: lavori, sospensioni, bus sostitutivi. Solo da Trenord. */
     val alerts: List<ServiceAlert> = emptyList(),
     val directOnly: Boolean = false,
@@ -284,12 +310,24 @@ class ResultsViewModel(
                 .applyDirectFilter()
                 .sortedBy { it.departure }
 
-            val rows = list.map { it.toRow() }
+            /*
+             * Le corse delle reti locali tenute perche' il ritardo le salva devono
+             * **dirlo**, come le nazionali: senza `partenzaStimata` la riga usciva
+             * bianca, identica a una ancora da partire (vedi `ancoraPrendibile`).
+             */
+            val locali = fuoriRfi.map { chiaveSoluzione(it) }.toHashSet()
+            val rows = list.map { viaggio ->
+                if (chiaveSoluzione(viaggio) in locali) viaggio.toRowLocale(departure) else viaggio.toRow()
+            }
             val requestedDay = departure.toLocalDate()
+            // Lista vuota su una rete col solo orario: l'ultima corsa di oggi e'
+            // gia' passata, e dirlo vale piu' di «nessun collegamento».
+            val ultima = if (rows.isEmpty()) ultimaCorsaLocale() else null
             _state.update {
                 it.copy(
                     loading = false,
                     journeys = rows,
+                    ultimaCorsaDelGiorno = ultima,
                     alerts = outcome.alerts,
                     nazionaleNonRisponde = outcome.nazionaleNonRisponde,
                     noSameDayResults = rows.isNotEmpty() &&
@@ -318,8 +356,9 @@ class ResultsViewModel(
      * taglio, cercando Sorrento - Napoli alle 08:45 l'elenco cominciava dalle
      * 05:30, con tre ore di treni gia' partiti da scorrere prima di arrivare al
      * primo utile (visto il 20/09/2026). Queste reti il tempo reale non ce
-     * l'hanno, quindi un treno gia' partito non si rincorre: non c'e' il caso
-     * «in ritardo, fai ancora in tempo» che vale per le altre.
+     * l'hanno per tutte le corse, ma dove ce l'hanno — il pianificatore EAV — un
+     * treno gia' partito che il ritardo rende ancora prendibile resta, e la riga
+     * lo dice in rosso come per le nazionali: vedi [ancoraPrendibile].
      *
      * Con [indietro] vale il contrario — le corse **prima** di [quando] — ed e'
      * quel che serve a «Corse precedenti» su una tratta che sta tutta dentro una
@@ -348,9 +387,17 @@ class ResultsViewModel(
             else -> giorno.atStartOfDay()
         }
         val tutti = when {
-            DataSource.EAV in sources && eav.covers(f) && eav.covers(t) ->
-                // L'orario dice quando passano; il pianificatore, per oggi, come vanno.
-                eav.conRitardi(eav.itinerario(f, t, giorno), f, t, quando)
+            DataSource.EAV in sources && eav.covers(f) && eav.covers(t) -> {
+                val corse = eav.itinerario(f, t, giorno)
+                /*
+                 * L'orario dice quando passano; il pianificatore, per oggi, come
+                 * vanno. Andando **indietro** non serve: quelle corse sono passate
+                 * e non si prendono comunque, e la finestra del pianificatore
+                 * comincia dall'ora chiesta in avanti — si sarebbe pagata una
+                 * chiamata per ritardi di corse che poi si scartano.
+                 */
+                if (indietro) corse else eav.conRitardi(corse, f, t, quando)
+            }
             DataSource.ARST in sources && arst.covers(f) && arst.covers(t) ->
                 arst.itinerario(f, t, giorno)
             DataSource.FNB in sources && fnb.covers(f) && fnb.covers(t) ->
@@ -779,10 +826,11 @@ class ResultsViewModel(
                 // Tratta che searchAll non conosce: come per «corse precedenti»,
                 // la finestra dopo la danno le reti fuori-RFI e i misti — gia'
                 // "fermi", niente arricchimento.
-                val locali = direttiFuoriRfi(sources, last.plusMinutes(1))
-                val trovate = (locali + altreSoluzioni(last.plusMinutes(1), null))
+                val daQui = last.plusMinutes(1)
+                val locali = direttiFuoriRfi(sources, daQui)
+                val trovate = (locali + altreSoluzioni(daQui, null))
                     .filter { it.departure.isAfter(last) }
-                    .map { it.toRow().copy(loadingStatus = false) }
+                    .map { it.toRowLocale(daQui) }
                     .sortedBy { it.journey.departure }
                 var rows = emptyList<JourneyRow>()
                 _state.update { s ->
@@ -820,6 +868,25 @@ class ResultsViewModel(
      * le conosce. Partire da li' vuol dire che un treno soppresso si vede subito,
      * anche quando l'interrogazione successiva non trovera' nulla.
      */
+    /**
+     * L'ultima corsa di oggi su una tratta tutta dentro una rete locale, se ce
+     * n'e' stata una: si legge dall'orario imbarcato, senza toccare la rete.
+     */
+    private suspend fun ultimaCorsaLocale(): LocalDateTime? =
+        runCatching { direttiFuoriRfi(sources, departure, indietro = true) }
+            .getOrDefault(emptyList())
+            .maxByOrNull { it.departure }
+            ?.departure
+
+    /**
+     * La riga di una corsa di una rete locale: gia' «ferma», e marcata quando e'
+     * gia' partita ma il ritardo la rende ancora prendibile.
+     */
+    private fun Journey.toRowLocale(dalle: LocalDateTime): JourneyRow {
+        val stimata = if (departure.isBefore(dalle)) partenzaAncoraUtile(primo = null, dalle = dalle) else null
+        return toRow().copy(loadingStatus = false, partenzaStimata = stimata)
+    }
+
     private fun Journey.toRow(): JourneyRow {
         val row = JourneyRow(this, state = declaredState, variato = variato, delayMinutes = delayMinutes)
         return row.copy(loadingStatus = row.realtimeNow)
@@ -1146,13 +1213,11 @@ class ResultsViewModel(
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15
 
-        /** Quanto copre, dall'ora chiesta, un tabellone di ViaggiaTreno (2 ore dal quarto d'ora prima). */
-        const val FINESTRA_TABELLONE_MIN = 90L
-
         /**
          * L'ampiezza delle fasce in cui si raggruppano le righe che condividono
-         * un tabellone futuro. Piu' stretta di quanto il tabellone copra
-         * ([FINESTRA_TABELLONE_MIN]), perche' la fascia e' una griglia fissa e la
+         * un tabellone futuro. Piu' stretta di quanto il tabellone copra — dal
+         * quarto d'ora prima dell'ora chiesta a un'ora e tre quarti dopo, misurato
+         * in `data/fonti/VIAGGIATRENO.md` — perche' la fascia e' una griglia fissa e la
          * lettura si fa all'ora della **prima** riga del gruppo: con fasce larghe
          * quanto la copertura, l'ultima riga di una fascia cadeva sul bordo e il
          * suo binario non usciva.

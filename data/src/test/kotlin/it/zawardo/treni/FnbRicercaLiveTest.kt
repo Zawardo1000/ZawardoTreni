@@ -8,7 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.time.LocalDate
-import java.time.LocalDateTime
 
 /**
  * La ricerca Ferrotramviaria contro il portale vero: Bari Centrale FNB →

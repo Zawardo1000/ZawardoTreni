@@ -125,8 +125,6 @@ internal object HubAV {
             .map { it.first }
     }
 
-    /** L'hub con quel codice RFI, se e' un hub. */
-
     /** Distanza in chilometri, emisenoverso. La preselezione non ha bisogno di piu'. */
     private fun distanza(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6371.0

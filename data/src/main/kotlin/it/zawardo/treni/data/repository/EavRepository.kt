@@ -182,7 +182,7 @@ class EavRepository(
                 label = p.corsa.numero,
                 category = EavStations.LINEE["L" + p.corsa.linea] ?: ("Linea " + p.corsa.linea),
                 direction = altroCapo,
-                scheduledTime = orologio(minuti),
+                scheduledTime = GtfsCsv.orologio(minuti),
                 delayMinutes = 0,
                 scheduledPlatform = null,
                 actualPlatform = null,
@@ -365,7 +365,16 @@ class EavRepository(
         quando: LocalDateTime,
     ): List<Journey> {
         if (viaggi.isEmpty()) return viaggi
-        val ritardi = ritardiFraStazioni(fromCode, toCode, quando)
+        /*
+         * **Si chiede da prima dell'ora cercata**, non da quell'ora: la finestra del
+         * pianificatore comincia *dopo* il momento chiesto (vedi
+         * [ritardiFraStazioni]), e chi cerca alle 10:52 vuole sapere anche del
+         * treno delle 10:38 che con dodici minuti di ritardo prende ancora —
+         * altrimenti quella corsa resta senza ritardo, e senza ritardo viene
+         * scartata come gia' partita. L'anticipo e' quello della finestra dei
+         * ritardi nazionali, un'ora: e' la stessa domanda.
+         */
+        val ritardi = ritardiFraStazioni(fromCode, toCode, quando.minusMinutes(RITARDI_DA_PRIMA))
         if (ritardi.isEmpty()) return viaggi
         return viaggi.map { viaggio ->
             val numero = viaggio.legs.firstOrNull { it.isTrain }?.trainNumber ?: return@map viaggio
@@ -382,9 +391,6 @@ class EavRepository(
 
     private fun millis(date: LocalDate): Long =
         date.atStartOfDay(ZoneId.of("Europe/Rome")).toInstant().toEpochMilli()
-
-    /** Minuti dalla mezzanotte in `HH:mm`: la regola sta in [GtfsCsv], con l'altro orario imbarcato. */
-    private fun orologio(minuti: Int): String = GtfsCsv.orologio(minuti)
 
     /**
      * La fermata EAV piu' vicina a un punto, se e' abbastanza vicina da avere
@@ -463,6 +469,13 @@ class EavRepository(
 
         /** Di quanto si chiede prima della partenza, per non restare fuori dalla finestra. */
         const val ANTICIPO_PIANIFICATORE = 10L
+
+        /**
+         * Da quanto prima dell'ora cercata si chiedono i ritardi delle corse, in
+         * minuti: vedi [conRitardi]. Un'ora, come la finestra dei treni ancora
+         * prendibili sulla rete nazionale.
+         */
+        const val RITARDI_DA_PRIMA = 60L
 
         /** I formati che il pianificatore vuole: giorno e ora, separati. */
         val GIORNO_PIANIFICATORE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")

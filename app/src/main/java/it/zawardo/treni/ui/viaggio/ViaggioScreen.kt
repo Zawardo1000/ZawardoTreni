@@ -1120,8 +1120,11 @@ private fun cambio(i: Int, qui: TrattaUiState, poi: TrattaUiState): RigaViaggio.
         reale = reale,
         arrivo = arrivo ?: qui.tratta.arrivo,
         partenza = partenza ?: poi.tratta.partenza,
-        scartoArrivo = discesa?.arrivalDelayMinutes ?: 0,
-        scartoPartenza = salita?.departureDelayMinutes ?: 0,
+        // Il colore degli orari lo decide lo scarto **come si legge**, non il
+        // ritardo della fonte: e' la stessa regola dei riquadri Sali/Scendi e
+        // dell'elenco fermate (`scartoVisibile`). Qui era rimasta quella vecchia.
+        scartoArrivo = scartoVisibile(discesa?.scheduledArrival, arrivo?.takeIf { reale }),
+        scartoPartenza = scartoVisibile(salita?.scheduledDeparture, partenza?.takeIf { reale }),
         binarioProgrammato = salita?.scheduledPlatform,
         binarioEffettivo = salita?.actualPlatform,
         verso = poi.tratta.discesaNome,

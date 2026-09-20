@@ -34,7 +34,11 @@ internal object MotoreViaggiMisti {
         val cambioMinimoMinuti: Long = 15,
         /** Margine da aggiungere ai minuti dichiarati di un trasferimento a piedi. */
         val margineTransferMinuti: Long = 5,
-        /** Oltre questa attesa al cambio, la coincidenza e' valida ma inutile. */
+        /**
+         * Quanta attesa si sopporta **oltre il tempo del cambio**: sessanta minuti
+         * piu' i quindici della stessa stazione fanno settantacinque, e il conto e'
+         * quello (vedi `concatena`). Oltre, la coincidenza e' valida ma inutile.
+         */
         val attesaMassimaMinuti: Long = 60,
         /**
          * Quanto un misto puo' essere piu' lento della migliore soluzione a rete

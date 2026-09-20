@@ -56,10 +56,6 @@ class TrenordRepository(
     private val hourFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     /**
-     * Vero quando la tratta e' interrogabile: servono due stazioni che Trenord
-     * conosce. Un codice qualunque non basta — vedi [CodiciTrenord].
-     */
-    /**
      * Vero se **almeno una** delle due stazioni e' nel catalogo Trenord: basta
      * questo perche' un cantiere suo possa riguardare il viaggio, mentre per
      * cercare soluzioni servono tutte e due ([covers]).
@@ -67,6 +63,10 @@ class TrenordRepository(
     fun conosce(from: Station, to: Station): Boolean =
         CodiciTrenord.hafas(from.rfiCode) != null || CodiciTrenord.hafas(to.rfiCode) != null
 
+    /**
+     * Vero quando la tratta e' interrogabile: servono **tutte e due** le stazioni
+     * nel catalogo Trenord. Un codice qualunque non basta — vedi [CodiciTrenord].
+     */
     fun covers(from: Station, to: Station): Boolean =
         CodiciTrenord.hafas(from.rfiCode) != null && CodiciTrenord.hafas(to.rfiCode) != null
 

@@ -9,7 +9,7 @@ package it.zawardo.treni.data.misti
  *  - **stessa stazione fisica** — Milano Centrale e' `S01700` per Trenitalia,
  *    ViaggiaTreno, Trenord e Italo. Il cambio e' li', codice uguale, e questi
  *    interscambi non stanno in tabella: si riconoscono dal codice che combacia
- *    (vedi [stessaStazione]).
+ *    (vedi `CodiciStazione.stessaStazione`, che tiene conto dei codici doppi).
  *  - **stazioni diverse ma vicine** — Sorrento arriva a Napoli con EAV, che
  *    ferma a Garibaldi; Italo parte da Napoli Centrale, che per EAV e' un altro
  *    codice. Sono lo stesso complesso ma registri diversi, e fra i due binari
@@ -25,18 +25,10 @@ package it.zawardo.treni.data.misti
  */
 internal object Interscambi {
 
-    enum class Modo {
-        /** Cambio nella stessa stazione, ai binari accanto. */
-        STESSA_STAZIONE,
-
-        /** Trasferimento a piedi fra due stazioni distinte dello stesso nodo. */
-        A_PIEDI,
-    }
-
     /**
      * Un punto di cambio fra due reti.
      *
-     * [a] e [b] sono i codici come li usa il resto dell'app: `S…`/`Z…` per le
+     * [a] e [b] sono i codici come li usa il resto dell'app: `S…` per le
      * stazioni RFI, i codici sintetici (`EAV3`, `FNB1110`) per le altre. Il
      * collegamento e' **bidirezionale**: vale sia da [a] verso [b] sia
      * viceversa.
@@ -45,7 +37,6 @@ internal object Interscambi {
         val a: String,
         val b: String,
         val minuti: Int,
-        val modo: Modo,
         val nota: String,
     )
 
@@ -58,24 +49,24 @@ internal object Interscambi {
     private val ELENCO: List<Punto> = listOf(
         // --- Napoli: la Circumvesuviana e la Cumana verso l'alta velocita' ---
         Punto(
-            a = "EAV3", b = "S09218", minuti = 8, modo = Modo.A_PIEDI,
+            a = "EAV3", b = "S09218", minuti = 8,
             // La Circumvesuviana di Napoli Garibaldi sta sotto i binari RFI di
             // Napoli Centrale: si cambia salendo, senza uscire.
             nota = "Circumvesuviana di Garibaldi, sotto Napoli Centrale",
         ),
         Punto(
-            a = "EAV1", b = "S09218", minuti = 10, modo = Modo.A_PIEDI,
+            a = "EAV1", b = "S09218", minuti = 10,
             nota = "Porta Nolana, ~700 m da Napoli Centrale",
         ),
         Punto(
-            a = "EAV722", b = "S09988", minuti = 5, modo = Modo.A_PIEDI,
+            a = "EAV722", b = "S09988", minuti = 5,
             // La fermata EAV di Afragola e' nella stazione AV.
             nota = "stessa stazione AV di Napoli Afragola",
         ),
 
         // --- Bari: la Ferrotramviaria verso l'alta velocita' ---
         Punto(
-            a = "FNB1110", b = "S11119", minuti = 6, modo = Modo.A_PIEDI,
+            a = "FNB1110", b = "S11119", minuti = 6,
             // Ferrotramviaria e' nel sottopiano di Bari Centrale.
             nota = "Ferrotramviaria, sottopiano di Bari Centrale",
         ),

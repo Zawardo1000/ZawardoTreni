@@ -98,6 +98,9 @@ class ViaggiMistiRepository(
         val corse = itinerario(da, a, quando.toLocalDate())
         if (corse.none { it.departure.isBefore(quando) }) return corse
         if (quando.toLocalDate() != LocalDate.now(ROME)) return corse
+        // `conRitardi` chiede al pianificatore da un'ora prima: la sua finestra
+        // comincia dopo l'ora chiesta, e le corse da salvare sono proprio quelle
+        // partite da poco.
         return runCatching { conRitardi(corse, da, a, quando) }.getOrDefault(corse)
     }
 

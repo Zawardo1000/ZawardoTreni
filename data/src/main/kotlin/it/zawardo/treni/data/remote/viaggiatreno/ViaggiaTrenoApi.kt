@@ -66,8 +66,8 @@ interface ViaggiaTrenoApi {
 
     /**
      * Le note SmartCaring di un treno in un giorno: il perche' per corsa dei
-     * regionali Trenitalia, anche per i giorni futuri. [searchDate] `yyyy-MM-dd`:
-     * senza, arriva l'intero storico (50 note e 348 KB per il 18686).
+     * regionali Trenitalia, anche per i giorni futuri. Il giorno va
+     * in `yyyy-MM-dd`: senza, arriva l'intero storico (50 note e 348 KB per il 18686).
      */
     @GET("http://www.viaggiatreno.it/infomobilita/resteasy/news/smartcaring")
     suspend fun noteSmartCaring(

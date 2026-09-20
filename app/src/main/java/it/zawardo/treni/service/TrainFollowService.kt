@@ -434,6 +434,11 @@ class TrainFollowService : Service() {
      * Quando una corsa esce di scena.
      *
      * Con una discesa dichiarata — cioe' dentro un viaggio — il treno smette di
+     * Le corse di cui nessuno rileva i passaggi — EAV, ARST, Ferrotramviaria,
+     * Italo dal tabellone — fanno eccezione e si chiudono sull'orologio: vedi
+     * sotto.
+     *
+     * Per le altre, il treno smette di
      * riguardarti quando hai **superato la stazione dove scendi**: prima no,
      * perche' finche' ci sei sopra il suo ritardo e' quello che decide se
      * prendi la coincidenza. Senza discesa (si e' arrivati dalla ricerca per
@@ -642,6 +647,9 @@ class TrainFollowService : Service() {
      * Avvisa solo se lo scarto rispetto all'**ultimo avviso** supera la soglia.
      * Confrontarlo con l'ultimo rilevamento farebbe suonare il telefono a ogni
      * oscillazione di un minuto.
+     *
+     * E solo finche' c'e' qualcosa da fare: salito a bordo, se dopo questa tratta
+     * non c'e' un cambio da prendere, si tace (vedi [haUnaCoincidenzaDopo]).
      */
     private fun maybeAlert(corsa: Sorvegliata) {
         val status = corsa.status ?: return
@@ -661,8 +669,6 @@ class TrainFollowService : Service() {
          * Il ritardo del treno **successivo**, finche' non ci sali, lo annuncia la
          * sua sorvegliata, con la sua partenza: quella regola non cambia.
          */
-        if (salito && !haUnaCoincidenzaDopo(corsa)) return
-
         /*
          * Lo scarto che conta e' quello dell'evento che stai aspettando: la tua
          * partenza finche' non sei salito, il tuo arrivo da li' in poi — la stessa
@@ -679,12 +685,22 @@ class TrainFollowService : Service() {
             else -> status.delayMinutes
         }
 
+        /*
+         * La soppressione si annuncia **sempre**, anche se sei gia' a bordo e non
+         * hai coincidenze: un treno soppresso mentre sei sopra vuol dire che si
+         * ferma, ed e' la cosa piu' urgente che questa funzione possa dire.
+         */
         if (status.state == TrainState.CANCELLED && !corsa.alertedCancellation) {
             corsa.alertedCancellation = true
             corsa.lastAlertedDelay = current
             emitAlert(corsa, "Il treno è stato soppresso.")
             return
         }
+
+        // Da qui in giu' si parla di ritardi e binari: a bordo di un diretto non
+        // servono piu' (deciso con l'utente il 20/09/2026), mentre con un cambio
+        // davanti il ritardo con cui arrivi decide se lo prendi.
+        if (salito && !haUnaCoincidenzaDopo(corsa)) return
 
         /*
          * Il binario prima del ritardo. Se cambiano insieme, quello che ti fa
@@ -703,9 +719,19 @@ class TrainFollowService : Service() {
         if (kotlin.math.abs(current - previous) <= DELAY_THRESHOLD_MIN) return
 
         corsa.lastAlertedDelay = current
-        val where = corsa.nomeSalita
-        val at = boarding?.effectiveDeparture?.format(ORA_DEL_GIORNO)
-        val tail = if (at != null) " Partenza da $where prevista alle $at." else ""
+        /*
+         * La coda dell'avviso parla dello stesso evento del numero: la tua
+         * partenza finche' non sei salito, il tuo arrivo da li' in poi. Prima
+         * diceva sempre la partenza, e a bordo annunciava un ritardo in arrivo
+         * spiegandolo con un orario di partenza passato da un'ora.
+         */
+        val tail = if (salito) {
+            corsa.alighting?.effectiveArrival?.format(ORA_DEL_GIORNO)
+                ?.let { " Arrivo a ${corsa.nomeDiscesa} previsto alle $it." }
+        } else {
+            boarding?.effectiveDeparture?.format(ORA_DEL_GIORNO)
+                ?.let { " Partenza da ${corsa.nomeSalita} prevista alle $it." }
+        }.orEmpty()
         emitAlert(corsa, "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail")
     }
 
@@ -810,7 +836,11 @@ class TrainFollowService : Service() {
         val body = "Android limita a 6 ore al giorno il monitoraggio in background. " +
             "Riapri l'app e tocca di nuovo la campanella per riprendere."
         NotificationManagerCompat.from(this).notify(
-            NOTIF_ALERT_ID,
+            // Fuori dalla fascia riservata agli avvisi delle corse ([emitAlert]),
+            // che parte da NOTIF_ALERT_ID: questo messaggio riguarda il servizio,
+            // non un treno, e non deve poter sostituire — o essere sostituito da —
+            // l'avviso di una corsa.
+            NOTIF_ALERT_ID + ALERT_PER_CORSA,
             NotificationCompat.Builder(this, CHANNEL_ALERTS)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setContentTitle("Monitoraggio interrotto")

@@ -92,8 +92,9 @@ fun delayColor(minutes: Int?): Color = when {
  *
  * L'anticipo si scriveva "3 min in anticipo", e nella stessa riga della stessa
  * fermata l'arrivo diceva gia' "-3": due grafie per la stessa cosa a due
- * centimetri di distanza, e la piu' lunga delle due mandava la partenza a capo. Il segno lo dice in un carattere, e lo dice ovunque allo
- * stesso modo — tabellone, risultati, dettaglio della corsa.
+ * centimetri di distanza, e la piu' lunga delle due mandava la partenza a capo.
+ * Il segno lo dice in un carattere, e lo dice ovunque allo stesso modo —
+ * tabellone, risultati, dettaglio della corsa.
  *
  * Il colore continua a distinguerli senza doverli leggere: vedi [delayColor].
  */

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import it.zawardo.treni.domain.model.DataSource
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("settings")
@@ -83,6 +84,16 @@ class SettingsStore(private val context: Context) {
              */
             scelte + DataSource.sempreAttive
         }
+            /*
+             * Solo quando l'insieme cambia davvero. `dataStore.data` riemette a
+             * **ogni** scrittura di preferenza — anche «solo diretti» o l'ultima
+             * ricerca — e chi osserva questo flusso fa cose che costano: rilegge
+             * gli orari imbarcati e, se una rete e' scaduta, ne riscarica il feed
+             * (`ServiceLocator.sorvegliaOrari`). Senza, toccare tre interruttori
+             * qualunque nelle impostazioni metteva in coda tre download da venti
+             * megabyte.
+             */
+            .distinctUntilChanged()
 
     suspend fun setSourceEnabled(source: DataSource, enabled: Boolean) {
         // Una rete non ancora collegata non si accende: non c'e' cosa accendere.

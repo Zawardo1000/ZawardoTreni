@@ -236,9 +236,20 @@ fun ResultsScreen(
                         return@Column
                     }
                     Text(
-                        "Nessun collegamento trovato",
+                        if (state.ultimaCorsaDelGiorno != null) "Nessuna corsa dopo quest'ora" else "Nessun collegamento trovato",
                         style = MaterialTheme.typography.titleMedium,
                     )
+                    state.ultimaCorsaDelGiorno?.let {
+                        // Su una rete col solo orario una corsa gia' partita sparisce
+                        // dall'elenco: senza questa riga lo schermo vuoto si legge
+                        // come «questa tratta non esiste».
+                        Text(
+                            "L'ultima parte alle " + it.format(ORA_DEL_GIORNO) +
+                                ": sposta indietro l'orario per vederla, o cambia giorno.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     if (state.directOnly) {
                         // Un filtro attivo che svuota la lista va detto, altrimenti
                         // sembra che la tratta non esista.
@@ -250,7 +261,10 @@ fun ResultsScreen(
                         )
                     }
                     state.alerts.forEach { AlertCard(it) }
-                    if (state.alerts.isEmpty() && !state.directOnly) {
+                    // Il consiglio generico solo se non si e' gia' detto qualcosa di
+                    // piu' preciso: con l'ora dell'ultima corsa in vista, ripetere
+                    // «prova a cambiare orario» e' rumore.
+                    if (state.alerts.isEmpty() && !state.directOnly && state.ultimaCorsaDelGiorno == null) {
                         Text(
                             "Per questa tratta e questo orario non risultano corse. " +
                                 "Prova a cambiare data o orario.",
@@ -689,9 +703,18 @@ private fun JourneyCard(
                 stato = { StatoSoluzione(row) },
                 prezzo = {
                     when {
-                        // Su un treno gia' passato in tabella il prezzo non c'e' piu', e
-                        // tacerlo farebbe sembrare una ricerca venuta senza prezzi.
-                        ancoraInTempo && (j.source == JourneySource.LEFRECCE || j.venditaChiusa) -> VenditaChiusa()
+                        /*
+                         * Su un treno gia' passato in tabella il prezzo non c'e' piu',
+                         * e tacerlo farebbe sembrare una ricerca venuta senza prezzi.
+                         *
+                         * **Non vale per i misti**: li' il prezzo e' quello della
+                         * tratta lunga, venduto da Trenitalia, e resta acquistabile
+                         * anche se il feeder locale e' partito da poco. Sono anche le
+                         * uniche righe non nate da Le Frecce che portano il suo
+                         * `source` di default.
+                         */
+                        ancoraInTempo && !j.assembled &&
+                            (j.source == JourneySource.LEFRECCE || j.venditaChiusa) -> VenditaChiusa()
                         // Lo si sta richiedendo: vedi `ResultsViewModel.riprovaPrezzi`.
                         row.prezzoInArrivo && row.aspettaPrezzo ->
                             CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)

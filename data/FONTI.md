@@ -85,7 +85,7 @@ Errori di oggi, indipendenti dalla riprogettazione:
    Voghera, 5084 Salerno, 5136 Roma Ostiense). `resolveFor`, trovandone una sola, la
    restituiva senza guardare la salita, e il dettaglio di un treno EAV mostrava quello RFI.
    Corretto: salendo da EAV, Ferrotramviaria o ARST non si interroga la cascata nazionale.
-5. **Documentazione da correggere**: in `CLAUDE.md`, il perché dei regionali (esiste,
+6. **Documentazione da correggere**: in `CLAUDE.md`, il perché dei regionali (esiste,
    SmartCaring e direttrici) e la corsa di ieri (solo `h24`); in `API-EAV.md`, l'orizzonte del
    GTFS (31/12/2026, non maggio 2027) e il ritardo per corsa (esiste, pianificatore); il KDoc di
    `LefrecceApi.search` (vuole il fuso, non «senza offset»); il commento di `SvizzeraApi`
@@ -104,6 +104,13 @@ rumore: si svuota. Dove esiste un JSON si usa il JSON (deciso il 19/09/2026).
 | EAV `ws_getData_pis.php` (`EavBoardParser`) | il tabellone EAV | nessuna per il tabellone; il ritardo per corsa sta nel pianificatore (JSON) | resta, sotto `EavTabelloneTest` e i test dal vivo |
 
 ## Proposta di riprogettazione
+
+> **Stato al 20/09/2026: fatta.** Quel che segue e' la proposta com'e' stata
+> scritta il 19, e si legge al presente: descrive l'app *di allora*. Nel codice di
+> oggi il giorno futuro si legge per quel giorno — fermate da Trenord o da Le
+> Frecce (`JourneyRepository.corsaDelGiorno`), binari dai tabelloni di quella data
+> (`CaricatoreCorsa.conBinariDelGiorno`) — e le funzioni nominate qui sotto non
+> esistono piu'. Il documento resta perche' spiega **perche'** si e' cambiato.
 
 ### 1. Il giorno futuro, senza la corsa di oggi
 

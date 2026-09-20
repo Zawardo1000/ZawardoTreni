@@ -6,7 +6,7 @@ import java.util.Locale
 /*
  * Come si scrivono ore e date in tutta l'app.
  *
- * Erano costruiti dieci volte in nove file, con quattro nomi diversi per la
+ * Erano costruiti dieci volte in sette file, con cinque nomi diversi per la
  * stessa cosa (`TIME`, `TIME_FMT`, `ORARIO`, `ORA`, `HHMM`). Sembra innocuo
  * finche' uno dei dieci non nasce diverso: `TrainNumberScreen` aveva
  * `ofPattern("d MMM")` **senza lingua**, e su un telefono in inglese la data

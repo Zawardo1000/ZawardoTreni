@@ -11,7 +11,7 @@ import java.time.ZoneOffset
  * Una tratta del viaggio come la si passa fra schermate: quel poco che serve a
  * ricaricarla da sola.
  *
- * Non e' [Leg] e non vuole esserlo. Deve attraversare una rotta di navigazione e
+ * Non e' `Leg` e non vuole esserlo. Deve attraversare una rotta di navigazione e
  * sopravvivere alla morte del processo, quindi contiene solo tipi che si
  * serializzano, e per ogni tratta le due cose che nessuna API sa da se': **dove
  * sali e dove scendi tu**. La discesa in particolare e' la ragione di tutta la

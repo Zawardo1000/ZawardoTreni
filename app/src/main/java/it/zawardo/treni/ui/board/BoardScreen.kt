@@ -81,6 +81,15 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.launch
 
+/**
+ * Quando la corsa passa di qui, come data e ora: il giorno della riga piu'
+ * l'orario di tabella. Null se la riga non porta un orario leggibile.
+ */
+private fun BoardEntry.oraDiPassaggio(): java.time.LocalDateTime? {
+    val ora = scheduledTime?.let { runCatching { java.time.LocalTime.parse(it) }.getOrNull() } ?: return null
+    return dateInRome().atTime(ora)
+}
+
 private fun BoardEntry.dateInRome(): LocalDate =
     Instant.ofEpochMilli(trainRef.departureDateMillis).atZone(ROME_ZONE).toLocalDate()
 
@@ -323,6 +332,16 @@ fun BoardScreen(
                                         // un'altra con lo stesso numero.
                                         originCode = entry.trainRef.originCode,
                                         departureMillis = entry.trainRef.departureDateMillis,
+                                        /*
+                                         * E l'ora a cui passa di qui: senza, una
+                                         * corsa di **domani** — il tabellone
+                                         * scorrendo arriva oltre la mezzanotte —
+                                         * non si sapeva nemmeno cercare, perche'
+                                         * l'orario di un giorno futuro si chiede
+                                         * per tratta e serve l'ora di salita.
+                                         */
+                                        boardingEpochSec = entry.oraDiPassaggio()
+                                            ?.atZone(ROME_ZONE)?.toEpochSecond(),
                                     ),
                                 )
                             }
