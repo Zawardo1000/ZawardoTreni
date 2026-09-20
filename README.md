@@ -139,7 +139,8 @@ source .tools/env.sh            # JAVA_HOME, ANDROID_HOME, PATH
 Requisiti: JDK 17, Android SDK platform 37, build-tools 36.0.0.
 
 La versione e' derivata da git: `versionCode` e' il numero di commit, `versionName`
-e' `1.2.<commit dalla 1.2>` (la 1.2.1 e' il commit 82), e nella schermata Info compare lo
+e' `1.3.<commit dalla 1.3>` (la 1.3.0 e' il commit 91; prima era `1.2.<commit dalla 1.2>`,
+con la 1.2.1 al commit 82), e nella schermata Info compare lo
 sha esatto della build.
 
 ### Firma di release
