@@ -70,6 +70,9 @@ class PaginazioneLeFrecceTest {
         }
 
         override suspend fun soluzioniDelSito(richiesta: RichiestaSito) = RispostaSito(emptyList())
+
+        override suspend fun fermateDelSito(cartId: String, solutionId: String) =
+            emptyList<it.zawardo.treni.data.remote.lefrecce.TrattaDelSito>()
     }
 
     @Test

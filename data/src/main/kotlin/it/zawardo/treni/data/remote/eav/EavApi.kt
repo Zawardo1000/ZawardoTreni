@@ -3,6 +3,7 @@ package it.zawardo.treni.data.remote.eav
 import okhttp3.ResponseBody
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
+import retrofit2.http.Headers
 import retrofit2.http.POST
 
 /**
@@ -80,4 +81,36 @@ interface EavApi {
         @Field("tipoLista") tipoLista: String = PARTENZE,
         @Field("visualizzazione") visualizzazione: String = LISTA_LUNGA,
     ): ResponseBody
+
+    /**
+     * Il pianificatore EAV: le corse dirette fra due stazioni, **col ritardo e
+     * con le soppressioni**.
+     *
+     * E' l'unica fonte EAV che dica il ritardo di una **corsa**: il monitor lo
+     * dice per la stazione che si sta guardando, e per il resto del percorso
+     * niente. Risponde JSON, sta su un altro host — `planner.eavsrl.it`, non il
+     * monitor — e per qualunque data dell'orario.
+     *
+     * Serve anche quando il monitor tace: il 20/09/2026 `orariotreni.eavsrl.it`
+     * rispondeva 503 su tutto, home compresa, e il pianificatore dava i ritardi
+     * come sempre.
+     *
+     * [origine] e [destinazione] sono gli id EAV di [EavStations], [data] e'
+     * `dd/MM/yyyy` e [ora] `HH:mm`. Da quell'ora copre circa due ore. Vedi
+     * `data/fonti/MINORI.md`.
+     *
+     * **Vuole `X-Requested-With: XMLHttpRequest`**: senza, ASP.NET non la
+     * riconosce come chiamata di pagina e risponde 302 verso `/Home/Error`, cioe'
+     * un HTML dove ci si aspetta JSON. Misurato il 20/09/2026: con
+     * l'intestazione 200 e quattro corse, senza 302 e 128 byte.
+     */
+    @FormUrlEncoded
+    @Headers("X-Requested-With: XMLHttpRequest")
+    @POST("https://planner.eavsrl.it/Home/Create")
+    suspend fun pianificatore(
+        @Field("origine") origine: Int,
+        @Field("destinazione") destinazione: Int,
+        @Field("data") data: String,
+        @Field("ora") ora: String,
+    ): EavPercorsiDto
 }

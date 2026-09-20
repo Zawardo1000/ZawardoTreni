@@ -205,6 +205,8 @@ class IntegrazioneTest {
             }
 
         assertTrue("nessuna tratta su cui verificare", tratte.isNotEmpty())
+        // A notte fonda il tabellone e' vuoto per davvero: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora il tabellone e' vuoto", !notteFonda() || tabellone.isNotEmpty())
         assertTrue("tabellone vuoto: non si puo' concludere nulla", tabellone.isNotEmpty())
 
         val rotte = tratte.filter { trainNumberOf(it.label) != it.trainNumber }
@@ -274,7 +276,12 @@ class IntegrazioneTest {
                 "  ${it.direction}  [${it.state}]")
         }
 
+        // A notte fonda il tabellone e' vuoto per davvero: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora il tabellone e' vuoto", !notteFonda() || grezzo.isNotEmpty())
         assertTrue("il tabellone e' vuoto: non si puo' concludere nulla", grezzo.isNotEmpty())
+        // A notte fonda le poche righe rimaste sono corse gia' andate, e che il
+        // filtro le tolga tutte e' proprio quel che deve fare: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora restano solo corse gia' andate", !notteFonda() || tenuti.isNotEmpty())
         assertTrue("il filtro ha svuotato il tabellone", tenuti.isNotEmpty())
         val superstitiPassati = tenuti.filter {
             it.state != TrainState.NOT_DEPARTED && it.minutesFrom(ora) < 0
@@ -352,6 +359,8 @@ class IntegrazioneTest {
     @Test
     fun `due corse con lo stesso numero non si assomigliano`() = runBlocking {
         val numeri = trains.departures("S01700").map { it.trainRef.number }.distinct().take(12)
+        // A notte fonda il tabellone e' vuoto per davvero: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora il tabellone e' vuoto", !notteFonda() || numeri.isNotEmpty())
         assertTrue("tabellone vuoto: non si puo' concludere nulla", numeri.isNotEmpty())
 
         println("=== CORSE PER NUMERO ===")

@@ -98,6 +98,16 @@ internal object GtfsCsv {
      * la mezzanotte, e riportarle a zero farebbe arrivare un treno prima di
      * essere partito.
      */
+    /**
+     * Minuti dalla mezzanotte in `HH:mm`, riportando oltre le 24 nel giorno dopo:
+     * `1460` e' «00:20», non «24:20».
+     *
+     * Serve a tutte e due le reti con orario imbarcato, EAV e ARST, che restano
+     * classi separate ma leggono lo stesso tipo di dato: la funzione stava
+     * scritta uguale in tutti e due i repository.
+     */
+    fun orologio(minuti: Int): String = "%02d:%02d".format((minuti / 60) % 24, minuti % 60)
+
     fun minuti(s: String): Int? {
         val p = s.trim().split(':')
         if (p.size < 2) return null

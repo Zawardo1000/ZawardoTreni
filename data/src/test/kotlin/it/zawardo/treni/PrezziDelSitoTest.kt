@@ -97,6 +97,9 @@ class PrezziDelSitoTest {
 
         override suspend fun soluzioniDelSito(richiesta: RichiestaSito) =
             RispostaSito(sito().map { VoceSito(it) })
+
+        override suspend fun fermateDelSito(cartId: String, solutionId: String) =
+            emptyList<it.zawardo.treni.data.remote.lefrecce.TrattaDelSito>()
     }
 
     @Test

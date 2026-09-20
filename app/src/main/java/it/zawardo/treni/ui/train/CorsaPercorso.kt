@@ -53,6 +53,8 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.variazione
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
+import it.zawardo.treni.ui.common.scartoVisibile
 import it.zawardo.treni.ui.common.BinarioPillola
 import it.zawardo.treni.ui.common.avvisiDaMostrare
 import it.zawardo.treni.ui.common.delayLabel
@@ -64,7 +66,6 @@ import it.zawardo.treni.ui.common.stateLabel
 import it.zawardo.treni.ui.theme.Cifre
 import it.zawardo.treni.ui.theme.TreniBrand
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /*
  * Il percorso di una corsa, disegnato una volta sola.
@@ -82,9 +83,7 @@ import java.time.format.DateTimeFormatter
  * ogni dato ha la sua colonna, di larghezza fissa, con le cifre tabulari.
  */
 
-internal val ORARIO: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-internal fun LocalDateTime?.hhmm(): String = this?.format(ORARIO) ?: "--:--"
+internal fun LocalDateTime?.hhmm(): String = this?.format(ORA_DEL_GIORNO) ?: "--:--"
 
 /** Le larghezze delle colonne, le stesse per l'intestazione e per ogni fermata. */
 internal object ColonneCorsa {
@@ -460,10 +459,18 @@ internal fun FermataRiga(
         Column(Modifier.width(ColonneCorsa.reale), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val mostra = realtime && !cancelled
             if (showArrival) {
-                OrarioReale(stop.effectiveArrival.takeIf { mostra }, stop.actualArrival != null, stop.arrivalDelayMinutes)
+                OrarioReale(
+                    stop.effectiveArrival.takeIf { mostra },
+                    stop.actualArrival != null,
+                    scartoVisibile(stop.scheduledArrival, stop.effectiveArrival),
+                )
             }
             if (showDeparture) {
-                OrarioReale(stop.effectiveDeparture.takeIf { mostra }, stop.actualDeparture != null, stop.departureDelayMinutes)
+                OrarioReale(
+                    stop.effectiveDeparture.takeIf { mostra },
+                    stop.actualDeparture != null,
+                    scartoVisibile(stop.scheduledDeparture, stop.effectiveDeparture),
+                )
             }
         }
 

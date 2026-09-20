@@ -1,0 +1,77 @@
+[
+ {
+  "api_src": "centricity",
+  "nome": "D027",
+  "updatedAt": "2019-05-27T07:00:24.149Z",
+  "createdAt": "2017-01-18T14:49:04.813Z",
+  "descrizione": "TREVIGLIO-MILANO-VARESE",
+  "alert": true,
+  "severity_code": 2,
+  "news": [
+   {
+    "description": "Il treno 24564 (TREVIGLIO 18:10 - VARESE 20:21) sta viaggiando in ritardo a causa di un guasto che ha richiesto un intervento tecnico.\n\nInfo sull'andamento del treno in APP e Sito nella sezione \"Real time | Linee e orari - ricerca treno\".",
+    "date": "2026-09-19T16:22:41.000Z",
+    "severity_code": 2,
+    "severity_description": "critical"
+   },
+   {
+    "description": "Si avvisa la Gentile Clientela che da notte 7/8 a notte 11/12 settembre e da notte 5/6 a notte 7/8 ottobre, per lavori di manutenzione programmata nella stazione di Gallarate, i treni S5 24582 e 24584, il bus dorario 582A subiranno variazioni. Inoltre, dal 14 settembre al 5 ottobre, i treni S5 da Treviglio a Varese, posticipano di 3 minuti lorario in arrivo a Varese: https://a.mktgcdn.com/f/3714691/UR2fd-Nq8SBAIqVQIpoxZBGnJBxjaR8XLpJ7gzsGDts.pdf",
+    "date": "2026-09-01T12:53:59.000Z",
+    "severity_code": 1,
+    "severity_description": "info"
+   },
+   {
+    "description": "Questo mese vuoi fare una gita al lago che sia anche un viaggio nel tempo? Acquista subito i biglietti speciali per il TRENO STORICO del 20 settembre da Milano Cadorna a Laveno, sul Lago Maggiore, e per l'AUTOMOTRICE STORICA del 27 settembre da Rovato a Pisogne, sul lago d'Iseo.\n\n \n\nSCOPRI DI PIÙ: \nhttps://www.trenord.it/giteintreno/esperienze/treni-storici/?utm_source=push_notification&amp;utm_medium=app&amp;utm_campaign=git_treni_storici_2026",
+    "date": "2026-09-16T06:30:00.000Z",
+    "severity_code": 1,
+    "severity_description": "warning"
+   }
+  ]
+ },
+ {
+  "api_src": "centricity",
+  "nome": "D028",
+  "updatedAt": "2019-05-27T07:00:40.139Z",
+  "createdAt": "2017-01-18T14:49:04.806Z",
+  "descrizione": "BRESCIA-ISEO-EDOLO",
+  "alert": true,
+  "severity_code": 1,
+  "news": [
+   {
+    "description": "Si informa la Gentile Clientela che, a parziale modifica rispetto a quanto già comunicato con precedente avviso n. 094/2026, i lavori di manutenzione programmata nelle stazioni di Bornato, Borgonato e Marone, termineranno il 30 settembre. \n\nCiò comporta le modifiche orario ai seguenti treni: https://a.mktgcdn.com/f/3714691/EZ6yPRcw8Ztz3SgffmonvroXkBLyiIAclUWcmXqkSes.pdf",
+    "date": "2026-08-24T15:57:26.000Z",
+    "severity_code": 1,
+    "severity_description": "info"
+   },
+   {
+    "description": "Questo mese vuoi fare una gita al lago che sia anche un viaggio nel tempo? Acquista subito i biglietti speciali per il TRENO STORICO del 20 settembre da Milano Cadorna a Laveno, sul Lago Maggiore, e per l'AUTOMOTRICE STORICA del 27 settembre da Rovato a Pisogne, sul lago d'Iseo.\n\n \n\nSCOPRI DI PIÙ: \nhttps://www.trenord.it/giteintreno/esperienze/treni-storici/?utm_source=push_notification&amp;utm_medium=app&amp;utm_campaign=git_treni_storici_2026",
+    "date": "2026-09-16T06:30:00.000Z",
+    "severity_code": 1,
+    "severity_description": "warning"
+   },
+   {
+    "description": "Il treno 20909 (ISEO 05:36 - BRESCIA 06:13), il 20 settembre non ferma a Borgonato-Adro.",
+    "date": "2026-09-19T11:00:00.000Z",
+    "severity_code": 1,
+    "severity_description": "warning"
+   }
+  ]
+ },
+ {
+  "api_src": "centricity",
+  "nome": "D034",
+  "updatedAt": "2019-07-31T11:01:39.097Z",
+  "createdAt": "2017-01-18T14:49:04.795Z",
+  "descrizione": "LAVENO-VARESE-SARONNO-MILANO",
+  "alert": true,
+  "severity_code": 1,
+  "news": [
+   {
+    "description": "Questo mese vuoi fare una gita al lago che sia anche un viaggio nel tempo? Acquista subito i biglietti speciali per il TRENO STORICO del 20 settembre da Milano Cadorna a Laveno, sul Lago Maggiore, e per l'AUTOMOTRICE STORICA del 27 settembre da Rovato a Pisogne, sul lago d'Iseo.\n\n \n\nSCOPRI DI PIÙ: \nhttps://www.trenord.it/giteintreno/esperienze/treni-storici/?utm_source=push_notification&amp;utm_medium=app&amp;utm_campaign=git_treni_storici_2026",
+    "date": "2026-09-16T06:30:00.000Z",
+    "severity_code": 1,
+    "severity_description": "warning"
+   }
+  ]
+ }
+]

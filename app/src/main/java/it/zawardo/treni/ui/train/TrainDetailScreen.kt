@@ -1,5 +1,6 @@
 package it.zawardo.treni.ui.train
 
+import it.zawardo.treni.ui.common.GIORNO_BREVE
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -7,24 +8,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -50,16 +46,13 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.theme.TreniBrand
+import it.zawardo.treni.domain.model.oggiInItalia
 import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
-import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.stessaStazione
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private val GIORNO = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -75,6 +68,9 @@ fun TrainDetailScreen(
     departureMillis: Long? = null,
     /** Quando si sale: distingue due corse dello stesso numero in giorni diversi. */
     boardingAt: LocalDateTime? = null,
+    /** L'origine della corsa detta dalla ricerca: vedi `Leg.origineCorsa`. */
+    origineCorsa: String? = null,
+    alightingName: String? = null,
     onBack: () -> Unit,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
@@ -82,7 +78,7 @@ fun TrainDetailScreen(
         factory = viewModelFactory { initializer {
             TrainDetailViewModel(
                 trainNumber, date, boardingRfi, boardingAt, boardingName, alightingRfi,
-                originCode, departureMillis,
+                originCode, departureMillis, origineCorsa, alightingName,
             )
         } },
     )
@@ -126,8 +122,8 @@ fun TrainDetailScreen(
                  */
                 subtitle = when {
                     // Di domani non si dice "partita": deve ancora partire.
-                    date.isAfter(LocalDate.now()) -> "in programma " + date.format(GIORNO)
-                    date != LocalDate.now() -> "partita il " + date.format(GIORNO)
+                    date.isAfter(oggiInItalia()) -> "in programma " + date.format(GIORNO_BREVE)
+                    date != oggiInItalia() -> "partita il " + date.format(GIORNO_BREVE)
                     else -> null
                 },
                 onBack = onBack,
@@ -149,7 +145,7 @@ fun TrainDetailScreen(
                     val followable = state.status != null &&
                         state.status!!.realtime &&
                         state.status!!.state != TrainState.ARRIVED &&
-                        date == LocalDate.now()
+                        date == oggiInItalia()
                     if (followable) {
                         IconButton(
                             onClick = {
@@ -200,9 +196,9 @@ fun TrainDetailScreen(
                 state.realtimeUnavailable -> Message(
                     if (state.futureDate) {
                         "Di questa corsa non c'è l'orario per il giorno scelto.\n\n" +
-                            "L'orario previsto si ricava dalla stessa corsa in circolazione " +
-                            "oggi, ma oggi questo treno non circola. Torna il giorno della " +
-                            "partenza, quando il servizio è attivo."
+                            "Le fermate di un giorno futuro si chiedono a Trenitalia per " +
+                            "quella data, e per questo treno adesso non rispondono. Aprendolo " +
+                            "da una ricerca per tratta si trova più facilmente."
                     } else {
                         "Nessun dato in tempo reale per questo treno.\n\n" +
                             "ViaggiaTreno espone i ritardi solo per la giornata in corso: " +

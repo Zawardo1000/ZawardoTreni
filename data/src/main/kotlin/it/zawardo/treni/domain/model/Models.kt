@@ -1,10 +1,8 @@
 package it.zawardo.treni.domain.model
 
-import java.text.Collator
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.util.Locale
 
 /**
  * Una stazione.
@@ -63,19 +61,6 @@ data class NearbyStation(
     val distanceKm: Double,
 )
 
-/**
- * Ordinamento alfabetico dei nomi di stazione.
- *
- * Il [Collator] italiano serve davvero: i nomi arrivano dalle API come capita,
- * alcuni tutti maiuscoli ("PASCAROSA") e altri accentati ("Chatillon"), e un
- * confronto fra stringhe li spedirebbe in blocchi separati, lontani dalla lettera
- * a cui l'utente li cerca. Con [Collator.PRIMARY] maiuscole e accenti non contano.
- */
-fun List<Station>.sortedByName(): List<Station> = sortedWith(compareBy(STATION_COLLATOR) { it.name })
-
-private val STATION_COLLATOR: Collator = Collator.getInstance(Locale.ITALIAN).apply {
-    strength = Collator.PRIMARY
-}
 
 /**
  * Da quale sorgente arriva una soluzione.
@@ -114,6 +99,12 @@ data class Journey(
      */
     val variato: Boolean = false,
     val delayMinutes: Int? = null,
+    /**
+     * Quel che la fonte dice della soluzione, gia' scelto per essere letto: «Il
+     * treno non effettua servizio viaggiatori», «Posti Esauriti sul treno 9588».
+     * Oggi solo dal sito di Le Frecce: vedi `avvisiDelSito`.
+     */
+    val avvisi: List<String> = emptyList(),
     /**
      * Il prezzo piu' basso di questa soluzione, quando la sorgente lo pubblica.
      *
@@ -275,6 +266,13 @@ data class Leg(
      * un EuroCity di Trenitalia i biglietti sono due. Vedi `tratteDaBiglietto`.
      */
     val venditore: DataSource? = null,
+    /**
+     * Il codice RFI della stazione d'origine della corsa, quando la fonte lo dice
+     * (Le Frecce, `bdoOrigin`): con numero e data e' la corsa esatta di
+     * ViaggiaTreno, senza cercarla per numero. Vedi
+     * `TrainStatusRepository.resolveFor`.
+     */
+    val origineCorsa: String? = null,
 ) {
     /** Solo i treni si possono seguire in tempo reale. */
     val isTrain: Boolean get() = kind == TransportKind.TRAIN && trainNumber != null
@@ -447,6 +445,11 @@ data class TrainStatus(
      * su 189.
      */
     val avvisi: List<String> = emptyList(),
+    /**
+     * Chi fa il treno, col `codiceCliente` di ViaggiaTreno (vedi [Imprese]); null
+     * se la corsa viene da un'altra fonte, che non lo dice.
+     */
+    val impresa: Int? = null,
 ) {
     /** Indice dell'ultima fermata effettuata, -1 se non ancora partito. */
     val currentStopIndex: Int
@@ -548,4 +551,20 @@ data class BoardEntry(
 
     /** Come su [Stop]: il binario annunciato e' stato confermato tale e quale. */
     val platformConfirmed: Boolean get() = binarioConfermato(scheduledPlatform, actualPlatform)
+}
+
+/**
+ * I `codiceCliente` di ViaggiaTreno: l'impresa che fa il treno, sulla corsa e
+ * sulle righe dei tabelloni. Misurati il 19/09/2026 su 452 righe di sei stazioni
+ * lombarde e sui campioni di `data/fonti`: sigla e codice combaciavano sempre.
+ */
+object Imprese {
+    /** Frecce, e gli EuroCity di Trenitalia per la Svizzera. */
+    const val FRECCE = 1
+    const val REGIONALE_TRENITALIA = 2
+    const val INTERCITY = 4
+    const val TPER = 18
+    const val TRENORD = 63
+    /** Gli EuroCity DB-OBB per il Brennero. */
+    const val DB_OBB = 64
 }

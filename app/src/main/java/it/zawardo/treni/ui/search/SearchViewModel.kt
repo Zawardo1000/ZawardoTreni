@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.local.SavedSearchEntity
 import it.zawardo.treni.data.local.SearchHistoryEntity
+import it.zawardo.treni.domain.model.adessoInItalia
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.NearbyStation
@@ -35,7 +36,7 @@ data class SearchUiState(
     val loadingSuggestions: Boolean = false,
     /** Le stazioni proposte dal mirino: si mostrano al posto dei suggerimenti. */
     val nearby: List<NearbyStation> = emptyList(),
-    val dateTime: LocalDateTime = LocalDateTime.now(),
+    val dateTime: LocalDateTime = adessoInItalia(),
     val rememberLast: Boolean = true,
     val directOnly: Boolean = false,
     val viaggiMisti: Boolean = false,
@@ -133,7 +134,7 @@ class SearchViewModel : ViewModel() {
                 to = last.second,
                 fromQuery = last.first.name,
                 toQuery = last.second.name,
-                dateTime = LocalDateTime.now(),
+                dateTime = adessoInItalia(),
             )
         }
         ServiceLocator.currentDeparture.value = last.first
@@ -179,7 +180,14 @@ class SearchViewModel : ViewModel() {
     fun onFieldFocused(field: SearchField) {
         _state.update {
             if (it.activeField == field) it
-            else it.copy(activeField = field, suggestions = emptyList(), nearby = emptyList())
+            // Anche la rotella: restava accesa sotto il campo nuovo, per una
+            // ricerca che non lo riguardava piu'.
+            else it.copy(
+                activeField = field,
+                suggestions = emptyList(),
+                nearby = emptyList(),
+                loadingSuggestions = false,
+            )
         }
     }
 
@@ -188,6 +196,14 @@ class SearchViewModel : ViewModel() {
             _state.update { it.copy(suggestions = emptyList(), loadingSuggestions = false) }
             return
         }
+        /*
+         * Il campo per cui si sta cercando: le risposte che arrivano dopo un
+         * cambio di campo non si mostrano piu'. Prima, scrivendo «milano» in
+         * Partenza e passando ad Arrivo, la risposta ancora in volo si disegnava
+         * sotto ad Arrivo — e un tocco in quel momento sceglieva la stazione
+         * sbagliata per il campo sbagliato.
+         */
+        val perIlCampo = _state.value.activeField
         /*
          * Le reti fuori-RFI sono locali e istantanee: EAV, Ferrotramviaria,
          * Vigezzina, ARST. Si cercano solo se **accese**, altrimenti le loro
@@ -201,7 +217,8 @@ class SearchViewModel : ViewModel() {
         // Poi la cache locale: la lista compare subito, poi si arricchisce dalla rete.
         val offline = runCatching { store.suggestOffline(query) }.getOrDefault(emptyList())
         _state.update {
-            it.copy(
+            if (it.activeField != perIlCampo) it
+            else it.copy(
                 suggestions = SuggerimentiStazioni.unisci(locali, offline),
                 loadingSuggestions = true,
             )
@@ -211,10 +228,14 @@ class SearchViewModel : ViewModel() {
         if (remote != null) {
             runCatching { store.cacheAll(remote) }
             val merged = SuggerimentiStazioni.unisci(locali, remote + offline)
-            _state.update { it.copy(suggestions = merged, loadingSuggestions = false, error = null) }
+            _state.update {
+                if (it.activeField != perIlCampo) it
+                else it.copy(suggestions = merged, loadingSuggestions = false, error = null)
+            }
         } else {
             _state.update {
-                it.copy(
+                if (it.activeField != perIlCampo) it
+                else it.copy(
                     loadingSuggestions = false,
                     error = if (offline.isEmpty()) "Nessuna connessione: solo stazioni gia' usate" else null,
                 )
@@ -286,7 +307,7 @@ class SearchViewModel : ViewModel() {
                 to = it.from,
                 fromQuery = it.toQuery,
                 toQuery = it.fromQuery,
-                dateTime = LocalDateTime.now(),
+                dateTime = adessoInItalia(),
                 suggestions = emptyList(),
                 nearby = emptyList(),
                 activeField = null,
@@ -327,7 +348,7 @@ class SearchViewModel : ViewModel() {
     }
 
     fun setNow() {
-        _state.update { it.copy(dateTime = LocalDateTime.now()) }
+        _state.update { it.copy(dateTime = adessoInItalia()) }
     }
 
     /**
@@ -338,7 +359,7 @@ class SearchViewModel : ViewModel() {
      * giorno ormai passato.
      */
     fun applyPair(from: Station, to: Station, timeMinutes: Int? = null) {
-        val now = LocalDateTime.now()
+        val now = adessoInItalia()
         val target = timeMinutes
             ?.let { now.toLocalDate().atTime(LocalTime.ofSecondOfDay(it * 60L)) }
             ?: now

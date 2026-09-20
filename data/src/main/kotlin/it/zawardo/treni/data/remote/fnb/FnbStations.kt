@@ -118,6 +118,16 @@ internal object FnbStations {
      */
     fun codSito(codice: String?): String? = byCodice(codice)?.codSito
 
+    /**
+     * Il codice sintetico da un codice nativo del portale: `S01110` → `FNB1110`.
+     *
+     * Non passa dal registro: la ricerca risponde anche per fermate che qui non
+     * ci sono — il portale ne elenca di piu' di quelle col tabellone — e una
+     * fermata sconosciuta deve restare indirizzabile lo stesso.
+     */
+    fun daCodSito(codSito: String?): String? =
+        codSito?.trim()?.uppercase()?.removePrefix("S")?.trimStart('0')?.toIntOrNull()?.let { PREFIX + it }
+
     /** Cerca per nome, come fa l'autocompletamento. */
     fun cerca(query: String, limite: Int = 12): List<Stazione> =
         StationMatching.cerca(ELENCO, query, limite) { it.nome }

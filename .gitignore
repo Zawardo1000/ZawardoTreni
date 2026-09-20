@@ -14,3 +14,6 @@ CLAUDE.md
 
 # APK distribuibili: non vanno nel repository
 dist/
+
+# Cache del compilatore Kotlin
+.kotlin/

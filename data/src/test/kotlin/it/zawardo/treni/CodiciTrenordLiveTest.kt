@@ -69,6 +69,8 @@ class CodiciTrenordLiveTest {
     fun `il tabellone Trenord di Brescia risponde`() = runBlocking {
         val righe = trenord.timetable("S01717")
         println("  tabellone Trenord di Brescia: ${righe.size} corse")
+        // Di notte l'orario di stazione e' vuoto per tutti: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora la rete e' ferma", !notteFonda() || righe.isNotEmpty())
         assertTrue("il tabellone Trenord di Brescia e' vuoto: il MIR e' cambiato?", righe.isNotEmpty())
     }
 

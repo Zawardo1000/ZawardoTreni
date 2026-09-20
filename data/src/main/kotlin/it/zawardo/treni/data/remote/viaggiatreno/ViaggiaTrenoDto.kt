@@ -36,6 +36,13 @@ data class AndamentoTrenoDto(
     /** Testo libero con eventuali avvisi (deviazioni, sostituzioni bus...). */
     val subTitle: String? = null,
 
+    /**
+     * Chi fa il treno: 1 Frecce, 2 regionale Trenitalia, 4 IC, 18 Tper,
+     * 63 Trenord, 64 DB-OBB. Vedi `Imprese` e `TrainStatus.impresa`: serve a non
+     * chiedere a Trenord le corse che non sono sue.
+     */
+    val codiceCliente: Int? = null,
+
     /** "--" quando il treno non e' ancora stato rilevato. */
     val stazioneUltimoRilevamento: String? = null,
     val oraUltimoRilevamento: Long? = null,
@@ -105,21 +112,57 @@ data class TabelloneVoceDto(
     val binarioEffettivoArrivoDescrizione: String? = null,
 )
 
-/** Elemento di `/elencoStazioni/{codReg}`, usato per popolare il DB offline. */
+/**
+ * Una voce di `news/infomobility`, la versione JSON delle notizie.
+ *
+ * E' la strada principale per il «perche'» di un ritardo: la pagina RSS dipende
+ * dalle classi del sito, questa no. Il [description] arriva con l'HTML
+ * sfuggito (`&lt;p&gt;`) e le lettere accentate come entita' (`&egrave;`):
+ * `InfomobilitaParser.daJson` le scioglie.
+ *
+ * [trainTags] sono i treni che un evento elenca **senza scriverli nel testo**:
+ * il 19/09/2026 «Linea AV Roma - Firenze» ne aveva otto, e la pagina nessuno.
+ */
 @Serializable
-data class StazioneDto(
-    val codStazione: String? = null,
-    val lat: Double = 0.0,
-    val lon: Double = 0.0,
-    val codReg: Int = 0,
-    /** 1 = principale, 3 = fermata minore, 4 = non presenziata. */
-    val tipoStazione: Int = 0,
-    val localita: LocalitaDto? = null,
+data class NotiziaInfomobilitaDto(
+    val title: String? = null,
+    /** Quando e' stata pubblicata, in millisecondi. */
+    val pubDate: Long? = null,
+    val description: String? = null,
+    /** I numeri dei treni coinvolti, quando l'evento li elenca. */
+    val trainTags: List<String> = emptyList(),
 )
 
+/**
+ * Una nota SmartCaring: il «perche'» dei regionali Trenitalia, e l'unica fonte
+ * che risponda anche per i **giorni futuri**.
+ *
+ * Si chiede per numero e giorno. Le note portano una validita' propria
+ * ([startValidity], [endValidity], in millisecondi) che puo' essere piu' larga
+ * del giorno chiesto, quindi va ricontrollata in casa; e i [trains] dicono a
+ * quali corse si riferisce, con l'origine — necessaria perche' lo stesso numero
+ * puo' essere di due treni diversi.
+ */
 @Serializable
-data class LocalitaDto(
-    val nomeLungo: String? = null,
-    val nomeBreve: String? = null,
-    val id: String? = null,
+data class NotaSmartCaringDto(
+    val id: Int? = null,
+    /** Il testo da mostrare. */
+    val infoNote: String? = null,
+    val startValidity: Long? = null,
+    val endValidity: Long? = null,
+    val trains: List<TrenoSmartCaringDto> = emptyList(),
 )
+
+/** La corsa a cui una nota si riferisce: numero commerciale e codice d'origine. */
+@Serializable
+data class TrenoSmartCaringDto(
+    val commercialTrainNumber: String? = null,
+    val originCode: String? = null,
+)
+
+/*
+ * Qui stavano `StazioneDto` e `LocalitaDto`, cioe' la forma di
+ * `/elencoStazioni/{codReg}`. Sono usciti insieme all'endpoint: la loro KDoc
+ * diceva «per popolare il DB offline», ma quel database lo riempie
+ * `SearchStore.cache` con le stazioni di Le Frecce, e nessuno li leggeva.
+ */

@@ -52,6 +52,8 @@ class FnbLiveTest {
          */
         if (righe.isEmpty()) {
             val arrivi = fnb.board(bariCentrale, arrivals = true)
+            // Di notte la rete e' ferma e il vuoto non dice niente: vedi `notteFonda`.
+            assumeTrue("a quest'ora la rete e' ferma", !notteFonda() || arrivi.isNotEmpty())
             assertTrue("il tabellone non ha restituito corse, ne' in partenza ne' in arrivo", arrivi.isNotEmpty())
             assumeTrue("a quest'ora da Bari Centrale non parte piu' niente", false)
         }
@@ -91,6 +93,8 @@ class FnbLiveTest {
         val partenze = fnb.board(bariCentrale, arrivals = false)
         val arrivi = fnb.board(bariCentrale, arrivals = true)
         println("\n=== BARI CENTRALE: ${partenze.size} partenze, ${arrivi.size} arrivi ===")
+        // Di notte la rete e' ferma e il vuoto non dice niente: vedi `notteFonda`.
+        assumeTrue("a quest'ora la rete e' ferma", !notteFonda() || partenze.isNotEmpty() || arrivi.isNotEmpty())
         assertTrue("arrivi e partenze sono entrambi vuoti", partenze.isNotEmpty() || arrivi.isNotEmpty())
     }
 

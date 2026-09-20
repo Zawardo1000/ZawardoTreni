@@ -3,8 +3,11 @@ package it.zawardo.treni.ui.board
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.istanteInItalia
+import it.zawardo.treni.domain.model.oraInItalia
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Imprese
 import it.zawardo.treni.domain.model.FiltroFonti
 import it.zawardo.treni.domain.model.NearbyStation
 import it.zawardo.treni.domain.model.Station
@@ -17,6 +20,7 @@ import it.zawardo.treni.domain.model.stessaStazione
 import it.zawardo.treni.domain.model.minutesFrom
 import it.zawardo.treni.domain.model.terminus
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -37,12 +41,21 @@ import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.stillCatchable
 import kotlinx.coroutines.Deferred
 import java.time.Instant
-import java.time.LocalTime
 import java.time.ZonedDateTime
 
 enum class BoardMode { DEPARTURES, ARRIVALS }
 
 data class BoardUiState(
+    /**
+     * Quante volte il tabellone e' stato ricaricato da capo.
+     *
+     * Serve alle righe: la verifica per riga — destinazione e binario corretti —
+     * parte da un effetto legato alla riga, e le chiavi della lista non cambiano
+     * fra un ricaricamento e l'altro. Senza questo contatore fra le sue chiavi,
+     * dopo «aggiorna» le righe gia' a schermo tornavano ai dati grezzi del
+     * tabellone e non si correggevano piu'.
+     */
+    val generazione: Int = 0,
     val station: Station? = null,
     val query: String = "",
     val suggestions: List<Station> = emptyList(),
@@ -115,7 +128,7 @@ class BoardViewModel : ViewModel() {
      * ore attorno all'orario richiesto. Per vedere piu' avanti si rifa' la
      * chiamata spostando l'orario, e si concatenano i blocchi.
      */
-    private var nextFrom: ZonedDateTime = ZonedDateTime.now()
+    private var nextFrom: ZonedDateTime = istanteInItalia()
 
     /*
      * Queste tre devono restare sopra `init`.
@@ -128,6 +141,9 @@ class BoardViewModel : ViewModel() {
 
     /** Corse gia' interrogate: una volta a testa, anche scorrendo avanti e indietro. */
     private val verificate = mutableSetOf<String>()
+
+    /** Il caricamento in corso: ne vive uno solo per volta. Vedi [load]. */
+    private var caricamento: Job? = null
 
     /** Numeri gia' chiesti a Trenord cercando i soppressi: si chiedono una volta sola. */
     private val chieste = mutableSetOf<String>()
@@ -270,7 +286,16 @@ class BoardViewModel : ViewModel() {
         val station = _state.value.station ?: return
         val code = station.rfiCode ?: return
 
-        nextFrom = ZonedDateTime.now()
+        /*
+         * Un caricamento alla volta. Senza, la risposta lenta della stazione di
+         * prima — ViaggiaTreno va in HTTP e non e' veloce — atterrava sulla
+         * stazione appena scelta: titolo e campo dicevano Brescia e le righe
+         * erano di Milano. E i due giri si rubavano anche `nextFrom`, `chieste`
+         * e l'orario Trenord, che sono di questa lettura, non della schermata.
+         */
+        caricamento?.cancel()
+
+        nextFrom = istanteInItalia()
         verificate.clear()
         chieste.clear()
         val arriviQui = _state.value.mode == BoardMode.ARRIVALS
@@ -281,8 +306,10 @@ class BoardViewModel : ViewModel() {
         } else {
             null
         }
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true, message = null, noMore = false) }
+        caricamento = viewModelScope.launch {
+            _state.update {
+                it.copy(loading = true, message = null, noMore = false, generazione = it.generazione + 1)
+            }
 
             /*
              * Se la finestra contiene solo corse gia' andate si sposta avanti da
@@ -315,7 +342,8 @@ class BoardViewModel : ViewModel() {
                     message = when {
                         entries.isNotEmpty() -> null
                         avanzato ->
-                            "Da qui non parte piu' nulla per oggi." +
+                            (if (_state.value.mode == BoardMode.ARRIVALS) "Qui non arriva piu' nulla per oggi."
+                            else "Da qui non parte piu' nulla per oggi.") +
                                 System.lineSeparator() + System.lineSeparator() +
                                 "Le corse rimaste in questa fascia sono gia' passate."
                         else ->
@@ -438,8 +466,8 @@ class BoardViewModel : ViewModel() {
         /*
          * La Vigezzina, che sta nell'orario svizzero e non in quello italiano.
          *
-         * Risponde solo alle partenze: l'orario svizzero, per gli arrivi, non
-         * pubblica l'origine della corsa. Vedi [SvizzeraRepository].
+         * Gli arrivi escono come orario e basta: l'origine c'e', il tempo reale
+         * di quel tabellone no. Vedi [SvizzeraRepository].
          */
         val vigezzina = async {
             if (DataSource.SVIZZERA in sources && svizzera.covers(code)) {
@@ -491,7 +519,7 @@ class BoardViewModel : ViewModel() {
             }
         }
 
-        val ora = LocalTime.now()
+        val ora = oraInItalia()
         (
             rfi.await() + ntv.await() + nordBarese.await() + vigezzina.await() +
                 vesuviana.await() + sardegna.await()
@@ -529,7 +557,7 @@ class BoardViewModel : ViewModel() {
                 ?: runCatching { trenord.timetable(code, arrivi) }.getOrDefault(emptyList())
             if (orario.isEmpty()) return@launch
 
-            val ora = LocalTime.now()
+            val ora = oraInItalia()
             val mostrate = _state.value.entries
             /*
              * Solo dentro la fascia gia' in elenco. Oltre, il tabellone non
@@ -576,8 +604,11 @@ class BoardViewModel : ViewModel() {
                         riga.copy(
                             state = comeSta,
                             // Su una corsa soppressa per intero non resta un
-                            // capolinea vivo: vale quello di tabella.
-                            direction = stato.terminus(arrivi) ?: riga.direction,
+                            // capolinea vivo: vale quello di tabella, e negli
+                            // arrivi e' l'origine della corsa.
+                            direction = stato.terminus(arrivi)
+                                ?: (if (arrivi) stato.origin ?: stato.stops.firstOrNull()?.stationName else null)
+                                ?: riga.direction,
                             label = stato.label.ifBlank { riga.label },
                         )
                     }
@@ -674,10 +705,11 @@ class BoardViewModel : ViewModel() {
      * chiederlo il tabellone lo diceva previsto dove il dettaglio lo dava
      * confermato. Lo stesso difetto del REG 22096 a Catania, da un'altra fonte.
      *
-     * Quali treni siano suoi lo dice l'orario di stazione di Trenord, che il
-     * tabellone scarica comunque per i soppressi ([orarioTrenord]): un
-     * Frecciarossa a Milano Centrale, o qualunque treno a Catania, non costa
-     * nessuna chiamata.
+     * Quali treni siano suoi lo dice la corsa stessa, col `codiceCliente` di
+     * ViaggiaTreno ([TrainStatus.impresa]): un Frecciarossa a Milano Centrale, o
+     * qualunque treno a Catania, non costa nessuna chiamata. Dove la corsa non lo
+     * dice resta l'orario di stazione di Trenord, che il tabellone scarica
+     * comunque per i soppressi ([orarioTrenord]).
      */
     private suspend fun conBinariTrenord(
         corsa: TrainStatus,
@@ -687,8 +719,14 @@ class BoardViewModel : ViewModel() {
     ): TrainStatus {
         if (DataSource.TRENORD !in sources || stazione == null || orario == null) return corsa
         if (entry.conBinarioDa(corsa, stazione).actualPlatform != null) return corsa
-        val suoi = runCatching { orario.await() }.getOrDefault(emptyList())
-        if (suoi.none { it.trainRef.number == entry.trainRef.number }) return corsa
+        when (corsa.impresa) {
+            Imprese.TRENORD -> Unit
+            null -> {
+                val suoi = runCatching { orario.await() }.getOrDefault(emptyList())
+                if (suoi.none { it.trainRef.number == entry.trainRef.number }) return corsa
+            }
+            else -> return corsa
+        }
         val giorno = Instant.ofEpochMilli(entry.trainRef.departureDateMillis).atZone(ROME).toLocalDate()
         return runCatching { limite.withPermit { trains.completaBinari(corsa, giorno) } }
             .getOrDefault(corsa)

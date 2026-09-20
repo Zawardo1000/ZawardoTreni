@@ -87,8 +87,14 @@ fun SvizzeraJourneyDto.diVettore(vettori: List<String>): Boolean {
  *
  * Null quando manca il numero o l'orario: senza, la riga non identifica niente
  * e non si puo' collocare nel tempo.
+ *
+ * Con [arrivo] e' una riga degli arrivi: [SvizzeraJourneyDto.to] e' l'origine, e
+ * il tempo reale di quel tabellone non vale niente — `delay` sempre null e una
+ * previsione uguale all'ora della richiesta per tutte le corse (sei arrivi a
+ * Locarno, dalle 19:15 alle 20:15, tutti "19:21:42", il 19/09/2026). La riga
+ * esce quindi come orario e basta.
  */
-fun SvizzeraJourneyDto.toBoardEntry(): BoardEntry? {
+fun SvizzeraJourneyDto.toBoardEntry(arrivo: Boolean = false): BoardEntry? {
     val stop = stop ?: return null
     val grezzo = stop.departure?.takeIf { it.isNotBlank() } ?: return null
     val quando = runCatching { OffsetDateTime.parse(grezzo, ORARIO_CH) }.getOrNull() ?: return null
@@ -98,9 +104,11 @@ fun SvizzeraJourneyDto.toBoardEntry(): BoardEntry? {
      * su altre (`72`). Si mostra nudo: e' il numero che sta sull'orario e sul
      * fianco della carrozza.
      */
-    val numero = number?.trimStart('0')?.takeIf { it.isNotBlank() }
-        ?: number?.takeIf { it.isNotBlank() }
+    val numero = name?.trimStart('0')?.takeIf { it.isNotBlank() }
+        ?: number?.trimStart('0')?.takeIf { it.isNotBlank() }
         ?: return null
+    // La linea, per la scritta: `RE80`, `S10`, `Panoramic Express 72`.
+    val linea = number?.trimStart('0')?.takeIf { it.isNotBlank() } ?: numero
 
     /*
      * `delay` null non e' zero: e' "non ancora rilevato", e capita su tutte le
@@ -108,7 +116,7 @@ fun SvizzeraJourneyDto.toBoardEntry(): BoardEntry? {
      * quindi diventa zero, ma lo stato resta REGULAR e nessuno scrive "in
      * orario": quello che non si sa non si racconta.
      */
-    val ritardo = stop.delay?.coerceAtLeast(0) ?: 0
+    val ritardo = if (arrivo) 0 else stop.delay?.coerceAtLeast(0) ?: 0
     val categoria = etichettaCategoria(category)
 
     return BoardEntry(
@@ -119,18 +127,25 @@ fun SvizzeraJourneyDto.toBoardEntry(): BoardEntry? {
             originCode = "",
             departureDateMillis = quando.toLocalDate().atStartOfDay(ROME).toInstant().toEpochMilli(),
         ),
-        label = etichetta(category, categoria, numero),
+        label = etichetta(category, categoria, linea),
         category = categoria,
         direction = to?.let(::nomeItaliano)?.takeIf { it.isNotBlank() },
         scheduledTime = "%02d:%02d".format(quando.hour, quando.minute),
         delayMinutes = ritardo,
         scheduledPlatform = binarioPulito(stop.platform),
-        // Il binario vero e' quello della previsione quando c'e', altrimenti
-        // resta quello di tabella: cosi' "binario cambiato" si accende solo
-        // quando e' cambiato davvero.
-        actualPlatform = binarioPulito(stop.prognosis?.platform)
-            ?: binarioPulito(stop.platform),
+        /*
+         * Il binario vero e' **solo** quello della previsione. Prima, quando
+         * mancava, ci si rimetteva quello di tabella: i due campi uscivano
+         * uguali, e per l'app due binari uguali vogliono dire «effettivo
+         * confermato» — la pillola diventava verde, cioe' «e' quello, ci si puo'
+         * avviare», anche due ore prima della partenza e senza che nessuno
+         * l'avesse assegnato. Lasciandolo vuoto la pillola resta nera, come su
+         * ViaggiaTreno quando c'e' il solo programmato, e «binario cambiato»
+         * continua ad accendersi solo quando cambia davvero.
+         */
+        actualPlatform = if (arrivo) null else binarioPulito(stop.prognosis?.platform),
         state = if (ritardo > 0) TrainState.DELAYED else TrainState.REGULAR,
         inStation = false,
+        realtime = !arrivo,
     )
 }

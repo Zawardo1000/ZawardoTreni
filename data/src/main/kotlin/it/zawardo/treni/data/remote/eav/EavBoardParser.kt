@@ -44,6 +44,9 @@ internal object EavBoardParser {
     private val RITARDO = cella("ritardo")
 
     private val TAG = Regex("""<[^>]*>""")
+
+    /** La colonna `blink` col cerchio arancione: il treno e' in banchina. */
+    private val IN_BANCHINA = Regex("""class="blink"[^>]*>\s*<div[^>]*circleOrange""")
     private val ORA = Regex("""^([01]?\d|2[0-3]):[0-5]\d$""")
 
     /**
@@ -137,8 +140,14 @@ internal object EavBoardParser {
                 ritardo > 0 || inRitardo -> TrainState.DELAYED
                 else -> TrainState.REGULAR
             },
-            // Il tabellone non dice se il treno e' gia' in banchina.
-            inStation = false,
+            /*
+             * In banchina: il monitor lo segna con un cerchio arancione
+             * lampeggiante nell'ultima colonna (`<td class="blink">` con dentro
+             * `circleOrange`). Il 19/09/2026 alle 19:09 c'era sull'11909 al
+             * binario 10 di Garibaldi e sul 9190 a Montesanto; vuoto su tutte le
+             * altre righe. Vedi `data/fonti/MINORI.md`.
+             */
+            inStation = IN_BANCHINA.containsMatchIn(tr),
         )
     }
 

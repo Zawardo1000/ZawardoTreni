@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.remote.fnb
 
+import okhttp3.ResponseBody
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -74,4 +75,44 @@ interface FnbApi {
         @Query("codSito") codSito: String,
         @Query("type") type: String = FERRO,
     ): FnbBoardDto
+
+    /**
+     * La ricerca A→B, con la data: l'unico orario di questa rete.
+     *
+     * Il tabellone conosce solo "adesso" e non dice il percorso; qui invece si
+     * ottengono le soluzioni del resto della giornata **per qualunque data fino
+     * alla fine dell'orario** (31/12/2026 al 20/09/2026), col prezzo e coi mezzi
+     * di ogni tratto. Le fermate stanno nel dettaglio ([soluzione]).
+     *
+     * [quando] e' `yyyy-MM-dd`, [ora] `HH:mm`. Un errore non e' un errore: dopo
+     * l'ultima corsa la risposta e' una lista vuota, come per una tratta che non
+     * esiste.
+     */
+    @GET("cerca/soluzioni/")
+    suspend fun cerca(
+        @Query("from") from: String,
+        @Query("to") to: String,
+        @Query("when") quando: String,
+        @Query("time") ora: String,
+        @Query("service") servizio: String = FERRO,
+    ): List<FnbSoluzioneDto>
+
+    /**
+     * Le fermate di una soluzione, con gli orari di ogni tratto.
+     *
+     * Vuole il cookie di sessione della ricerca: senza risponde `{}` con 200.
+     * Vedi [apriSessione].
+     */
+    @GET("soluzioni/id/{id}")
+    suspend fun soluzione(@Path("id") id: Long): FnbDettaglioDto
+
+    /**
+     * La pagina che apre la sessione.
+     *
+     * Il `JSESSIONID` (path `/b2c`) lo imposta solo una pagina web, non il JSON:
+     * si fa un giro su `index.jsp` e da li' in poi il dettaglio risponde. La
+     * pagina non si legge: serve solo il cookie, che il client conserva.
+     */
+    @GET("https://eticket.ferrovienordbarese.it/b2c/web/index.jsp")
+    suspend fun apriSessione(): ResponseBody
 }

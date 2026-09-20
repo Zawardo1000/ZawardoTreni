@@ -3,7 +3,6 @@ package it.zawardo.treni
 import it.zawardo.treni.data.mapper.toTrainStatus
 import it.zawardo.treni.data.remote.viaggiatreno.AndamentoTrenoDto
 import it.zawardo.treni.data.remote.viaggiatreno.FermataDto
-import it.zawardo.treni.data.remote.viaggiatreno.StazioneDto
 import it.zawardo.treni.data.remote.viaggiatreno.TabelloneVoceDto
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.data.repository.TrainStatusRepository
@@ -113,9 +112,9 @@ class PartenzaVistaTest {
         override suspend fun partenze(stationCode: String, dateTime: String) = tabellone
         override suspend fun arrivi(stationCode: String, dateTime: String): List<TabelloneVoceDto> = error("non serve")
         override suspend fun cercaNumeroTreno(trainNumber: String): ResponseBody = error("non serve")
-        override suspend fun autocompletaStazione(prefix: String): ResponseBody = error("non serve")
-        override suspend fun elencoStazioni(regionCode: Int): List<StazioneDto> = error("non serve")
         override suspend fun infomobilita(): ResponseBody = error("non serve")
+        override suspend fun notizieInfomobilita(): List<it.zawardo.treni.data.remote.viaggiatreno.NotiziaInfomobilitaDto> = error("non serve")
+        override suspend fun noteSmartCaring(numero: String, giorno: String): List<it.zawardo.treni.data.remote.viaggiatreno.NotaSmartCaringDto> = error("non serve")
     }
 
     private fun repository(

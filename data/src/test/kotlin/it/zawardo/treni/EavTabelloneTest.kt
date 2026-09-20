@@ -45,4 +45,21 @@ class EavTabelloneTest {
     fun `lo stato non finisce fra le note di percorso`() {
         assertEquals("VIA POMPEI", EavBoardParser.noteDiPercorso("VIA POMPEI - IN RITARDO - DELAYED"))
     }
+
+    /**
+     * Il cerchio arancione della colonna `blink`: il treno e' in banchina. Riga
+     * vera di Montesanto del 19/09/2026 alle 19:09.
+     */
+    @Test
+    fun `il cerchio arancione vuol dire in banchina`() {
+        val tabellone = EavBoardParser.parse(
+            """<table>
+            <tr> <td class="numTreno">&nbsp;9190</td> <td class="categoria">A</td> <td ><div class="destinazione">TORREGAVETA</div></td> <td class="informazioni"></td> <td class="binario">1</td> <td class="orario">19:15</td> <td class="ritardo"></td> <td class="blink"><div id="circleOrange"></div><div id="circleOrange2"></div></td> </tr>
+            ${riga("9192", "", "19:35", "")}
+            </table>""",
+            0L,
+        ).associateBy { it.trainRef.number }
+        assertEquals(true, tabellone.getValue("9190").inStation)
+        assertEquals(false, tabellone.getValue("9192").inStation)
+    }
 }

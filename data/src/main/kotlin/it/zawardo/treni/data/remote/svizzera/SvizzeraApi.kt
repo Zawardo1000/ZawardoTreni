@@ -32,10 +32,13 @@ import retrofit2.http.Query
  *
  * ## Quello che questo endpoint non fa
  *
- * - **non da' l'origine di un arrivo.** Il campo `to` e' sempre il capolinea,
- *   anche nel tabellone degli arrivi, e la `passList` di un tabellone e' vuota.
- *   Un tabellone degli arrivi direbbe quindi che il treno viene da dove sta
- *   andando: per questo il repository espone solo le partenze.
+ * - **negli arrivi (`type=arrival`) il campo `to` e' l'origine**, e l'orario sta
+ *   in `stop.departure`; il tempo reale di quel tabellone e' finto (ritardo null,
+ *   previsione uguale all'ora della richiesta). La `passList` delle partenze
+ *   invece non e' vuota: porta le fermate successive, a parte il primo elemento
+ *   che ha l'id della destinazione. Vedi `data/fonti/MINORI.md`.
+ * - **nasconde le soppressioni**: il 19/09/2026 l'RE 80 025835 soppresso per un
+ *   guasto usciva a ritardo 0. `search.ch` le segna.
  * - **mescola i vettori.** A Domodossola risponde con SBB, BLS e Trenitalia
  *   insieme a FART. Vanno filtrati, o si duplica cio' che ViaggiaTreno gia'
  *   copre.

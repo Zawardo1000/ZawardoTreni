@@ -3,7 +3,6 @@ package it.zawardo.treni.domain.model
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.temporal.ChronoUnit
 
 /**
  * Proietta il ritardo corrente sulle fermate non ancora effettuate.
@@ -74,14 +73,8 @@ fun BoardEntry.conRitardoDaFermo(stazione: String, adesso: LocalDateTime): Board
     if (!realtime || state != TrainState.NOT_DEPARTED) return this
     if (!stessaStazione(trainRef.originCode, stazione)) return this
     val tabella = runCatching { LocalTime.parse(scheduledTime) }.getOrNull() ?: return this
-    val fermo = ChronoUnit.MINUTES.between(tabella, adesso.toLocalTime()).toInt().let {
-        // Mezzanotte in mezzo: le 23:55 viste alle 00:05 sono dieci minuti fa.
-        when {
-            it < -MEZZA_GIORNATA -> it + GIORNATA
-            it > MEZZA_GIORNATA -> it - GIORNATA
-            else -> it
-        }
-    }
+    // Mezzanotte in mezzo: le 23:55 viste alle 00:05 sono dieci minuti fa.
+    val fermo = minutiCircolari(tabella, adesso.toLocalTime())
     if (fermo <= delayMinutes) return this
     return copy(delayMinutes = fermo)
 }
@@ -121,6 +114,3 @@ fun BoardEntry.conRitardoDa(corsa: TrainStatus): BoardEntry {
     if (corsa.delayMinutes <= delayMinutes) return this
     return copy(delayMinutes = corsa.delayMinutes)
 }
-
-private const val MEZZA_GIORNATA = 720
-private const val GIORNATA = 1440

@@ -4,6 +4,7 @@ import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * ViaggiaTreno — backend del portale RFI/Trenitalia. Non ufficiale, non documentato.
@@ -39,17 +40,6 @@ interface ViaggiaTrenoApi {
     suspend fun cercaNumeroTreno(@Path("trainNumber") trainNumber: String): ResponseBody
 
     /**
-     * Autocompletamento stazioni, `text/plain`: `MILANO CENTRALE|S01700`.
-     * Usato solo come fallback: l'autocompletamento primario e' offline su Room.
-     */
-    @GET("autocompletaStazione/{prefix}")
-    suspend fun autocompletaStazione(@Path("prefix") prefix: String): ResponseBody
-
-    /** Elenco stazioni per regione (0..22), usato per popolare il DB offline. */
-    @GET("elencoStazioni/{regionCode}")
-    suspend fun elencoStazioni(@Path("regionCode") regionCode: Int): List<StazioneDto>
-
-    /**
      * Tabellone partenze. [dateTime] va nel formato JS
      * `EEE MMM dd yyyy HH:mm:ss 'GMT'Z` in locale inglese.
      */
@@ -66,6 +56,24 @@ interface ViaggiaTrenoApi {
      */
     @GET("infomobilitaRSS/false")
     suspend fun infomobilita(): ResponseBody
+
+    /**
+     * Le stesse notizie in JSON, coi numeri dei treni citati: la strada
+     * principale, l'RSS in HTML resta di riserva (vedi `data/FONTI.md`).
+     */
+    @GET("http://www.viaggiatreno.it/infomobilita/resteasy/news/infomobility")
+    suspend fun notizieInfomobilita(): List<NotiziaInfomobilitaDto>
+
+    /**
+     * Le note SmartCaring di un treno in un giorno: il perche' per corsa dei
+     * regionali Trenitalia, anche per i giorni futuri. [searchDate] `yyyy-MM-dd`:
+     * senza, arriva l'intero storico (50 note e 348 KB per il 18686).
+     */
+    @GET("http://www.viaggiatreno.it/infomobilita/resteasy/news/smartcaring")
+    suspend fun noteSmartCaring(
+        @Query("commercialTrainNumber") numero: String,
+        @Query("searchDate") giorno: String,
+    ): List<NotaSmartCaringDto>
 
     /** Tabellone arrivi, stesso formato di [partenze]. */
     @GET("arrivi/{stationCode}/{dateTime}")

@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
@@ -73,7 +72,6 @@ import it.zawardo.treni.ui.common.BinarioPillola
 import it.zawardo.treni.ui.theme.Cifre
 import androidx.compose.ui.unit.sp
 import it.zawardo.treni.ui.common.currentLocation
-import it.zawardo.treni.ui.common.delayColor
 import it.zawardo.treni.ui.common.delayLabel
 import it.zawardo.treni.ui.common.lateColor
 import it.zawardo.treni.ui.common.rememberLocationRequester
@@ -304,8 +302,14 @@ fun BoardScreen(
                             key = { chiaveRiga(it) },
                         ) { e ->
                             // Solo per le righe che compaiono davvero: il controllo
-                            // di destinazione e binario costa una chiamata.
-                            LaunchedEffect(e.trainRef.number, e.trainRef.departureDateMillis) {
+                            // di destinazione e binario costa una chiamata. Fra le
+                            // chiavi c'e' anche `generazione`, altrimenti dopo un
+                            // «aggiorna» le righe gia' viste non si ricorreggevano.
+                            LaunchedEffect(
+                                e.trainRef.number,
+                                e.trainRef.departureDateMillis,
+                                state.generazione,
+                            ) {
                                 vm.verifica(e)
                             }
                             BoardRow(e, binarioInArrivo = chiaveRiga(e) in state.binariInArrivo) { entry ->

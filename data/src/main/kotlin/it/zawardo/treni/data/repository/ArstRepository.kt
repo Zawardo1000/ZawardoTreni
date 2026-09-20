@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.repository
 
+import it.zawardo.treni.data.remote.gtfs.GtfsCsv
 import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.remote.arst.ArstOrario
 import it.zawardo.treni.data.remote.StationMatching
@@ -13,9 +14,11 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.LocalDateTime
 import java.time.LocalDate
 
 /**
@@ -220,10 +223,33 @@ class ArstRepository(
      * dove si sale, che e' quanto si puo' offrire — e molto meglio di "nessun
      * dato".
      */
-    fun dettaglioCorsa(numero: String, date: LocalDate = LocalDate.now(ROME)): TrainStatus? {
+    fun dettaglioCorsa(
+        numero: String,
+        date: LocalDate = LocalDate.now(ROME),
+        /**
+         * Da dove si sale, quando lo si sa: **serve a distinguere due corse
+         * omonime**. Vedi sotto.
+         */
+        salita: String? = null,
+        /** L'ora di salita, ultimo criterio quando la stazione non basta. */
+        oraSalita: LocalDateTime? = null,
+    ): TrainStatus? {
         val o = orario() ?: return null
         if (!o.copre(date)) return null
-        val c = o.corseDel(date).firstOrNull { it.id == numero } ?: return null
+        /*
+         * **Il numero, qui, non identifica la corsa.** ARST numera le corse per
+         * linea e riparte da capo su ognuna: nell'orario del 20/09/2026, 48 corse
+         * su 117 condividono l'id con un'altra — tutte fra la TCA
+         * (Monserrato-Mandas-Isili) e la TSS2 (Sassari-Sorso), che stanno a
+         * duecento chilometri. Prendendo la prima si apriva la corsa dell'altra
+         * isola: la AT9 di Sassari mostrava le fermate di Senorbi'.
+         *
+         * A distinguerle e' la stazione da cui si sale — le due linee non hanno
+         * fermate in comune — e, se anche quella non bastasse, l'ora di salita.
+         */
+        val c = o.corseDel(date).filter { it.id == numero }
+            .let { omonime -> if (omonime.size <= 1) omonime.firstOrNull() else scegli(omonime, o, salita, oraSalita) }
+            ?: return null
         val mezzanotte = date.atStartOfDay()
 
         val stops = c.fermate.mapIndexed { i, f ->
@@ -265,9 +291,31 @@ class ArstRepository(
         )
     }
 
-    /** Minuti dalla mezzanotte in `HH:mm`, riportando oltre le 24 nel giorno dopo. */
-    private fun orologio(minuti: Int): String =
-        "%02d:%02d".format((minuti / 60) % 24, minuti % 60)
+    /**
+     * Fra piu' corse con lo stesso numero, quella che si sta guardando: ferma
+     * dove si sale, e all'ora giusta. Senza nemmeno un indizio non si tira a
+     * indovinare — meglio nessun dato che la corsa di un'altra linea.
+     */
+    private fun scegli(
+        omonime: List<ArstOrario.Corsa>,
+        o: ArstOrario,
+        salita: String?,
+        oraSalita: LocalDateTime?,
+    ): ArstOrario.Corsa? {
+        val codice = salita?.removePrefix(PREFIX)?.toIntOrNull() ?: return null
+        val passano = omonime.filter { corsa -> corsa.fermate.any { it.stazione == codice } }
+        if (passano.size <= 1) return passano.firstOrNull()
+        // Due corse della stessa linea nello stesso giorno per la stessa fermata:
+        // resta l'ora, che il tabellone e l'elenco conoscono sempre.
+        val minuti = oraSalita?.toLocalTime()?.let { it.hour * 60 + it.minute } ?: return passano.first()
+        return passano.minByOrNull { corsa ->
+            val sua = corsa.fermate.first { it.stazione == codice }
+            abs(sua.partenza % MINUTI_AL_GIORNO - minuti)
+        }
+    }
+
+    /** Minuti dalla mezzanotte in `HH:mm`: la regola sta in [GtfsCsv], con l'altro orario imbarcato. */
+    private fun orologio(minuti: Int): String = GtfsCsv.orologio(minuti)
 
     /** L'id numerico dietro un codice sintetico, null se non e' ARST. */
     private fun idStazione(codice: String?): Int? {
@@ -279,6 +327,9 @@ class ArstRepository(
     private companion object {
         /** Prefisso dei codici sintetici. Nessun codice RFI comincia cosi'. */
         const val PREFIX = "ARST"
+
+        /** I minuti di una giornata: gli orari GTFS oltre le 24 si riportano qui dentro. */
+        const val MINUTI_AL_GIORNO = 1440
 
         /**
          * Base degli id sintetici.

@@ -1,5 +1,6 @@
 package it.zawardo.treni.ui.train
 
+import it.zawardo.treni.ui.common.GIORNO_CORTO
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,9 +55,7 @@ import it.zawardo.treni.ui.TrainRoute
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
-private val DATE = DateTimeFormatter.ofPattern("d MMM")
 private val ROME_ZONE: ZoneId = ZoneId.of("Europe/Rome")
 
 private fun TrainRef.dateInRome(): LocalDate =
@@ -236,7 +235,7 @@ private fun RunCard(corsa: TrainRun, onOpenTrain: (TrainRoute) -> Unit) {
                 Text(corsa.label, style = MaterialTheme.typography.titleMedium)
                 Text(
                     listOfNotNull(corsa.origin, corsa.destination).joinToString(" → ")
-                        .ifBlank { "percorso non disponibile" } + "  ·  " + date.format(DATE),
+                        .ifBlank { "percorso non disponibile" } + "  ·  " + date.format(GIORNO_CORTO),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -252,7 +251,7 @@ private fun RunCard(corsa: TrainRun, onOpenTrain: (TrainRoute) -> Unit) {
 
 /**
  * Un preferito porta con se' la descrizione del giorno in cui e' stato salvato:
- * "REG 2618 Â· Milano Centrale -> Lecco" dice all'utente qual e' il suo treno
+ * "REG 2618 · Milano Centrale -> Lecco" dice all'utente qual e' il suo treno
  * molto meglio di un numero nudo. Non e' un dato in tempo reale e non pretende
  * di esserlo: quello arriva dopo, quando la corsa viene cercata.
  */
@@ -280,7 +279,7 @@ private fun FavoriteCard(
                 val tratta = listOfNotNull(favorite.originName, favorite.destinationName)
                 if (tratta.isNotEmpty()) {
                     Text(
-                        tratta.joinToString(" â†’ "),
+                        tratta.joinToString(" → "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

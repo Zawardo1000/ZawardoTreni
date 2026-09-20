@@ -1,5 +1,7 @@
 package it.zawardo.treni.ui.search
 
+import it.zawardo.treni.ui.common.GIORNO_BREVE
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,7 +45,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.LeadingIconTab
@@ -80,13 +81,8 @@ import it.zawardo.treni.ui.common.currentLocation
 import it.zawardo.treni.ui.common.rememberLocationRequester
 import kotlinx.coroutines.launch
 import it.zawardo.treni.ui.common.TimePickerModal
-import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private val DATE_FMT = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
-private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
  * Dove sta il pulsante inverti dentro la colonna dei due campi.
@@ -491,14 +487,14 @@ private fun SearchOptions(
             OutlinedButton(onClick = onPickDate, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp))
                 Text(
-                    "  " + state.dateTime.format(DATE_FMT),
+                    "  " + state.dateTime.format(GIORNO_BREVE),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             OutlinedButton(onClick = onPickTime) {
                 Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp))
-                Text("  " + state.dateTime.format(TIME_FMT))
+                Text("  " + state.dateTime.format(ORA_DEL_GIORNO))
             }
             TextButton(onClick = onNow) { Text("Adesso") }
         }

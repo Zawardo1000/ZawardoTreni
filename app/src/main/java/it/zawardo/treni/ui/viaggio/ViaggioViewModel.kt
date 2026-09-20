@@ -1,8 +1,10 @@
 package it.zawardo.treni.ui.viaggio
 
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.oggiInItalia
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.ui.TrattaViaggio
@@ -19,7 +21,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 
 /**
  * Un tratto di percorso che si puo' chiudere dietro i tre punti.
@@ -99,7 +100,16 @@ class ViaggioViewModel(
         startAutoRefresh()
     }
 
-    fun refresh() = load(manual = true)
+    /**
+     * Ricarica le tratte, **se non si stanno gia' caricando**: come nel dettaglio
+     * di una corsa, `ON_RESUME` arriva anche all'apertura, e senza guardia ogni
+     * gamba del viaggio veniva interrogata due volte in parallelo — con la
+     * rotella del trascinamento che girava senza che nessuno avesse trascinato.
+     */
+    fun refresh() {
+        if (_state.value.refreshing) return
+        load(manual = true)
+    }
 
     /** Apre o richiude un tratto di percorso chiuso dietro i tre punti. */
     fun espandi(indice: Int, blocco: BloccoNascosto) {
@@ -149,6 +159,8 @@ class ViaggioViewModel(
                 boardingAt = tratta.partenza,
                 boardingName = tratta.salitaNome,
                 alightingCode = tratta.discesaRfi,
+                alightingName = tratta.discesaNome,
+                origineCorsa = tratta.origineRfi,
             ).carica()
         }
 
@@ -162,10 +174,20 @@ class ViaggioViewModel(
                     // Una risposta vuota non cancella quel che si sapeva prima:
                     // il rinfresco successivo puo' trovare la fonte muta.
                     status = status ?: it.status,
-                    error = if (status == null && it.status == null) {
-                        "Di questa corsa non risulta nulla per il giorno scelto."
-                    } else {
-                        null
+                    error = when {
+                        status != null || it.status != null -> null
+                        /*
+                         * Di un giorno futuro le fermate le da' Le Frecce (vedi
+                         * `CaricatoreCorsa.delGiornoDaLeFrecce`); se non risponde, il
+                         * treno c'e' lo stesso, e dirlo "inesistente" sarebbe falso:
+                         * si dice quel che la soluzione sa gia'.
+                         */
+                        tratta.giorno.isAfter(oggiInItalia()) ->
+                            "Le fermate di questo treno per il giorno scelto adesso non " +
+                                "si trovano. Sale a ${tratta.salitaNome} alle " +
+                                "${tratta.partenza.format(ORA_DEL_GIORNO)}, scende a ${tratta.discesaNome} " +
+                                "alle ${tratta.arrivo.format(ORA_DEL_GIORNO)}."
+                        else -> "Di questa corsa non risulta nulla per il giorno scelto."
                     },
                 )
             }
@@ -197,7 +219,7 @@ class ViaggioViewModel(
                 delay(60_000)
                 val vive = _state.value.tratte.any { t ->
                     val s = t.status
-                    t.tratta.treno && t.tratta.giorno == LocalDate.now() &&
+                    t.tratta.treno && t.tratta.giorno == oggiInItalia() &&
                         (s == null || (s.realtime && s.state != TrainState.ARRIVED))
                 }
                 if (!vive) break
@@ -211,3 +233,5 @@ class ViaggioViewModel(
         super.onCleared()
     }
 }
+
+/** L'ora di salita e discesa nel messaggio di una corsa futura senza fermate. */

@@ -1,11 +1,12 @@
 package it.zawardo.treni.ui.viaggio
 
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
+import it.zawardo.treni.ui.common.GIORNO_BREVE
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,6 +70,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,6 +81,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import it.zawardo.treni.domain.model.oggiInItalia
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.nomeDelCambio
@@ -93,6 +96,7 @@ import it.zawardo.treni.domain.model.primaDellaSalita
 import it.zawardo.treni.domain.model.soppressione
 import it.zawardo.treni.service.TrainFollowService
 import it.zawardo.treni.ui.TrattaViaggio
+import it.zawardo.treni.ui.common.scartoVisibile
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.BinarioPillola
 import it.zawardo.treni.ui.common.avvisiDaMostrare
@@ -113,14 +117,9 @@ import it.zawardo.treni.ui.train.IntestazioneColonne
 import it.zawardo.treni.ui.train.PosizioneTreno
 import it.zawardo.treni.ui.train.nelTratto
 import it.zawardo.treni.ui.train.posizioneInViaggio
-import it.zawardo.treni.ui.train.ORARIO
 import java.time.Duration
-import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private val GIORNO = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 
 /**
  * Il viaggio con i cambi, tutto in una schermata sola.
@@ -150,7 +149,26 @@ fun ViaggioScreen(
     onBack: () -> Unit,
     onOpenStation: (String, String) -> Unit = { _, _ -> },
 ) {
-    if (tratte.isEmpty()) return
+    /*
+     * Senza tratte non si disegna il viaggio, ma nemmeno si lascia una schermata
+     * bianca senza uscita: ci si arriva dalla notifica quando il viaggio salvato
+     * e' stato scritto da una versione precedente dell'app e non si rilegge piu'.
+     * Una barra col tasto indietro e una riga di spiegazione bastano.
+     */
+    if (tratte.isEmpty()) {
+        Scaffold(topBar = { TreniTopBar(title = "Viaggio", onBack = onBack) }) { inner ->
+            Box(Modifier.fillMaxSize().padding(inner), contentAlignment = Alignment.Center) {
+                Text(
+                    "Questo viaggio non si apre piu': cercalo di nuovo dalla scheda Tratta.",
+                    Modifier.padding(24.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        return
+    }
 
     val vm: ViaggioViewModel = viewModel(
         factory = viewModelFactory { initializer { ViaggioViewModel(tratte) } },
@@ -200,12 +218,12 @@ fun ViaggioScreen(
             TreniTopBar(
                 title = "${primo.salitaNome} → ${ultimo.discesaNome}",
                 subtitle = buildString {
-                    if (primo.giorno != LocalDate.now()) {
-                        append(primo.giorno.format(GIORNO)).append(", ")
+                    if (primo.giorno != oggiInItalia()) {
+                        append(primo.giorno.format(GIORNO_BREVE)).append(", ")
                     }
-                    append(primo.partenza.format(ORARIO))
+                    append(primo.partenza.format(ORA_DEL_GIORNO))
                     append(" → ")
-                    append(ultimo.arrivo.format(ORARIO))
+                    append(ultimo.arrivo.format(ORA_DEL_GIORNO))
                     // Le camminate non sono cambi: vedi `Journey.mezzi`.
                     val cambi = tratte.count { !it.piedi } - 1
                     append(" · ")
@@ -221,7 +239,7 @@ fun ViaggioScreen(
                      * questo viaggio.
                      */
                     val seguibile = state.tratte.any { t ->
-                        t.tratta.giorno == LocalDate.now() &&
+                        t.tratta.giorno == oggiInItalia() &&
                             t.status?.realtime == true &&
                             t.status?.state != TrainState.ARRIVED
                     }
@@ -530,7 +548,14 @@ private fun SchedaTratta(
                 previsto = salita?.scheduledDeparture ?: tratta.partenza,
                 reale = salita?.effectiveDeparture?.takeIf { realtime },
                 misurato = salita?.actualDeparture != null,
-                scarto = salita?.departureDelayMinutes ?: 0,
+                /*
+                 * Il colore lo decidono i due orari **come si leggono**, non il
+                 * ritardo della fonte: e' la stessa regola delle fermate qui
+                 * sotto (`scartoVisibile`). Prima erano due regole diverse nella
+                 * stessa schermata, e sulle fermate dove ViaggiaTreno arrotonda
+                 * la stessa fermata usciva rossa in cima e verde nell'elenco.
+                 */
+                scarto = scartoVisibile(salita?.scheduledDeparture, salita?.effectiveDeparture?.takeIf { realtime }),
                 programmato = salita?.scheduledPlatform,
                 effettivo = salita?.actualPlatform,
             )
@@ -541,7 +566,7 @@ private fun SchedaTratta(
                 previsto = discesa?.scheduledArrival ?: tratta.arrivo,
                 reale = discesa?.effectiveArrival?.takeIf { realtime },
                 misurato = discesa?.actualArrival != null,
-                scarto = discesa?.arrivalDelayMinutes ?: 0,
+                scarto = scartoVisibile(discesa?.scheduledArrival, discesa?.effectiveArrival?.takeIf { realtime }),
                 programmato = discesa?.scheduledPlatform,
                 effettivo = discesa?.actualPlatform,
             )
@@ -573,9 +598,9 @@ private fun CapoDelTratto(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(previsto.format(ORARIO), Modifier.width(ColonneCorsa.orario), style = Cifre.riga)
+        Text(previsto.format(ORA_DEL_GIORNO), Modifier.width(ColonneCorsa.orario), style = Cifre.riga)
         Text(
-            reale?.format(ORARIO) ?: "",
+            reale?.format(ORA_DEL_GIORNO) ?: "",
             Modifier.width(ColonneCorsa.reale),
             style = Cifre.riga,
             fontWeight = if (misurato) FontWeight.SemiBold else FontWeight.Normal,
@@ -705,7 +730,7 @@ private fun OrarioDelCambio(etichetta: String, quando: LocalDateTime, scarto: In
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            quando.format(ORARIO),
+            quando.format(ORA_DEL_GIORNO),
             Modifier.alignByBaseline(),
             style = Cifre.riga,
             fontWeight = FontWeight.SemiBold,
@@ -790,8 +815,8 @@ private fun TrattaSenzaPercorso(tratta: TrattaViaggio, cambio: RigaViaggio.Cambi
             )
         }
         Text(
-            "${tratta.salitaNome} ${tratta.partenza.format(ORARIO)} → " +
-                "${tratta.discesaNome} ${tratta.arrivo.format(ORARIO)}",
+            "${tratta.salitaNome} ${tratta.partenza.format(ORA_DEL_GIORNO)} → " +
+                "${tratta.discesaNome} ${tratta.arrivo.format(ORA_DEL_GIORNO)}",
             style = MaterialTheme.typography.bodyMedium,
         )
         if (cambio == null) {
@@ -1179,8 +1204,8 @@ private fun RitardoFisso(tutte: List<TrattaUiState>, indice: Int, modifier: Modi
     val treni = tutte.indices.filter { tutte[it].tratta.treno }
     val primo = indice == treni.firstOrNull()
     val ultimo = indice == treni.lastOrNull()
-    val da = "${tratta.salitaNome} ${tratta.partenza.format(ORARIO)}"
-    val a = "${tratta.discesaNome} ${tratta.arrivo.format(ORARIO)}"
+    val da = "${tratta.salitaNome} ${tratta.partenza.format(ORA_DEL_GIORNO)}"
+    val a = "${tratta.discesaNome} ${tratta.arrivo.format(ORA_DEL_GIORNO)}"
     val dove = when {
         primo && !ultimo -> "fino a $a"
         ultimo && !primo -> "da $da"

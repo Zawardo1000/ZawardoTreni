@@ -216,3 +216,25 @@ fun ItaloScheduleDto.toTrainStatus(
         stops = fermate,
     )
 }
+
+/**
+ * Una fermata scritta dentro `InfoRoute`: nome e ora di tabella.
+ *
+ * Il nome e' come lo scrive Italo — «Mediopadana R.Emilia», «Bologna centrale» —
+ * e puo' contenere trattini e punti: a delimitarlo e' la parentesi con l'ora,
+ * non il separatore. L'ora e' `HH.MM`, qualche volta `HH:MM`.
+ */
+private val FERMATA_INFOROUTE = Regex("""([^()]+?)\s*\((\d{1,2})[.:](\d{2})\)""")
+
+/**
+ * Le fermate di `InfoRoute`, in ordine: nome e ora di tabella.
+ *
+ * Vuoto se il campo manca o non si riconosce niente: la corsa resta com'era, con
+ * la sola fermata del tabellone.
+ */
+fun fermateDaInfoRoute(infoRoute: String?): List<Pair<String, LocalTime>> =
+    FERMATA_INFOROUTE.findAll(infoRoute.orEmpty()).mapNotNull { m ->
+        val nome = m.groupValues[1].trim().trim('-', '\u2013', ',', ' ').trim()
+        val ora = runCatching { LocalTime.of(m.groupValues[2].toInt(), m.groupValues[3].toInt()) }.getOrNull()
+        if (nome.isEmpty() || ora == null) null else nome to ora
+    }.toList()

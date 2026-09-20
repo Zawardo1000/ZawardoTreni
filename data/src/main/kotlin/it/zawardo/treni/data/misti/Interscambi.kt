@@ -103,14 +103,12 @@ internal object Interscambi {
 
     data class Vicino(val codice: String, val minuti: Int, val nota: String)
 
-    /**
-     * Vero se due codici indicano la stessa stazione fisica.
-     *
-     * E' l'interscambio implicito: lo stesso codice RFI da due reti diverse —
-     * Milano Centrale servita da un regionale e da un Italo — significa cambiare
-     * ai binari accanto, senza trasferimento. Il confronto e' diretto perche'
-     * le reti RFI e Italo condividono gia' il codice `S…`.
+    /*
+     * Qui c'era una seconda `stessaStazione`, che confrontava i codici nudi.
+     * Nessuno la chiamava, ma portava il nome della regola ufficiale
+     * (`CodiciStazione.stessaStazione`) e diceva il contrario: il suo commento
+     * sosteneva che il confronto diretto bastasse, e Bologna Centrale — due
+     * codici per la stessa stazione — lo smentisce. Una funzione morta con quel
+     * nome e' peggio di nessuna funzione: prima o poi qualcuno la importa.
      */
-    fun stessaStazione(uno: String?, due: String?): Boolean =
-        !uno.isNullOrBlank() && uno == due
 }

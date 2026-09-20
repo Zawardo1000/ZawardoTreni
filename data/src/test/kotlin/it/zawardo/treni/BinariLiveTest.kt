@@ -5,11 +5,18 @@ import it.zawardo.treni.data.repository.TrainStatusRepository
 import it.zawardo.treni.data.repository.TrenordRepository
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.binarioPulito
+import it.zawardo.treni.domain.model.Imprese
+import it.zawardo.treni.domain.model.stessaStazione
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
+import java.time.Duration
+import it.zawardo.treni.domain.model.Stop
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -54,6 +61,14 @@ class BinariLiveTest {
     private val boardFormat: DateTimeFormatter =
         DateTimeFormatter.ofPattern("EEE MMM dd yyyy HH:mm:ss 'GMT'Z", Locale.ENGLISH)
 
+    /** Due letture della stessa fermata: l'ora di tabella coincide al minuto. */
+    private fun stessaOra(una: Stop, altra: Stop): Boolean {
+        val qui = (una.scheduledDeparture ?: una.scheduledArrival)?.toLocalTime() ?: return false
+        val la = (altra.scheduledDeparture ?: altra.scheduledArrival)?.toLocalTime() ?: return false
+        // Tre minuti, la stessa tolleranza di `conBinariDa`.
+        return abs(Duration.between(qui, la).toMinutes()) <= 3
+    }
+
     /** Quante fermate hanno un binario, in qualunque delle due forme. */
     private fun TrainStatus.conBinario() = stops.count { it.platform != null }
 
@@ -70,17 +85,50 @@ class BinariLiveTest {
             .distinct()
             .take(quante)
 
+    /**
+     * Le corse in partenza che sono **di Trenord**, con la lettura nazionale.
+     *
+     * Chi sia di Trenord lo dice `codiceCliente` 63 (`TrainStatus.impresa`),
+     * come in produzione. Il numero da solo non basta: Trenord ha un suo treno
+     * per molti numeri altrui — l'IC 657 per La Spezia e' il suo Milano
+     * Cadorna-Asso — e misurarne i binari qui vorrebbe dire misurare un'altra
+     * corsa, e dichiarare guasto Trenord quando invece si stava guardando il
+     * treno sbagliato.
+     */
+    private suspend fun corseTrenordInPartenza(quante: Int): List<Pair<String, TrainStatus>> =
+        trains.departures("S01700")
+            .distinctBy { it.trainRef.number }
+            .take(quante)
+            .mapNotNull { riga ->
+                val corsa = runCatching { trains.status(riga.trainRef) }.getOrNull() ?: return@mapNotNull null
+                if (corsa.impresa != Imprese.TRENORD) null else riga.trainRef.number to corsa
+            }
+
+    /**
+     * Trenord il binario lo pubblica **da quando viene assegnato**, un quarto
+     * d'ora prima della partenza: su una corsa che parte fra un'ora non c'e', e
+     * non e' un difetto. Percio' il binario si pretende solo se fra le corse
+     * guardate ce n'e' almeno una ormai prossima.
+     */
+    private val quasiInPartenza = Duration.ofMinutes(20)
+
     @Test
     fun `Trenord pubblica ancora il binario nelle fermate`() = runBlocking {
-        val numeri = corseInPartenza(8)
-        assumeTrue("tabellone di Milano Centrale vuoto: nessuna corsa in partenza", numeri.isNotEmpty())
+        val sue = corseTrenordInPartenza(12)
+        assumeTrue("nessuna corsa Trenord fra quelle in partenza adesso", sue.isNotEmpty())
 
         println("\n=== BINARI SECONDO TRENORD, da Milano Centrale ===")
         var lombarde = 0
         var conBinario = 0
-        for (numero in numeri) {
+        var prossime = 0
+        for ((numero, nazionale) in sue) {
             val corsa = trenord.trainStatus(numero, oggi) ?: continue
             lombarde++
+            nazionale.stops.firstOrNull { stessaStazione(it.stationCode, "S01700") }
+                ?.scheduledDeparture?.let { partenza ->
+                    val mancano = Duration.between(LocalDateTime.now(), partenza)
+                    if (!mancano.isNegative && mancano <= quasiInPartenza) prossime++
+                }
             val quanti = corsa.conBinario()
             if (quanti > 0) conBinario++
             println("  ${corsa.label.padEnd(12)} ${corsa.stops.size} fermate, $quanti col binario")
@@ -90,7 +138,9 @@ class BinariLiveTest {
             }
         }
 
+        println("  corse Trenord: $lombarde, di cui $prossime quasi in partenza, $conBinario col binario")
         assumeTrue("nessuna corsa Trenord fra quelle in partenza adesso", lombarde > 0)
+        assumeTrue("nessuna di queste corse e' abbastanza vicina alla partenza", prossime > 0)
         assertTrue(
             "Trenord risponde ma nessuna fermata ha un binario: controllare " +
                 "`platform` e `is_actual_platform` in pass_list",
@@ -178,6 +228,55 @@ class BinariLiveTest {
                 "scritta in due modi si legge come un cambio di binario.",
             sconosciute.isEmpty(),
         )
+    }
+
+    /**
+     * Il filtro per impresa non deve togliere i binari a chi li aveva.
+     *
+     * Dal 19/09/2026 a Trenord si chiede solo per i **suoi** treni
+     * (`codiceCliente` 63): su 91 treni di altre imprese ne conosceva 4, e tutti
+     * e 4 erano un suo treno con lo stesso numero. Il rischio del filtro e'
+     * l'opposto: che un treno Trenord non venga piu' riconosciuto come tale e
+     * resti senza i binari che solo Trenord ha. Qui si confronta corsa per
+     * corsa: quel che Trenord dichiara alle sue fermate deve finire nell'unione.
+     */
+    @Test
+    fun `sui treni Trenord l'unione porta ancora i binari suoi`() = runBlocking {
+        val righe = trains.departures("S01700").distinctBy { it.trainRef.number }.take(12)
+        assumeTrue("tabellone di Milano Centrale vuoto", righe.isNotEmpty())
+
+        println("\n=== BINARI TRENORD: quel che Trenord ha deve arrivare nell'unione ===")
+        var suoi = 0
+        var verificati = 0
+        for (riga in righe) {
+            val corsa = runCatching { trains.status(riga.trainRef) }.getOrNull() ?: continue
+            if (corsa.impresa != Imprese.TRENORD) continue
+            suoi++
+            val suo = runCatching { trenord.trainStatus(corsa.number, oggi) }.getOrNull()
+            delay(2_000)
+            if (suo == null) {
+                println("  ${corsa.label}: Trenord non la conosce")
+                continue
+            }
+            val unito = trains.completaBinari(corsa, oggi)
+            // I binari che Trenord ha su una fermata che l'unione deve portarsi dietro.
+            val attesi = suo.stops.mapNotNull { f ->
+                val quale = f.platform ?: return@mapNotNull null
+                val dove = f.stationCode ?: return@mapNotNull null
+                // Stessa fermata: stessa stazione e stessa ora di tabella, come in `conBinariDa`.
+                unito.stops.firstOrNull { stessaStazione(it.stationCode, dove) && stessaOra(it, f) }
+                    ?.let { dove to (quale to it.platform) }
+            }
+            val mancanti = attesi.filter { (_, binari) -> binari.second == null }
+            println("  ${corsa.label.padEnd(12)} ${attesi.size} binari da Trenord, mancanti ${mancanti.size}")
+            assertTrue(
+                "l'unione non ha portato i binari di Trenord sul ${corsa.label}: $mancanti",
+                mancanti.isEmpty(),
+            )
+            if (attesi.isNotEmpty()) verificati++
+        }
+        println("  corse Trenord nel campione: $suoi, con binari verificati: $verificati")
+        assumeTrue("nessuna corsa Trenord in partenza adesso", suoi > 0)
     }
 
     @Test

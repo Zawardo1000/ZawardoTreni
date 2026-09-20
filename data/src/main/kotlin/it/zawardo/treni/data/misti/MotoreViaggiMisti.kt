@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.misti
 
+import it.zawardo.treni.domain.model.codiceStazione
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
@@ -70,25 +71,39 @@ internal object MotoreViaggiMisti {
     ): List<Journey> {
         if (prime.isEmpty() || seconde.isEmpty()) return emptyList()
 
-        // Indicizza le seconde meta' per codice di partenza: evita il prodotto
-        // cartesiano cieco e tiene solo le coppie che condividono un nodo.
+        /*
+         * Indicizza le seconde meta' per codice di partenza: evita il prodotto
+         * cartesiano cieco e tiene solo le coppie che condividono un nodo.
+         *
+         * La chiave passa per `codiceStazione`, che riconduce a uno solo i codici
+         * doppi: Bologna Centrale e' `S05043` nella ricerca e `S05046` nel
+         * dettaglio delle Frecce che partono dal piano sotterraneo, ed e' uno dei
+         * nodi di cambio piu' probabili. Col codice nudo le due meta' non si
+         * incontravano, e il viaggio misto spariva senza un errore.
+         */
         val secondePerPartenza: Map<String, List<Journey>> = seconde
             .filter { it.legs.isNotEmpty() }
-            .groupBy { it.legs.first().from.rfiCode.orEmpty() }
+            .groupBy { codiceStazione(it.legs.first().from.rfiCode).orEmpty() }
             .filterKeys { it.isNotBlank() }
 
         val assemblati = mutableListOf<Journey>()
 
         for (prima in prime) {
             val ultimoArrivo = prima.legs.lastOrNull() ?: continue
-            val codiceArrivo = ultimoArrivo.to.rfiCode ?: continue
+            val codiceArrivo = codiceStazione(ultimoArrivo.to.rfiCode) ?: continue
 
             // I nodi da cui una seconda meta' puo' ripartire: la stessa stazione,
             // piu' le stazioni a piedi in tabella.
             val nodi = buildList {
                 add(NodoCambio(codiceArrivo, minuti = vincoli.cambioMinimoMinuti, aPiedi = null))
                 Interscambi.aPiediDa(codiceArrivo).forEach {
-                    add(NodoCambio(it.codice, minuti = it.minuti + vincoli.margineTransferMinuti, aPiedi = it))
+                    add(
+                        NodoCambio(
+                            codiceStazione(it.codice).orEmpty(),
+                            minuti = it.minuti + vincoli.margineTransferMinuti,
+                            aPiedi = it,
+                        ),
+                    )
                 }
             }
 
@@ -175,6 +190,13 @@ internal object MotoreViaggiMisti {
             // qui non c'e' una sorgente unica.
             cancelled = prima.cancelled || seconda.cancelled,
             partiallyCancelled = prima.partiallyCancelled || seconda.partiallyCancelled,
+            /*
+             * Il ritardo della **prima** meta', quando la sua rete lo dichiara
+             * (il pianificatore EAV). E' l'unico che possa contare qui: dice se
+             * una corsa gia' partita si prende ancora, e quella e' la corsa con
+             * cui il viaggio comincia. Il tempo reale vero resta gamba per gamba.
+             */
+            delayMinutes = prima.delayMinutes,
             /*
              * Nessun prezzo *intero* sul viaggio assemblato.
              *

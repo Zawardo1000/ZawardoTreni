@@ -6,6 +6,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import it.zawardo.treni.domain.model.TrainState
+import java.time.Duration
+import java.time.LocalDateTime
 import it.zawardo.treni.domain.model.TrainStatus
 
 /*
@@ -85,20 +87,12 @@ fun delayColor(minutes: Int?): Color = when {
     else -> lateColor()
 }
 
-/** Solo il numero con segno: "+8", "-3", "0". */
-fun delayNumber(minutes: Int): String = when {
-    minutes > 0 -> "+$minutes"
-    minutes < 0 -> "$minutes"
-    else -> "0"
-}
-
 /**
  * Lo scarto in minuti, col segno davanti: "+8 min", "-3 min", "in orario".
  *
  * L'anticipo si scriveva "3 min in anticipo", e nella stessa riga della stessa
- * fermata l'arrivo diceva gia' "-3" (vedi [delayNumber]): due grafie per la
- * stessa cosa a due centimetri di distanza, e la piu' lunga delle due mandava
- * la partenza a capo. Il segno lo dice in un carattere, e lo dice ovunque allo
+ * fermata l'arrivo diceva gia' "-3": due grafie per la stessa cosa a due
+ * centimetri di distanza, e la piu' lunga delle due mandava la partenza a capo. Il segno lo dice in un carattere, e lo dice ovunque allo
  * stesso modo — tabellone, risultati, dettaglio della corsa.
  *
  * Il colore continua a distinguerli senza doverli leggere: vedi [delayColor].
@@ -107,6 +101,24 @@ fun delayLabel(minutes: Int): String = when {
     minutes > 0 -> "+$minutes min"
     minutes < 0 -> "$minutes min"
     else -> "in orario"
+}
+
+/**
+ * Lo scarto fra i due orari **come si leggono a schermo**, in minuti.
+ *
+ * Il ritardo della fermata non va bene per colorare: ViaggiaTreno lo arrotonda
+ * per eccesso, e un rilevamento trenta secondi dopo l'orario di tabella diventa
+ * "+1". Misurato il 20/09/2026 su 24 corse: 15 fermate su 140 avevano lo stesso
+ * minuto in tutte e due le colonne e ritardo 1 — il FR 9583 a Torino Porta
+ * Nuova, 08:00 e 08:00, l'ICN 1962 a Paola, 20:52 e 20:52 — e uscivano in rosso
+ * accanto a un orario identico a quello previsto. Il colore deve spiegare quel
+ * che si vede: due orari uguali sono una conferma, non un ritardo. Il ritardo
+ * della corsa, quello vero, resta scritto in cima com'e'.
+ */
+fun scartoVisibile(tabella: LocalDateTime?, reale: LocalDateTime?): Int {
+    if (tabella == null || reale == null) return 0
+    val alMinuto = { q: LocalDateTime -> q.withSecond(0).withNano(0) }
+    return Duration.between(alMinuto(tabella), alMinuto(reale)).toMinutes().toInt()
 }
 
 /**

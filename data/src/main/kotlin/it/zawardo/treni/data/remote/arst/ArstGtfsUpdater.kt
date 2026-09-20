@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.remote.arst
 
+import it.zawardo.treni.data.mapper.ROME
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -40,7 +41,7 @@ internal class ArstGtfsUpdater(
      */
     suspend fun aggiornaSeVecchio(
         soglia: Long = MESI_DI_VALIDITA,
-        oggi: LocalDate = LocalDate.now(),
+        oggi: LocalDate = LocalDate.now(ROME),
     ): Esito = withContext(Dispatchers.IO) {
         val attuale = ArstOrario.carica(cartella)
             ?: return@withContext scarica(oggi) // senza orario si scarica comunque

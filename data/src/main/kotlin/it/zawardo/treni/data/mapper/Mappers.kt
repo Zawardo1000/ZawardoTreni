@@ -298,14 +298,14 @@ private fun FermataDto.toStop() = Stop(
     scheduledDeparture = partenzaTeorica.toRomeDateTime(),
     actualDeparture = partenzaReale.toRomeDateTime(),
     departureDelayMinutes = ritardoPartenza,
-    // La pulizia sta prima del ripiego, non dopo: cosi' un campo che c'e' ma non
-    // dice niente lascia il posto a quello dell'arrivo, che al capolinea e'
-    // l'unico esistente. Vedi `binarioPulito`, che spiega perche' non basti
-    // ricopiare la stringa.
-    scheduledPlatform = binarioPulito(binarioProgrammatoPartenzaDescrizione)
-        ?: binarioPulito(binarioProgrammatoArrivoDescrizione),
-    actualPlatform = binarioPulito(binarioEffettivoPartenzaDescrizione)
-        ?: binarioPulito(binarioEffettivoArrivoDescrizione),
+    scheduledPlatform = binarioDiPartenzaOArrivo(
+        binarioProgrammatoPartenzaDescrizione,
+        binarioProgrammatoArrivoDescrizione,
+    ),
+    actualPlatform = binarioDiPartenzaOArrivo(
+        binarioEffettivoPartenzaDescrizione,
+        binarioEffettivoArrivoDescrizione,
+    ),
     /*
      * `actualFermataType` dice se la fermata e' stata effettuata, non dove sia
      * il treno adesso: leggerlo come posizione riempiva il percorso di "sei
@@ -349,8 +349,24 @@ fun AndamentoTrenoDto.toTrainStatus(): TrainStatus {
             .inOrdineDiPercorso()
             .map { it.toStop().projectedBy(ritardo) }
             .consolidate(),
+        impresa = codiceCliente,
     )
 }
+
+/**
+ * Il binario di una fermata: quello della partenza, o quello dell'arrivo dove la
+ * partenza non c'e'.
+ *
+ * **La pulizia sta prima del ripiego, non dopo**: un campo che c'e' ma non dice
+ * niente — un piazzale senza numero, uno spazio — deve lasciare il posto a
+ * quello dell'arrivo, che al capolinea e' l'unico esistente. Vedi
+ * `binarioPulito`, che spiega perche' non basti ricopiare la stringa.
+ *
+ * Serve identica alla corsa e alla riga di tabellone, ed era scritta due volte
+ * nello stesso file, col commento solo sulla prima.
+ */
+private fun binarioDiPartenzaOArrivo(partenza: String?, arrivo: String?): String? =
+    binarioPulito(partenza) ?: binarioPulito(arrivo)
 
 fun TabelloneVoceDto.toBoardEntry(): BoardEntry? {
     val origin = codOrigine ?: return null
@@ -368,10 +384,14 @@ fun TabelloneVoceDto.toBoardEntry(): BoardEntry? {
         direction = (destinazione ?: origine)?.let(::nomeLeggibile),
         scheduledTime = compOrarioPartenza ?: compOrarioArrivo,
         delayMinutes = ritardo,
-        scheduledPlatform = binarioPulito(binarioProgrammatoPartenzaDescrizione)
-            ?: binarioPulito(binarioProgrammatoArrivoDescrizione),
-        actualPlatform = binarioPulito(binarioEffettivoPartenzaDescrizione)
-            ?: binarioPulito(binarioEffettivoArrivoDescrizione),
+        scheduledPlatform = binarioDiPartenzaOArrivo(
+            binarioProgrammatoPartenzaDescrizione,
+            binarioProgrammatoArrivoDescrizione,
+        ),
+        actualPlatform = binarioDiPartenzaOArrivo(
+            binarioEffettivoPartenzaDescrizione,
+            binarioEffettivoArrivoDescrizione,
+        ),
         state = when {
             provvedimento == 1 -> TrainState.CANCELLED
             provvedimento == 2 -> TrainState.DIVERTED

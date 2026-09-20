@@ -64,4 +64,41 @@ class NotizieLiveTest {
             )
         }
     }
+
+    /**
+     * Il JSON, che l'app legge per primo, contro la pagina: tutto quel che la
+     * pagina dice a una corsa lo deve dire anche il JSON. Il JSON si chiede prima
+     * e dopo la pagina, perche' fra le due chiamate puo' uscire una notizia.
+     */
+    @Test
+    fun `il JSON dice almeno quel che dice la pagina`() = runBlocking {
+        val api = NetworkModule.viaggiaTrenoApi
+        val prima = api.notizieInfomobilita()
+        val pagina = InfomobilitaParser.parse(api.infomobilita().string())
+        val dopo = api.notizieInfomobilita()
+        assertTrue("il JSON delle notizie e' vuoto: manca anche la voce della circolazione", prima.isNotEmpty())
+
+        val dalJson = (InfomobilitaParser.daJson(prima) + InfomobilitaParser.daJson(dopo)).toSet()
+        println("\n=== NOTIZIE JSON: ${prima.size} voci, ${dalJson.size} notizie, ${dalJson.count { it.soloNumero }} solo dai trainTags; pagina ${pagina.size} ===")
+        dalJson.forEach { println("  ${it.numero} ${it.origine} ${it.partenza} ${it.giorno} ${if (it.soloNumero) "tag" else ""} | ${it.testo.lines().first()}") }
+        val mancanti = pagina.filter { it !in dalJson }
+        assertTrue("il JSON non dice quel che dice la pagina: $mancanti", mancanti.isEmpty())
+
+        dalJson.forEach {
+            assertTrue("numero di treno illeggibile: ${it.numero}", it.numero.all(Char::isDigit))
+            assertTrue("notizia senza testo per il ${it.numero}", it.testo.isNotBlank())
+            assertTrue(
+                "nel testo del ${it.numero} e' rimasto dell'HTML: ${it.testo}",
+                listOf("<", "&nbsp;", "&amp;", "&lt;").none { html -> html in it.testo },
+            )
+        }
+        // I treni coi collegamenti nel testo delle voci: se ce ne sono, qualcosa si legge.
+        val collegati = prima.sumOf { v -> trenoCollegato.findAll(v.description.orEmpty()).count() }
+        if (collegati > 0) {
+            assertTrue(
+                "le voci hanno $collegati collegamenti a treni ma il parser non ne legge nessuno",
+                dalJson.any { !it.soloNumero },
+            )
+        }
+    }
 }

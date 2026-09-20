@@ -3,6 +3,7 @@ package it.zawardo.treni.ui.train
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.oggiInItalia
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.TrainStatus
 import kotlinx.coroutines.Job
@@ -50,6 +51,8 @@ class TrainDetailViewModel(
     alightingCode: String? = null,
     originCode: String? = null,
     departureMillis: Long? = null,
+    origineCorsa: String? = null,
+    alightingName: String? = null,
 ) : ViewModel() {
 
     private val memory = ServiceLocator.trainMemory
@@ -64,6 +67,8 @@ class TrainDetailViewModel(
         alightingCode = alightingCode,
         originCode = originCode,
         departureMillis = departureMillis,
+        origineCorsa = origineCorsa,
+        alightingName = alightingName,
     )
 
     private val _state = MutableStateFlow(TrainDetailUiState())
@@ -83,7 +88,21 @@ class TrainDetailViewModel(
         startAutoRefresh()
     }
 
-    fun refresh() = load(initial = false, manual = true)
+    /**
+     * Ricarica la corsa, **se non si sta gia' caricando**.
+     *
+     * La guardia non e' un dettaglio: `ON_RESUME` arriva anche all'apertura della
+     * schermata, quando `init` sta gia' leggendo. Senza, ogni apertura costava due
+     * volte la cascata intera — due `corsaDelGiorno` e due raffiche di tabelloni
+     * per un giorno futuro — e, peggio, il secondo giro spegneva `loading`: la
+     * schermata mostrava «Treno non trovato» per tutti i secondi della prima
+     * lettura, per poi riempirsi di colpo.
+     */
+    fun refresh() {
+        val ora = _state.value
+        if (ora.loading || ora.refreshing) return
+        load(initial = false, manual = true)
+    }
 
     /**
      * Si salva il numero; nome e capolinea sono solo la descrizione con cui
@@ -134,7 +153,7 @@ class TrainDetailViewModel(
                     status = status ?: it.status,
                     // 204 su una data non odierna significa "dato inesistente", non "errore".
                     realtimeUnavailable = status == null && it.status == null,
-                    futureDate = date.isAfter(LocalDate.now()),
+                    futureDate = date.isAfter(oggiInItalia()),
                 )
             }
         }
@@ -147,13 +166,25 @@ class TrainDetailViewModel(
     private fun startAutoRefresh() {
         autoRefresh?.cancel()
         autoRefresh = viewModelScope.launch {
+            var aVuoto = 0
             while (isActive) {
                 delay(60_000)
                 val s = _state.value.status
                 // Su un treno gia' arrivato non c'e' piu' niente da aggiornare,
                 // e nemmeno su una corsa che viene dall'orario: li' non c'e'
-                // niente che possa cambiare fra un minuto e l'altro.
+                // niente che possa cambiare fra un minuto e l'altro. Finche' il
+                // treno viaggia si continua, anche quando ci sei sopra: e' il
+                // momento in cui il ritardo cambia di piu'.
                 if (s != null && (s.state == TrainState.ARRIVED || !s.realtime)) break
+                /*
+                 * Ma di una corsa che **non si e' mai vista** non si insiste per
+                 * sempre: un numero che nessuna fonte conosce, o un servizio giu',
+                 * avrebbero tenuto la schermata a interrogare ogni minuto finche'
+                 * restava aperta. Dopo qualche tentativo si smette; basta tirare
+                 * giu' per riprovare.
+                 */
+                if (s == null && ++aVuoto >= LETTURE_A_VUOTO) break
+                if (s != null) aVuoto = 0
                 load(initial = false)
             }
         }
@@ -162,5 +193,10 @@ class TrainDetailViewModel(
     override fun onCleared() {
         autoRefresh?.cancel()
         super.onCleared()
+    }
+
+    private companion object {
+        /** Quante letture a vuoto di fila prima di smettere di riprovare da soli. */
+        const val LETTURE_A_VUOTO = 5
     }
 }

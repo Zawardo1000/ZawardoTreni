@@ -3,6 +3,7 @@ package it.zawardo.treni.data.remote.gtfs
 import it.zawardo.treni.data.remote.arst.ArstGtfsUpdater
 import it.zawardo.treni.data.remote.eav.EavGtfsUpdater
 import it.zawardo.treni.domain.model.DataSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,12 +88,25 @@ class AggiornamentoOrari(
                 // Ricontrollato dentro il lock: due chiamate ravvicinate
                 // potrebbero aver superato insieme il filtro di sopra.
                 if (sorgente in gia) continue
-                gia += sorgente
                 val updater = SORGENTI[sorgente] ?: continue
 
                 _stato.value = Stato.InCorso(sorgente)
-                val esito = runCatching { updater(client, cartella, soglia) }
-                    .getOrElse { Esito.Fallito(it.message ?: it::class.java.simpleName) }
+                val esito = try {
+                    updater(client, cartella, soglia)
+                } catch (e: CancellationException) {
+                    // Annullato: non e' un esito, e questa sorgente resta da guardare.
+                    throw e
+                } catch (e: Exception) {
+                    Esito.Fallito(e.message ?: e::class.java.simpleName)
+                }
+                /*
+                 * «Gia' guardata» solo se il giro e' andato a buon fine. Segnarlo
+                 * prima del tentativo voleva dire che un fallimento — l'app aperta
+                 * in metropolitana, con la rete che non c'e' — non si ritentava piu'
+                 * per tutta la sessione, nemmeno riaccendendo la rete o rientrando
+                 * nelle impostazioni.
+                 */
+                if (esito !is Esito.Fallito) gia += sorgente
                 _stato.value = Stato.Concluso(sorgente, esito)
             }
             _stato.value = Stato.Fermo

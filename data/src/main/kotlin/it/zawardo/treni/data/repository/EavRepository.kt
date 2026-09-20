@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.repository
 
+import it.zawardo.treni.data.remote.gtfs.GtfsCsv
 import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.remote.eav.EavApi
 import it.zawardo.treni.data.remote.eav.EavBoardParser
@@ -15,11 +16,14 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainState
+import it.zawardo.treni.domain.model.projectedBy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * EAV, la quinta sorgente: Circumvesuviana, Cumana, Circumflegrea e suburbane
@@ -34,8 +38,11 @@ import java.time.ZoneId
  * sintetici `EAV<id>` (vedi [EavStations]) e non compaiono nel catalogo RFI.
  * Fuori da quelle [covers] dice di no senza spendere una chiamata.
  *
- * **Due fonti, non una.** Il tabellone e' l'unica cosa che EAV pubblichi in
- * tempo reale, e copre solo oggi e solo le stazioni che hanno un monitor.
+ * **Tre fonti, non una.** Il tabellone e' quel che EAV pubblica in tempo reale
+ * per una stazione, e copre solo oggi e solo le stazioni che hanno un monitor.
+ * Il **pianificatore** ([ritardiFraStazioni]) dice invece il ritardo di una
+ * corsa, e regge anche quando il monitor non risponde — il 20/09/2026
+ * `orariotreni.eavsrl.it` dava 503 su tutto, e il pianificatore rispondeva.
  * Tutto il resto — i giorni futuri, e le ventiquattro stazioni delle altre
  * reti EAV — viene dall'orario ufficiale imbarcato ([EavOrario]), le cui righe
  * escono con [BoardEntry.realtime] falso perche' un ritardo non lo conoscono.
@@ -196,7 +203,57 @@ class EavRepository(
      * sembrano misurati. Meglio un elenco fermate onesto che una schermata che
      * dice "nessun dato".
      */
-    fun dettaglioCorsa(numero: String, date: LocalDate = LocalDate.now(ROME)): TrainStatus? {
+    /**
+     * Il ritardo e le soppressioni delle corse dirette fra due stazioni, per
+     * numero di treno: l'unico modo di sapere come va una corsa EAV.
+     *
+     * Il monitor risponde per una stazione sola e non dice niente del resto del
+     * percorso; il pianificatore da' il ritardo della corsa (confrontati il
+     * 19/09/2026 con cinque treni del tabellone di Garibaldi: gli stessi numeri).
+     * Vale solo per oggi: per un altro giorno il campo c'e' ma e' zero, e uno
+     * zero che vuol dire "non si sa" e' peggio di niente.
+     *
+     * Vuoto se non risponde, se le stazioni non sono EAV o se il giorno non e'
+     * oggi: chi chiama resta con l'orario di tabella, come prima.
+     */
+    suspend fun ritardiFraStazioni(
+        fromCode: String,
+        toCode: String,
+        quando: LocalDateTime,
+    ): Map<String, RitardoEav> = withContext(Dispatchers.IO) {
+        if (quando.toLocalDate() != LocalDate.now(ROME)) return@withContext emptyMap()
+        val da = EavStations.byCodice(fromCode)?.id ?: return@withContext emptyMap()
+        val a = EavStations.byCodice(toCode)?.id ?: return@withContext emptyMap()
+        if (da == a) return@withContext emptyMap()
+
+        val risposta = runCatching {
+            api.pianificatore(
+                origine = da,
+                destinazione = a,
+                data = quando.format(GIORNO_PIANIFICATORE),
+                ora = quando.format(ORA_PIANIFICATORE),
+            )
+        }.getOrNull() ?: return@withContext emptyMap()
+
+        risposta.corse
+            .flatMap { it.percorsi }
+            .mapNotNull { tratto ->
+                val numero = tratto.codice?.toString() ?: return@mapNotNull null
+                numero to RitardoEav(minuti = tratto.ritardo ?: 0, soppressa = tratto.soppressa)
+            }
+            .toMap()
+    }
+
+    /** Come va una corsa EAV oggi, secondo il pianificatore: vedi [ritardiFraStazioni]. */
+    data class RitardoEav(val minuti: Int, val soppressa: Boolean)
+
+    suspend fun dettaglioCorsa(
+        numero: String,
+        date: LocalDate = LocalDate.now(ROME),
+        /** Dove si sale e dove si scende, se chi chiama lo sa: servono al ritardo. */
+        salita: String? = null,
+        discesa: String? = null,
+    ): TrainStatus? {
         val o = orario() ?: return null
         if (!o.copre(date)) return null
         val c = o.corsa(numero, date) ?: return null
@@ -240,7 +297,81 @@ class EavRepository(
                 "fermate e orari sono quelli di tabella.",
             stops = stops,
             realtime = false,
+        ).conRitardoDelPianificatore(numero, date, salita, discesa, stops.first().scheduledDeparture)
+    }
+
+    /**
+     * Il ritardo di oggi dal pianificatore, quando si sa da dove a dove si va.
+     *
+     * E' l'unica fonte EAV che dica come va **questa corsa**: il monitor parla
+     * della stazione che guardi e basta. Le fermate restano quelle di tabella,
+     * spostate del ritardo come per ogni altra corsa non ancora rilevata
+     * ([projectedBy]), e la corsa lo dichiara nel suo avviso: EAV i passaggi non
+     * li rileva, quindi quegli orari sono una stima, non una misura.
+     *
+     * Se il pianificatore non risponde, o la corsa non e' fra le sue, resta
+     * l'orario di tabella con l'avviso di prima.
+     */
+    private suspend fun TrainStatus.conRitardoDelPianificatore(
+        numero: String,
+        date: LocalDate,
+        salita: String?,
+        discesa: String?,
+        partenza: LocalDateTime?,
+    ): TrainStatus {
+        if (salita == null || discesa == null || date != LocalDate.now(ROME)) return this
+        /*
+         * Da poco **prima** della partenza, non da adesso e non dall'ora esatta:
+         * la finestra del pianificatore comincia dall'ora chiesta ed esclude chi
+         * parte in quel minuto. Chiedendo le 09:13 per la corsa delle 09:13, il
+         * 20/09/2026, tornavano le tre successive e non lei.
+         */
+        /*
+         * Di una corsa gia' finita non si dice "in orario": il pianificatore
+         * continua a elencarla con ritardo zero, che li' vuol dire "non la seguo
+         * piu'", non "e' andata liscia". Resta l'orario di tabella.
+         */
+        val fine = stops.lastOrNull()?.let { it.scheduledArrival ?: it.scheduledDeparture }
+        if (fine != null && fine.isBefore(LocalDateTime.now(ROME))) return this
+
+        val quando = (partenza ?: LocalDateTime.now(ROME)).minusMinutes(ANTICIPO_PIANIFICATORE)
+        val suo = ritardiFraStazioni(salita, discesa, quando)[numero] ?: return this
+        return copy(
+            delayMinutes = suo.minuti,
+            state = when {
+                suo.soppressa -> TrainState.CANCELLED
+                suo.minuti > 0 -> TrainState.DELAYED
+                else -> TrainState.REGULAR
+            },
+            notice = if (suo.soppressa) {
+                "Corsa soppressa secondo il pianificatore EAV."
+            } else {
+                "Ritardo di oggi dal pianificatore EAV. I passaggi EAV non li rileva: " +
+                    "gli orari sono quelli di tabella, spostati del ritardo."
+            },
+            stops = stops.map { it.projectedBy(suo.minuti) },
+            realtime = true,
         )
+    }
+
+    /**
+     * Gli stessi ritardi sulle soluzioni dell'elenco: una chiamata sola per
+     * ricerca, e ogni riga prende quello della sua corsa.
+     */
+    suspend fun conRitardi(
+        viaggi: List<Journey>,
+        fromCode: String,
+        toCode: String,
+        quando: LocalDateTime,
+    ): List<Journey> {
+        if (viaggi.isEmpty()) return viaggi
+        val ritardi = ritardiFraStazioni(fromCode, toCode, quando)
+        if (ritardi.isEmpty()) return viaggi
+        return viaggi.map { viaggio ->
+            val numero = viaggio.legs.firstOrNull { it.isTrain }?.trainNumber ?: return@map viaggio
+            val suo = ritardi[numero] ?: return@map viaggio
+            viaggio.copy(delayMinutes = suo.minuti, cancelled = suo.soppressa)
+        }
     }
 
     /** Il giorno piu' lontano su cui l'orario sappia rispondere. */
@@ -252,15 +383,8 @@ class EavRepository(
     private fun millis(date: LocalDate): Long =
         date.atStartOfDay(ZoneId.of("Europe/Rome")).toInstant().toEpochMilli()
 
-    /**
-     * Minuti dalla mezzanotte in `HH:MM`.
-     *
-     * Il modulo 1440 non e' pignoleria: il GTFS esprime le corse che scavalcano
-     * la mezzanotte con ore oltre le 24, e senza questo un treno delle 00:20
-     * comparirebbe come "24:20".
-     */
-    private fun orologio(minuti: Int): String =
-        "%02d:%02d".format((minuti / 60) % 24, minuti % 60)
+    /** Minuti dalla mezzanotte in `HH:mm`: la regola sta in [GtfsCsv], con l'altro orario imbarcato. */
+    private fun orologio(minuti: Int): String = GtfsCsv.orologio(minuti)
 
     /**
      * La fermata EAV piu' vicina a un punto, se e' abbastanza vicina da avere
@@ -336,6 +460,13 @@ class EavRepository(
          * quando il BFF ne aggiungera' altre.
          */
         const val LOCATION_ID_BASE = 9_000_000_000L
+
+        /** Di quanto si chiede prima della partenza, per non restare fuori dalla finestra. */
+        const val ANTICIPO_PIANIFICATORE = 10L
+
+        /** I formati che il pianificatore vuole: giorno e ora, separati. */
+        val GIORNO_PIANIFICATORE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+        val ORA_PIANIFICATORE: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 
     /**

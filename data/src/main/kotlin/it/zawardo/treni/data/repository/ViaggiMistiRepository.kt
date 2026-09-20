@@ -3,6 +3,7 @@ package it.zawardo.treni.data.repository
 import it.zawardo.treni.data.misti.HubAV
 import it.zawardo.treni.data.misti.Interscambi
 import it.zawardo.treni.data.misti.MotoreViaggiMisti
+import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Station
@@ -61,12 +62,44 @@ class ViaggiMistiRepository(
         val fonte: DataSource,
         val copre: (String?) -> Boolean,
         val itinerario: suspend (String, String, LocalDate) -> List<Journey>,
+        /**
+         * Il ritardo che la rete dichiara sulle sue corse, dove esiste: serve a
+         * dire se una corsa gia' partita si prende ancora. ARST non ne ha, e la
+         * lista torna com'e'.
+         */
+        val conRitardi: suspend (List<Journey>, String, String, LocalDateTime) -> List<Journey> =
+            { corse, _, _, _ -> corse },
     )
 
     private val feeders = listOf(
-        Feeder(DataSource.EAV, eav::covers) { a, b, d -> eav.itinerario(a, b, d) },
-        Feeder(DataSource.ARST, arst::covers) { a, b, d -> arst.itinerario(a, b, d) },
+        Feeder(
+            DataSource.EAV,
+            eav::covers,
+            { a, b, d -> eav.itinerario(a, b, d) },
+            { corse, a, b, quando -> eav.conRitardi(corse, a, b, quando) },
+        ),
+        Feeder(DataSource.ARST, arst::covers, { a, b, d -> arst.itinerario(a, b, d) }),
     )
+
+    /**
+     * L'adduzione con, dove serve, il ritardo della sua rete.
+     *
+     * Il ritardo si chiede **solo se c'e' una corsa gia' partita** da salvare:
+     * e' l'unico caso in cui cambia qualcosa (vedi
+     * `ResultsViewModel.ancoraPrendibile`), e costa una chiamata al
+     * pianificatore. Nel caso normale — tutte le corse ancora da partire — non
+     * si spende niente.
+     */
+    private suspend fun Feeder.adduzione(
+        da: String,
+        a: String,
+        quando: LocalDateTime,
+    ): List<Journey> {
+        val corse = itinerario(da, a, quando.toLocalDate())
+        if (corse.none { it.departure.isBefore(quando) }) return corse
+        if (quando.toLocalDate() != LocalDate.now(ROME)) return corse
+        return runCatching { conRitardi(corse, da, a, quando) }.getOrDefault(corse)
+    }
 
     /**
      * I viaggi misti fra [from] e [to], o vuoto se non ce ne sono di sensati.
@@ -116,14 +149,26 @@ class ViaggiMistiRepository(
             async {
                 val hubRfi = hub.rfi ?: return@async emptyList<Journey>()
                 // Le porte del feeder al nodo: le sue stazioni a piedi dall'hub.
-                val porte = Interscambi.aPiediDa(hubRfi).map { it.codice }.filter { feeder.copre(it) }
+                val vicini = Interscambi.aPiediDa(hubRfi).filter { feeder.copre(it.codice) }
+                val porte = vicini.map { it.codice }
                 if (porte.isEmpty()) return@async emptyList<Journey>()
                 val hubNaz = hubNazionale[hub.italo]
 
                 if (versoAV) {
                     // adduzione: from -> porte del nodo; veloce: nodo -> to
-                    val add = porte.flatMap { feeder.itinerario(from.rfiCode!!, it, quando.toLocalDate()) }
-                    val veloce = avDaHub(hubRfi, hubNaz, to, quando, sources)
+                    val add = porte.flatMap { feeder.adduzione(from.rfiCode!!, it, quando) }
+                    /*
+                     * La gamba veloce da quando si arriva al nodo, non dall'ora
+                     * chiesta: le corse che si chiedono sono poche, e coprono un
+                     * paio d'ore. Il 19/09/2026 cercando Sorrento-Roma alle 18:22
+                     * la Circumvesuviana arrivava a Napoli alle 19:42, e le Frecce
+                     * chieste dalle 18:22 finivano prima delle 19:50: nessun misto.
+                     */
+                    val alNodo = vicini.mapNotNull { v ->
+                        add.filter { it.legs.lastOrNull()?.to?.rfiCode == v.codice && !it.departure.isBefore(quando) }
+                            .minOfOrNull { it.arrival }?.plusMinutes(v.minuti.toLong())
+                    }.minOrNull()
+                    val veloce = avDaHub(hubRfi, hubNaz, to, maxOf(quando, alNodo ?: quando), sources)
                     MotoreViaggiMisti.assembla(add, veloce, direttoMigliore)
                 } else {
                     // specchio: veloce from -> nodo, adduzione nodo -> to

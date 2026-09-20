@@ -44,6 +44,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.remote.gtfs.AggiornamentoOrari
+import it.zawardo.treni.domain.model.oggiInItalia
 import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.ui.about.AboutScreen
 import it.zawardo.treni.ui.board.BoardScreen
@@ -152,6 +153,10 @@ data class TrainRoute(
     val originCode: String? = null,
     val departureMillis: Long? = null,
     val boardingEpochSec: Long? = null,
+    /** L'origine della corsa detta dalla ricerca: vedi `Leg.origineCorsa`. */
+    val origineCorsa: String? = null,
+    /** Il nome della stazione di discesa: serve a Le Frecce per un giorno futuro. */
+    val alightingName: String? = null,
 )
 
 private data class TabItem(
@@ -210,12 +215,27 @@ class MainActivity : ComponentActivity() {
         val number = intent?.getStringExtra(TrainFollowService.EXTRA_OPEN_TRAIN) ?: return
         val day = intent.getLongExtra(
             TrainFollowService.EXTRA_OPEN_DATE,
-            LocalDate.now().toEpochDay(),
+            oggiInItalia().toEpochDay(),
         )
+        // La tratta seguita, quando la notifica la porta: con salita e discesa la
+        // corsa si apre come dall'elenco — per il giorno giusto, e senza rischiare
+        // l'altro treno che porta lo stesso numero.
+        val tratta = intent.getStringExtra(TrainFollowService.EXTRA_OPEN_TRATTA)
+            ?.let { tratteDaJson(it).firstOrNull() }
         // Consumato una volta sola: senza rimozione, ogni rotazione ripeterebbe
         // la navigazione riportando l'utente sul treno mentre naviga altrove.
         intent.removeExtra(TrainFollowService.EXTRA_OPEN_TRAIN)
-        pendingTrain.value = TrainRoute(number, day)
+        intent.removeExtra(TrainFollowService.EXTRA_OPEN_TRATTA)
+        pendingTrain.value = TrainRoute(
+            number = number,
+            dateEpochDay = day,
+            boardingRfi = tratta?.salitaRfi,
+            boardingName = tratta?.salitaNome,
+            alightingRfi = tratta?.discesaRfi,
+            alightingName = tratta?.discesaNome,
+            boardingEpochSec = tratta?.partenzaEpochSec?.takeIf { it > 0 },
+            origineCorsa = tratta?.origineRfi,
+        )
     }
 }
 
@@ -397,6 +417,8 @@ private fun TreniApp(
                     boardingAt = r.boardingEpochSec?.let {
                         LocalDateTime.ofEpochSecond(it, 0, ZoneOffset.UTC)
                     },
+                    origineCorsa = r.origineCorsa,
+                    alightingName = r.alightingName,
                     onBack = { nav.popBackStack() },
                     onOpenStation = { rfi, name -> nav.navigate(StationBoardRoute(rfi, name)) },
                 )

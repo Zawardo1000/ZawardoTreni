@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.remote.eav
 
+import it.zawardo.treni.data.remote.gtfs.GtfsCsv
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStream
@@ -300,7 +301,7 @@ internal object EavGtfsParser {
                         while (true) {
                             val l = r.readLine() ?: break
                             if (intestazione) { intestazione = false; continue }
-                            if (l.isNotBlank()) riga(campi(l))
+                            if (l.isNotBlank()) riga(GtfsCsv.campi(l))
                         }
                     }
             }
@@ -331,8 +332,8 @@ internal object EavGtfsParser {
                 if (c.size < 5) return@leggi
                 if (!corse.containsKey(c[0])) return@leggi
                 val stop = c[3].toIntOrNull() ?: return@leggi
-                val arr = minuti(c[1]) ?: return@leggi
-                val par = minuti(c[2]) ?: arr
+                val arr = GtfsCsv.minuti(c[1]) ?: return@leggi
+                val par = GtfsCsv.minuti(c[2]) ?: arr
                 val seq = c[4].toIntOrNull() ?: 0
                 passaggi.getOrPut(c[0]) { mutableListOf() }
                     .add(Triple(seq, stop - SCARTO_STOP_ID, arr * 10_000 + par))
@@ -391,34 +392,15 @@ internal object EavGtfsParser {
         }
     }.getOrNull() ?: LocalDate.now()
 
-    /** `HH:MM:SS` in minuti dalla mezzanotte. Le ore oltre 24 restano tali. */
-    private fun minuti(s: String): Int? {
-        val p = s.trim().split(':')
-        if (p.size < 2) return null
-        val h = p[0].toIntOrNull() ?: return null
-        val m = p[1].toIntOrNull() ?: return null
-        return h * 60 + m
-    }
-
-    /**
-     * Divide una riga CSV rispettando le virgolette.
+    /*
+     * `minuti` e `campi` stavano anche qui, copiate parola per parola da
+     * [GtfsCsv]: la divisione di una riga CSV che rispetta le virgolette — i
+     * nomi di fermata contengono virgole, "Torre Annunziata, Oplonti" — e gli
+     * `HH:MM:SS` in minuti, con le ore oltre 24 lasciate tali. Sono proprio le
+     * funzioni dove un errore non da' errore: una riga sfasata attribuisce gli
+     * orari alla fermata sbagliata, in silenzio. Ora se ne usa una copia sola.
      *
-     * Il feed EAV cita ogni campo e dentro i nomi di fermata ci sono virgole:
-     * uno `split(",")` spezzerebbe "Torre Annunziata, Oplonti" in due colonne e
-     * sfaserebbe tutta la riga.
+     * Resta separato l'accesso alle colonne **per posizione**, che e' la vera
+     * differenza fra questo parser e quello generico.
      */
-    private fun campi(riga: String): List<String> {
-        val out = mutableListOf<String>()
-        val sb = StringBuilder()
-        var dentro = false
-        for (ch in riga) {
-            when {
-                ch == '"' -> dentro = !dentro
-                ch == ',' && !dentro -> { out += sb.toString(); sb.setLength(0) }
-                else -> sb.append(ch)
-            }
-        }
-        out += sb.toString()
-        return out
-    }
 }

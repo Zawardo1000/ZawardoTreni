@@ -1,10 +1,12 @@
 package it.zawardo.treni.data.remote
 
+import it.zawardo.treni.data.remote.svizzera.SearchChApi
 import it.zawardo.treni.data.remote.svizzera.SvizzeraApi
 import it.zawardo.treni.data.remote.eav.EavApi
 import it.zawardo.treni.data.remote.fnb.FnbApi
 import it.zawardo.treni.data.remote.italo.ItaloApi
 import it.zawardo.treni.data.remote.lefrecce.LefrecceApi
+import it.zawardo.treni.data.remote.trenord.CantieriApi
 import it.zawardo.treni.data.remote.trenord.TrenordApi
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import kotlinx.serialization.json.Json
@@ -160,13 +162,14 @@ object NetworkModule {
     }
 
     /**
-     * Ferrotramviaria risponde JSON in chiaro, senza chiavi ne' sessione: e' la
-     * piu' semplice delle sorgenti non-RFI, e non serve altro che il client base.
+     * Ferrotramviaria risponde JSON in chiaro e senza chiavi. Il **cookie di
+     * sessione** serve solo al dettaglio di una soluzione (`soluzioni/id`), che
+     * senza risponde `{}`: lo conserva lo stesso barattolo di Le Frecce.
      */
     val fnbApi: FnbApi by lazy {
         Retrofit.Builder()
             .baseUrl(FnbApi.BASE_URL)
-            .client(baseClient().build())
+            .client(baseClient().cookieJar(SessionCookieJar()).build())
             .addConverterFactory(jsonConverter)
             .build()
             .create(FnbApi::class.java)
@@ -183,6 +186,33 @@ object NetworkModule {
             .addConverterFactory(jsonConverter)
             .build()
             .create(SvizzeraApi::class.java)
+    }
+
+    /**
+     * I cantieri di Trenord, che stanno su Yext: vedi [CantieriApi]. Host
+     * diverso da `www.trenord.it`, quindi client suo e nessun Referer.
+     */
+    val cantieriApi: CantieriApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(CantieriApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(CantieriApi::class.java)
+    }
+
+    /**
+     * `search.ch`, che sta sotto a `transport.opendata.ch` e ne sa di piu':
+     * ritardo degli arrivi e soppressioni. Si usa solo come aggiunta al
+     * tabellone svizzero. Vedi [SearchChApi].
+     */
+    val searchChApi: SearchChApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(SearchChApi.BASE_URL)
+            .client(baseClient().build())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(SearchChApi::class.java)
     }
 
     /**

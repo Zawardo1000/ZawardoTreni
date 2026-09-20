@@ -3,7 +3,9 @@ package it.zawardo.treni.data.repository
 import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.mapper.toBoardEntry
 import it.zawardo.treni.data.mapper.toTrainStatus
+import it.zawardo.treni.data.mapper.fermateDaInfoRoute
 import it.zawardo.treni.data.remote.italo.ItaloApi
+import it.zawardo.treni.data.remote.italo.ItaloBoardTrainDto
 import it.zawardo.treni.data.remote.italo.ItaloStations
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
@@ -17,6 +19,8 @@ import it.zawardo.treni.domain.model.stessaStazione
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import it.zawardo.treni.domain.model.projectedBy
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
@@ -199,12 +203,15 @@ class ItaloRepository(
     ): TrainStatus? {
         if (!covers(rfiCode)) return null
 
-        val partenza = board(rfiCode, arrivals = false, date = date)
-            .firstOrNull { it.trainRef.number == trainNumber }
-        val arrivo = partenza ?: board(rfiCode, arrivals = true, date = date)
-            .firstOrNull { it.trainRef.number == trainNumber }
-        val riga = arrivo ?: return null
-        val inPartenza = partenza != null
+        val codice = ItaloStations.italoCode(rfiCode) ?: return null
+        val risposta = runCatching { api.stazione(codice) }.getOrNull() ?: return null
+        if (risposta.empty) return null
+
+        val grezzaInPartenza = risposta.departures.firstOrNull { it.number?.trim() == trainNumber }
+        val grezza = grezzaInPartenza ?: risposta.arrivals.firstOrNull { it.number?.trim() == trainNumber }
+            ?: return null
+        val inPartenza = grezzaInPartenza != null
+        val riga = grezza.toBoardEntry(date) ?: return null
 
         /*
          * Prima si prova a farsi dare il percorso intero.
@@ -220,6 +227,14 @@ class ItaloRepository(
         val orario = riga.scheduledTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
             ?.let { date.atTime(it) }
         val previsto = orario?.plusMinutes(riga.delayMinutes.toLong())
+
+        /*
+         * Il percorso scritto nella riga stessa (`InfoRoute`): e' orario di
+         * tabella, ma c'e' anche sulle corse che il servizio Italo non segue —
+         * cioe' quasi tutte. Meglio le fermate vere a orario di tabella che una
+         * riga sola.
+         */
+        conInfoRoute(grezza, riga, date, rfiCode, stationName, inPartenza, orario, previsto)?.let { return it }
 
         return TrainStatus(
             number = trainNumber,
@@ -253,6 +268,126 @@ class ItaloRepository(
                     projectedDeparture = if (inPartenza) previsto else null,
                 ),
             ),
+        )
+    }
+
+    /**
+     * La corsa come la scrive `InfoRoute`: le fermate del percorso, a orario di
+     * tabella, intorno a quella del tabellone.
+     *
+     * Fra le **partenze** `InfoRoute` elenca le fermate successive col loro
+     * orario d'arrivo, fra gli **arrivi** quelle precedenti col loro orario di
+     * partenza: la fermata dove siamo sta quindi in testa o in coda. Il ritardo
+     * e' quello della riga, proiettato sulle fermate future come per ogni altra
+     * corsa non ancora rilevata.
+     *
+     * Gli orari sono di tabella, e la corsa lo dichiara: Italo qui non rileva i
+     * passaggi, e `InfoRoute` racconta l'orario, non la corsa di oggi — quando
+     * una corsa e' limitata, le due cose si discostano (misurato il 19/09/2026:
+     * 7 casi su 97, tutti cosi'). Null se il campo non c'e' o non si legge.
+     */
+    private fun conInfoRoute(
+        grezza: ItaloBoardTrainDto,
+        riga: BoardEntry,
+        date: LocalDate,
+        rfiCode: String,
+        stationName: String?,
+        inPartenza: Boolean,
+        orario: LocalDateTime?,
+        previsto: LocalDateTime?,
+    ): TrainStatus? {
+        val altre = fermateDaInfoRoute(grezza.infoRoute)
+        if (altre.isEmpty() || orario == null) return null
+
+        val qui = Stop(
+            index = 0,
+            stationName = stationName.orEmpty(),
+            stationCode = rfiCode,
+            scheduledArrival = if (inPartenza) null else orario,
+            actualArrival = null,
+            arrivalDelayMinutes = if (inPartenza) 0 else riga.delayMinutes,
+            scheduledDeparture = if (inPartenza) orario else null,
+            actualDeparture = null,
+            departureDelayMinutes = if (inPartenza) riga.delayMinutes else 0,
+            scheduledPlatform = null,
+            actualPlatform = riga.actualPlatform,
+            status = StopStatus.FUTURE,
+            projectedArrival = if (inPartenza) null else previsto,
+            projectedDeparture = if (inPartenza) previsto else null,
+            detected = false,
+        )
+
+        /*
+         * Il percorso puo' scavallare la mezzanotte, e `InfoRoute` scrive solo le
+         * ore: si srotolano a partire dalla fermata di qui, l'unica di cui si
+         * sappia il giorno. Fra le partenze le altre vengono dopo e il giorno sale
+         * quando l'ora cala; fra gli arrivi vengono prima, e si risale all'indietro.
+         * E' la stessa regola delle fermate vere, in `ItaloMappers`: senza, l'Italo
+         * delle 23:30 arrivava alle 00:45 **dello stesso giorno**, cioe' ventitre
+         * ore prima di partire.
+         */
+        val quandoDelle: List<LocalDateTime> = if (inPartenza) {
+            var precedente: LocalDateTime = orario
+            altre.map { (_, ora) ->
+                precedente = precedente.toLocalDate().atTime(ora)
+                    .let { if (it.isBefore(precedente)) it.plusDays(1) else it }
+                precedente
+            }
+        } else {
+            var successiva: LocalDateTime = orario
+            altre.reversed().map { (_, ora) ->
+                successiva = successiva.toLocalDate().atTime(ora)
+                    .let { if (it.isAfter(successiva)) it.minusDays(1) else it }
+                successiva
+            }.reversed()
+        }
+
+        val fuori = altre.mapIndexed { i, (nome, _) ->
+            val codiceRfi = ItaloStations.rfiCode(ItaloStations.codeByName(nome))
+            val quando = quandoDelle[i]
+            Stop(
+                index = 0,
+                stationName = nome,
+                stationCode = codiceRfi,
+                scheduledArrival = if (inPartenza) quando else null,
+                actualArrival = null,
+                arrivalDelayMinutes = 0,
+                scheduledDeparture = if (inPartenza) null else quando,
+                actualDeparture = null,
+                departureDelayMinutes = 0,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                status = StopStatus.FUTURE,
+                detected = false,
+            )
+        }
+
+        val tutte = (if (inPartenza) listOf(qui) + fuori else fuori + listOf(qui))
+            .mapIndexed { i, fermata -> fermata.copy(index = i + 1).projectedBy(riga.delayMinutes) }
+
+        return TrainStatus(
+            number = riga.trainRef.number,
+            category = "Italo",
+            label = riga.label,
+            /*
+             * Di questa corsa si conosce **meta' percorso**: fra le partenze le
+             * fermate successive, fra gli arrivi le precedenti. Quindi l'origine
+             * la si sa solo guardando un arrivo, e la destinazione solo guardando
+             * una partenza; dall'altra parte la lista comincia (o finisce) sulla
+             * stazione da cui stiamo guardando, che origine non e'. Scriverla
+             * lo stesso avrebbe dato l'Italo Napoli-Milano «da Roma Termini».
+             * L'altra meta' resta null: non la sa nessuno.
+             */
+            origin = if (inPartenza) null else tutte.first().stationName,
+            destination = if (inPartenza) riga.direction ?: tutte.last().stationName else null,
+            delayMinutes = riga.delayMinutes,
+            state = riga.state,
+            lastDetectionStation = null,
+            lastDetectionTime = null,
+            notice = "Fermate e orari di tabella, dal tabellone Italo. Italo non rileva i " +
+                "passaggi di questa corsa: il ritardo e' quello dichiarato a " +
+                (stationName ?: "questa stazione") + ".",
+            stops = tutte,
         )
     }
 }

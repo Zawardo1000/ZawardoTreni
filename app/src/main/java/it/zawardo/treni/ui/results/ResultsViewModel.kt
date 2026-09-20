@@ -1,10 +1,14 @@
 package it.zawardo.treni.ui.results
 
+import it.zawardo.treni.data.repository.TabelloniFuturi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.repository.chiavePrezzoLeFrecce
 import it.zawardo.treni.data.repository.chiaveSoluzione
+import it.zawardo.treni.domain.model.oggiInItalia
+import it.zawardo.treni.domain.model.adessoInItalia
+import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.FiltroFonti
@@ -36,6 +40,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.LocalDate
@@ -135,7 +141,7 @@ data class JourneyRow(
      * domani mattina, e chiedere per quelle lo stato di oggi risponde con la
      * corsa sbagliata, quasi sempre gia' arrivata.
      */
-    val isRealtimeDay: Boolean get() = giornoDelPrimoTreno == LocalDate.now()
+    val isRealtimeDay: Boolean get() = giornoDelPrimoTreno == oggiInItalia()
 
     /**
      * Il giorno del primo treno, che non e' sempre quello della soluzione.
@@ -193,6 +199,7 @@ class ResultsViewModel(
     private val misti = ServiceLocator.viaggiMistiRepository
     private val eav = ServiceLocator.eavRepository
     private val arst = ServiceLocator.arstRepository
+    private val fnb = ServiceLocator.fnbRepository
     private val italo = ServiceLocator.italoRepository
     private val trains = ServiceLocator.trainStatusRepository
     private val settings = ServiceLocator.settings
@@ -212,7 +219,7 @@ class ResultsViewModel(
      * Quale riga sia interrogabile lo decide la riga stessa, dalla propria data
      * di partenza: vedi [JourneyRow.isRealtimeDay].
      */
-    private val isToday: Boolean = departure.toLocalDate() == LocalDate.now()
+    private val isToday: Boolean = departure.toLocalDate() == oggiInItalia()
 
     init {
         viewModelScope.launch {
@@ -237,8 +244,27 @@ class ResultsViewModel(
                 )
             }
 
+            /*
+             * I diretti sulle reti fuori-RFI, quando le due punte sono della
+             * stessa rete: Sorrento→Napoli su EAV, Sassari→Nuoro su ARST. Il BFF
+             * non conosce quelle stazioni e i viaggi misti richiedono l'alta
+             * velocita', quindi senza questo passo una tratta tutta-EAV o
+             * tutta-ARST resterebbe senza risultati, ora che quelle stazioni si
+             * possono scegliere. Escono senza tempo reale, come la loro rete.
+             *
+             * Parte **insieme** alla ricerca nazionale: sono reti diverse e
+             * chiamate diverse, e su Bari-Barletta — dove il portale di
+             * Ferrotramviaria e' una ricerca vera, non un orario in casa —
+             * aspettare l'una per cominciare l'altra raddoppiava l'attesa. E in
+             * `runCatching`, perche' un intoppo su quella rete non puo' lasciare
+             * la schermata a girare a vuoto.
+             */
+            val fuoriRfiInCorso = async {
+                runCatching { direttiFuoriRfi(sources, departure) }.getOrDefault(emptyList())
+            }
             val outcome = runCatching { journeys.searchAll(from, to, departure, limit = PAGE, sources = sources) }
                 .getOrElse { e ->
+                    fuoriRfiInCorso.cancel()
                     _state.update {
                         it.copy(
                             loading = false,
@@ -247,15 +273,7 @@ class ResultsViewModel(
                     }
                     return@launch
                 }
-            /*
-             * I diretti sulle reti fuori-RFI, quando le due punte sono della
-             * stessa rete: Sorrento→Napoli su EAV, Sassari→Nuoro su ARST. Il BFF
-             * non conosce quelle stazioni e i viaggi misti richiedono l'alta
-             * velocita', quindi senza questo passo una tratta tutta-EAV o
-             * tutta-ARST resterebbe senza risultati, ora che quelle stazioni si
-             * possono scegliere. Escono senza tempo reale, come la loro rete.
-             */
-            val fuoriRfi = direttiFuoriRfi(sources)
+            val fuoriRfi = fuoriRfiInCorso.await()
 
             /*
              * Il filtro si applica dopo, non prima: le sorgenti non sanno
@@ -290,22 +308,72 @@ class ResultsViewModel(
     /**
      * I viaggi diretti quando partenza e arrivo sono della stessa rete fuori-RFI.
      *
-     * Solo EAV e ARST, che un orario ce l'hanno da cui ricavare gli itinerari.
-     * Ferrotramviaria e Vigezzina hanno il solo tabellone di stazione, da cui una
-     * ricerca A→B non si ricava: per ora quelle tratte interne restano scoperte.
+     * EAV e ARST hanno un orario imbarcato da cui ricavare gli itinerari;
+     * Ferrotramviaria una ricerca sua, che e' anche l'unico suo orario (vedi
+     * `FnbRepository.itinerario`). Resta scoperta la Vigezzina, che ha il solo
+     * tabellone di stazione.
+     *
+     * **Solo le corse ancora utili**, da [quando] in poi. EAV e ARST leggono un
+     * orario imbarcato e rispondono con tutte le corse del giorno: senza questo
+     * taglio, cercando Sorrento - Napoli alle 08:45 l'elenco cominciava dalle
+     * 05:30, con tre ore di treni gia' partiti da scorrere prima di arrivare al
+     * primo utile (visto il 20/09/2026). Queste reti il tempo reale non ce
+     * l'hanno, quindi un treno gia' partito non si rincorre: non c'e' il caso
+     * «in ritardo, fai ancora in tempo» che vale per le altre.
+     *
+     * Con [indietro] vale il contrario — le corse **prima** di [quando] — ed e'
+     * quel che serve a «Corse precedenti» su una tratta che sta tutta dentro una
+     * di queste reti.
      */
-    private suspend fun direttiFuoriRfi(sources: Set<DataSource>): List<Journey> {
+    private suspend fun direttiFuoriRfi(
+        sources: Set<DataSource>,
+        quando: LocalDateTime,
+        indietro: Boolean = false,
+    ): List<Journey> {
         val f = from.rfiCode ?: return emptyList()
         val t = to.rfiCode ?: return emptyList()
-        val giorno = departure.toLocalDate()
-        return when {
+        val giorno = quando.toLocalDate()
+        /*
+         * Andando indietro, l'orario imbarcato di EAV e ARST si legge tutto in
+         * una volta e non costa niente: si parte dall'inizio del giorno e si
+         * filtra. Ferrotramviaria invece e' una ricerca vera, che risponde in
+         * avanti e a soluzioni contate: chiesta dall'inizio del giorno tornava
+         * coi primi treni del mattino, e «corse precedenti» a meta' pomeriggio
+         * restava vuota per forza. Le si chiedono le ore appena prima.
+         */
+        val daChiedere = when {
+            !indietro -> quando
+            DataSource.FNB in sources && fnb.covers(f) && fnb.covers(t) ->
+                maxOf(quando.minusHours(ORE_INDIETRO_FNB), giorno.atStartOfDay())
+            else -> giorno.atStartOfDay()
+        }
+        val tutti = when {
             DataSource.EAV in sources && eav.covers(f) && eav.covers(t) ->
-                eav.itinerario(f, t, giorno)
+                // L'orario dice quando passano; il pianificatore, per oggi, come vanno.
+                eav.conRitardi(eav.itinerario(f, t, giorno), f, t, quando)
             DataSource.ARST in sources && arst.covers(f) && arst.covers(t) ->
                 arst.itinerario(f, t, giorno)
+            DataSource.FNB in sources && fnb.covers(f) && fnb.covers(t) ->
+                runCatching { fnb.itinerario(f, t, daChiedere) }.getOrDefault(emptyList())
             else -> emptyList()
         }
+        return tutti
+            .filter { if (indietro) it.departure.isBefore(quando) else ancoraPrendibile(it, quando) }
+            .sortedBy { it.departure }
     }
+
+    /**
+     * Vero se la corsa parte dall'ora cercata in poi — o se parte prima ma il suo
+     * ritardo la rende ancora prendibile.
+     *
+     * E' la stessa regola dei treni nazionali (`cercaAncoraPrendibili`), portata
+     * dove il ritardo lo dichiara la rete stessa: il pianificatore EAV. Un treno
+     * delle 10:38 con dodici minuti di ritardo, cercando le 10:45, e' ancora li'.
+     * Soppresso no: quello non si prende comunque.
+     */
+    private fun ancoraPrendibile(viaggio: Journey, quando: LocalDateTime): Boolean =
+        !viaggio.departure.isBefore(quando) ||
+            viaggio.partenzaAncoraUtile(primo = null, dalle = quando) != null
 
     /**
      * Le soluzioni che la ricerca principale non copre, cercate **dopo** e in
@@ -331,18 +399,30 @@ class ResultsViewModel(
                 // aggregato: le loro corse stanno fuori da ViaggiaTreno e il realtime
                 // si legge aprendo la singola corsa. Nascono quindi gia' "fermi".
                 //
-                // Dall'ora cercata in avanti, come la ricerca principale — ma con
-                // una **grazia sui misti**. Un EAV+Italo e' raro, e le coincidenze
-                // Italo in tempo reale sono a singhiozzo: perderne una perche' il
-                // feeder e' partito cinque minuti fa la farebbe sparire del tutto,
-                // mentre vedere che *esiste* vale piu' del "l'hai persa per poco".
-                // Cosi' un misto resta fino a [GRAZIA_MISTI] prima dell'ora cercata;
-                // l'Italo diretto — corsa nazionale singola, di cui ce n'e' a bizzeffe
-                // — resta stretto.
-                val grazia = departure.minus(GRAZIA_MISTI)
+                /*
+                 * Dall'ora cercata in avanti, come la ricerca principale. Una riga
+                 * che parte prima resta solo se il ritardo dichiarato dalla sua
+                 * rete — il pianificatore EAV, Trenord — la rende ancora
+                 * prendibile, e allora lo **dice**: esce in rosso, «fai ancora in
+                 * tempo», come i treni nazionali.
+                 *
+                 * Prima c'erano venti minuti di grazia buoni per ogni misto,
+                 * perche' un EAV+Italo e' raro e perderlo per cinque minuti lo
+                 * toglieva del tutto. Ma usciva bianco, uguale a uno da prendere:
+                 * era l'unico posto dell'app dove una partenza passata si mostrava
+                 * senza dirlo, e per giunta su una soglia inventata invece che sul
+                 * ritardo vero, che ormai si conosce.
+                 */
                 val nuove = trovate
-                    .filter { !it.departure.isBefore(if (it.assembled) grazia else departure) }
-                    .map { it.toRow().copy(loadingStatus = false) }
+                    .mapNotNull { viaggio ->
+                        val stimata = if (viaggio.departure.isBefore(departure)) {
+                            viaggio.partenzaAncoraUtile(primo = null, dalle = departure)
+                                ?: return@mapNotNull null
+                        } else {
+                            null
+                        }
+                        viaggio.toRow().copy(loadingStatus = false, partenzaStimata = stimata)
+                    }
                     .filter { it.key !in gia }
                 s.copy(
                     loadingMisti = false,
@@ -495,13 +575,33 @@ class ResultsViewModel(
         }
     }
 
-    /** Vero se la tratta puo' comporre misti o Italo diretti: decide il velo. */
-    private suspend fun componeAltre(): Boolean {
+    /**
+     * Quale richiesta di paginazione e' l'ultima partita, per direzione: serve a
+     * far spegnere la rotella solo a chi l'ha accesa. Vedi `loadEarlier`.
+     */
+    private var gettoneEarlier = 0
+    private var gettoneLater = 0
+
+    /**
+     * Cosa c'e' da comporre su questa tratta: i misti (beta) e gli Italo diretti.
+     *
+     * Una domanda sola, con una risposta sola: il velo di caricamento e la
+     * ricerca vera la facevano ognuno per conto proprio, con le stesse quattro
+     * righe copiate. Se fossero divergute, il velo avrebbe girato per una
+     * ricerca che non parte — o non sarebbe comparso per una che parte.
+     */
+    private suspend fun cosaComporre(): Pair<Boolean, Boolean> {
         val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
         val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
         val vuoleItalo = DataSource.ITALO in sources &&
             italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
-        return vuoleMisti || vuoleItalo
+        return vuoleMisti to vuoleItalo
+    }
+
+    /** Vero se la tratta puo' comporre misti o Italo diretti: decide il velo. */
+    private suspend fun componeAltre(): Boolean {
+        val (misti, italoDiretto) = cosaComporre()
+        return misti || italoDiretto
     }
 
     /**
@@ -517,10 +617,7 @@ class ResultsViewModel(
         quando: LocalDateTime,
         direttoMigliore: java.time.Duration?,
     ): List<Journey> {
-        val betaAttivo = runCatching { settings.viaggiMisti.first() }.getOrDefault(false)
-        val vuoleMisti = FiltroFonti.componiMisti(soloDiretti = directOnly, betaAttivo = betaAttivo)
-        val vuoleItalo = DataSource.ITALO in sources &&
-            italo.covers(from.rfiCode) && italo.covers(to.rfiCode)
+        val (vuoleMisti, vuoleItalo) = cosaComporre()
         val italoDiretti = if (vuoleItalo) {
             runCatching { italo.itinerario(from.rfiCode!!, to.rfiCode!!, quando.toLocalDate()) }
                 .getOrDefault(emptyList())
@@ -555,6 +652,7 @@ class ResultsViewModel(
         val first = (current.journeys.firstOrNull { it.partenzaStimata == null } ?: current.journeys.firstOrNull())
             ?.journey?.departure ?: return
 
+        val mio = ++gettoneEarlier
         viewModelScope.launch {
             _state.update { it.copy(loadingEarlier = true) }
 
@@ -584,19 +682,23 @@ class ResultsViewModel(
             }
 
             if (found.isEmpty()) {
-                // Tratta di soli misti (Sorrento-EAV: il BFF non la conosce):
-                // searchAll e' muto, ma feeder e Freccia girano anche prima. Si
-                // pesca la finestra precedente dei misti — gia' "fermi", come nella
-                // prima ricerca, e senza arricchimento in tempo reale.
+                /*
+                 * Tratta che searchAll non conosce: Sorrento-Napoli e' tutta EAV,
+                 * Sorrento-Roma si fa solo coi misti. Le corse di prima le danno
+                 * le reti fuori-RFI (orario imbarcato o ricerca propria) e i
+                 * misti — gia' "fermi", come nella prima ricerca, e senza
+                 * arricchimento in tempo reale.
+                 */
                 val anchor = maxOf(first.minusHours(4), first.toLocalDate().atStartOfDay())
-                val existing = current.journeys.map { it.key }.toSet()
-                val rows = altreSoluzioni(anchor, null)
+                val locali = direttiFuoriRfi(sources, first, indietro = true)
+                val trovate = (locali + altreSoluzioni(anchor, null))
                     .filter { it.departure.isBefore(first) }
                     .map { it.toRow().copy(loadingStatus = false) }
-                    .filter { it.key !in existing }
                     .sortedBy { it.journey.departure }
-                    .takeLast(PAGE)
+                var rows = emptyList<JourneyRow>()
                 _state.update { s ->
+                    val gia = s.journeys.map { it.key }.toHashSet()
+                    rows = trovate.filter { it.key !in gia }.takeLast(PAGE)
                     s.copy(
                         loadingEarlier = false,
                         journeys = (rows + s.journeys).sortedBy { it.journey.departure },
@@ -606,17 +708,42 @@ class ResultsViewModel(
                 return@launch
             }
 
-            val existing = current.journeys.map { it.key }.toSet()
-            val rows = found.map { it.toRow() }
-                .filter { it.key !in existing }
-
+            /*
+             * Lo scarto dei doppioni si fa **sullo stato di adesso**, non sulla
+             * fotografia presa prima delle chiamate: nel frattempo la ricerca dei
+             * treni ancora prendibili puo' aver anteposto le stesse soluzioni, e
+             * due righe con la stessa chiave fanno cadere la lista
+             * (`IllegalArgumentException: Key … was already used`).
+             */
+            var rows = emptyList<JourneyRow>()
             _state.update { s ->
-                s.copy(loadingEarlier = false, journeys = (rows + s.journeys).sortedBy { it.journey.departure }, noMoreEarlier = rows.isEmpty())
+                val gia = s.journeys.map { it.key }.toHashSet()
+                rows = found.map { it.toRow() }.filter { it.key !in gia }
+                s.copy(
+                    loadingEarlier = false,
+                    journeys = (rows + s.journeys).sortedBy { it.journey.departure },
+                    noMoreEarlier = rows.isEmpty(),
+                )
             }
             enrich(rows)
             prezziDeiTreni(rows)
             prezziInPiuBiglietti(rows)
             riprovaDa?.let { riprovaPrezzi(it, WIDE_PAGE, rows) }
+        }.invokeOnCompletion {
+            /*
+             * Se qualcosa si rompe per strada — o la schermata se ne va — la
+             * rotella non resta accesa per sempre: «Corse precedenti» torna
+             * premibile, e riprovare tocca a chi guarda.
+             *
+             * Solo la **propria**, pero'. Questo blocco gira anche dopo la coda
+             * lenta (prezzi), quando l'utente puo' gia' aver premuto di nuovo:
+             * senza il gettone si spegneva la rotella della richiesta in corso,
+             * che a quel punto ripartiva da capo e prependeva le stesse righe due
+             * volte.
+             */
+            _state.update { s ->
+                if (s.loadingEarlier && gettoneEarlier == mio) s.copy(loadingEarlier = false) else s
+            }
         }
     }
 
@@ -635,6 +762,7 @@ class ResultsViewModel(
          */
         val da = last.minusMinutes(CAMMINATA_IN_TESTA_MAX)
 
+        val mio = ++gettoneLater
         viewModelScope.launch {
             _state.update { it.copy(loadingLater = true) }
 
@@ -647,35 +775,40 @@ class ResultsViewModel(
             // il pulsante resta, e riprovare tocca a chi guarda.
             val guasto = esito == null || esito.nazionaleNonRisponde
 
-            val existing = current.journeys.map { it.key }.toSet()
-
             if (batch.isEmpty()) {
-                // Tratta di soli misti: come per «corse precedenti», la finestra
-                // successiva la danno i misti — gia' "fermi", niente arricchimento.
-                val rows = altreSoluzioni(last.plusMinutes(1), null)
+                // Tratta che searchAll non conosce: come per «corse precedenti»,
+                // la finestra dopo la danno le reti fuori-RFI e i misti — gia'
+                // "fermi", niente arricchimento.
+                val locali = direttiFuoriRfi(sources, last.plusMinutes(1))
+                val trovate = (locali + altreSoluzioni(last.plusMinutes(1), null))
                     .filter { it.departure.isAfter(last) }
                     .map { it.toRow().copy(loadingStatus = false) }
-                    .filter { it.key !in existing }
                     .sortedBy { it.journey.departure }
-                    .take(PAGE)
+                var rows = emptyList<JourneyRow>()
                 _state.update { s ->
+                    val gia = s.journeys.map { it.key }.toHashSet()
+                    rows = trovate.filter { it.key !in gia }.take(PAGE)
                     s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty() && !guasto)
                 }
                 return@launch
             }
 
-            val rows = batch
-                .map { it.toRow() }
-                .filter { it.key !in existing }
-                .take(PAGE)
-
+            // Come sopra: i doppioni si scartano contro la lista di adesso.
+            var rows = emptyList<JourneyRow>()
             _state.update { s ->
+                val gia = s.journeys.map { it.key }.toHashSet()
+                rows = batch.map { it.toRow() }.filter { it.key !in gia }.take(PAGE)
                 s.copy(loadingLater = false, journeys = s.journeys + rows, noMoreLater = rows.isEmpty())
             }
             enrich(rows)
             prezziDeiTreni(rows)
             prezziInPiuBiglietti(rows)
             if (esito?.prezziAssenti == true) riprovaPrezzi(da, WIDE_PAGE, rows)
+        }.invokeOnCompletion {
+            // Come per «Corse precedenti», gettone compreso.
+            _state.update { s ->
+                if (s.loadingLater && gettoneLater == mio) s.copy(loadingLater = false) else s
+            }
         }
     }
 
@@ -774,6 +907,7 @@ class ResultsViewModel(
                 date = poi.departure.toLocalDate(),
                 boardingCode = poi.from.rfiCode,
                 boardingAt = poi.departure,
+                origine = poi.origineCorsa,
             )
         }.getOrNull() ?: return inOrario
         return j.coincidenza(primo, secondo)
@@ -787,7 +921,7 @@ class ResultsViewModel(
      * [JourneyRow.realtimeNow].
      */
     private fun ritardiContano(): Boolean {
-        val adesso = LocalDateTime.now()
+        val adesso = adessoInItalia()
         return !departure.isBefore(adesso.minus(FINESTRA_RITARDI)) &&
             !departure.isAfter(adesso.plus(ORIZZONTE_RITARDI))
     }
@@ -814,6 +948,7 @@ class ResultsViewModel(
      * vedi [JourneyRow.conTempoRealeDi].
      */
     private fun enrich(rows: List<JourneyRow>) {
+        binariDeiGiorniFuturi(rows)
         // Ogni riga vale per il proprio giorno: quelle di domani non si chiedono.
         val interrogabili = rows.filter { it.realtimeNow }
         if (interrogabili.isEmpty()) return
@@ -836,6 +971,68 @@ class ResultsViewModel(
             if (coincidenze.isEmpty()) return@launch
             _state.update { s ->
                 s.copy(journeys = s.journeys.map { r -> coincidenze[r.key]?.let { r.copy(coincidenza = it) } ?: r })
+            }
+        }
+    }
+
+    /**
+     * Il binario di tabella sulle righe dei giorni futuri, dai tabelloni di
+     * ViaggiaTreno **di quel giorno**: la stazione di salita del primo treno,
+     * all'ora della salita.
+     *
+     * Quelle righe il tempo reale non lo hanno, e fino al 19/09/2026 restavano
+     * senza binario. I tabelloni pero' rispondono da +1 a +8 giorni col binario
+     * programmato del giorno, che cambia da un giorno all'altro (vedi
+     * `data/FONTI.md`). Un tabellone copre circa un'ora e mezza dall'ora chiesta:
+     * le righe che ci cadono dentro lo condividono, e l'elenco di una tratta
+     * costa una chiamata ogni poche righe.
+     */
+    private fun binariDeiGiorniFuturi(rows: List<JourneyRow>) {
+        val oggi = oggiInItalia()
+        val daLeggere = rows.mapNotNull { r ->
+            if (r.scheduledPlatform != null) return@mapNotNull null
+            val leg = r.journey.legs.firstOrNull { it.isTrain } ?: return@mapNotNull null
+            val giorno = leg.departure.toLocalDate()
+            if (!giorno.isAfter(oggi) || giorno.isAfter(oggi.plusDays(TabelloniFuturi.GIORNI))) return@mapNotNull null
+            val codice = leg.from.rfiCode?.takeIf { it.startsWith("S") } ?: return@mapNotNull null
+            Triple(r.key, leg, codice)
+        }.sortedBy { it.second.departure }
+        if (daLeggere.isEmpty()) return
+
+        viewModelScope.launch {
+            /*
+             * Un tabellone copre un'ora e mezza: le righe della stessa stazione che
+             * cadono nella stessa fascia si accontentano di una lettura sola. Le
+             * letture che restano vanno **insieme**, poche alla volta: in fila
+             * erano una decina di chiamate una dopo l'altra, e i binari comparivano
+             * sull'elenco col contagocce.
+             */
+            val gruppi = LinkedHashMap<Pair<String, Long>, MutableList<Pair<String, Leg>>>()
+            for ((chiave, leg, codice) in daLeggere) {
+                val fascia = leg.departure.atZone(ROME).toEpochSecond() / (FASCIA_TABELLONE_MIN * 60)
+                gruppi.getOrPut(codice to fascia) { mutableListOf() } += chiave to leg
+            }
+
+            val porta = Semaphore(TabelloniFuturi.INSIEME)
+            val binari = coroutineScope {
+                gruppi.map { (dove, righe) ->
+                    async {
+                        val codice = dove.first
+                        val quando = righe.first().second.departure
+                        val tabellone = porta.withPermit {
+                            runCatching { trains.departures(codice, quando.atZone(ROME)) }
+                                .getOrDefault(emptyList())
+                        }
+                        righe.mapNotNull { (chiave, leg) ->
+                            tabellone.firstOrNull { it.trainRef.number == leg.trainNumber }
+                                ?.scheduledPlatform?.let { chiave to it }
+                        }
+                    }
+                }.awaitAll().flatten().toMap()
+            }
+            if (binari.isEmpty()) return@launch
+            _state.update { s ->
+                s.copy(journeys = s.journeys.map { r -> binari[r.key]?.let { b -> r.copy(scheduledPlatform = b) } ?: r })
             }
         }
     }
@@ -864,6 +1061,7 @@ class ResultsViewModel(
                 date = giorno,
                 boardingCode = leg.from.rfiCode,
                 boardingAt = leg.departure,
+                origine = leg.origineCorsa,
             )
         }.getOrNull()?.let { conBinarioDiSalita(it, leg, giorno) }
         val salita = status?.fermataDiSalita(leg)
@@ -948,6 +1146,19 @@ class ResultsViewModel(
         /** Si chiede piu' del necessario perche' molte cadono fuori finestra. */
         const val WIDE_PAGE = 15
 
+        /** Quanto copre, dall'ora chiesta, un tabellone di ViaggiaTreno (2 ore dal quarto d'ora prima). */
+        const val FINESTRA_TABELLONE_MIN = 90L
+
+        /**
+         * L'ampiezza delle fasce in cui si raggruppano le righe che condividono
+         * un tabellone futuro. Piu' stretta di quanto il tabellone copra
+         * ([FINESTRA_TABELLONE_MIN]), perche' la fascia e' una griglia fissa e la
+         * lettura si fa all'ora della **prima** riga del gruppo: con fasce larghe
+         * quanto la copertura, l'ultima riga di una fascia cadeva sul bordo e il
+         * suo binario non usciva.
+         */
+        const val FASCIA_TABELLONE_MIN = 60L
+
         /**
          * Quanto puo' durare una camminata in testa, che le fonti contano nella
          * partenza e noi no: vedi `loadLater`. Quelle fra gemelle sono di 5-8.
@@ -962,12 +1173,10 @@ class ResultsViewModel(
         val ATTESE_PREZZI = listOf(1_000L, 4_000L, 10_000L)
 
         /**
-         * Grazia sui viaggi misti: si tengono anche se il feeder e' partito da
-         * poco. Le coincidenze Italo in tempo reale sono rare, e perderne una per
-         * una manciata di minuti la farebbe sparire del tutto. Non si applica ai
-         * diretti nazionali, di cui ce n'e' in abbondanza.
+         * Quante ore indietro chiedere a Ferrotramviaria per «corse precedenti»:
+         * la sua e' una ricerca in avanti, e va ancorata li' vicino.
          */
-        val GRAZIA_MISTI: java.time.Duration = java.time.Duration.ofMinutes(20)
+        const val ORE_INDIETRO_FNB = 3L
 
         /**
          * Quanto indietro guardare per i treni in ritardo che si prendono

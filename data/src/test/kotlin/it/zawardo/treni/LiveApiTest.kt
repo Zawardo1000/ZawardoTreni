@@ -365,6 +365,8 @@ class LiveApiTest {
         println("  righe: ${righe.size}")
         righe.take(5).forEach { println("     ${it.scheduledTime}  ${it.label} -> ${it.direction}") }
 
+        // Di notte l'orario di stazione e' vuoto per tutti: vedi `notteFonda`.
+        org.junit.Assume.assumeTrue("a quest'ora la rete e' ferma", !notteFonda() || righe.isNotEmpty())
         assertTrue(
             "nessuna riga: o il markup di Trenord e' cambiato, o l'endpoint non risponde",
             righe.isNotEmpty(),
@@ -373,6 +375,12 @@ class LiveApiTest {
             "ogni riga deve avere numero e orario, o non e' confrontabile col tabellone",
             righe.all { it.trainRef.number.isNotBlank() && !it.scheduledTime.isNullOrBlank() },
         )
+
+        // Negli arrivi Trenord scrive la destinazione: come provenienza sarebbe
+        // falsa, e la riga non ne porta nessuna (vedi `data/fonti/TRENORD.md`).
+        val arrivi = trenord.timetable("S01701", arrivals = true)
+        println("  arrivi: ${arrivi.size}")
+        assertTrue("negli arrivi la direzione di Trenord e' la destinazione", arrivi.all { it.direction == null })
 
         // Fuori dall'area Trenord la risposta e' vuota: la chiamata non fa danno.
         val fuoriArea = trenord.timetable("S08409")

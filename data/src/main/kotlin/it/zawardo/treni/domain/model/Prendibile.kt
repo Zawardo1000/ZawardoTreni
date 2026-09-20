@@ -3,7 +3,6 @@ package it.zawardo.treni.domain.model
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
-import kotlin.math.abs
 
 /**
  * La fermata di una corsa in una stazione; se la corsa ci passa piu' volte,
@@ -30,10 +29,8 @@ fun TrainStatus.fermataA(codice: String?, ora: LocalTime?): Stop? {
 
 /** Quanto la fermata dista da un'ora del giorno, d'arrivo o di partenza che sia. */
 private fun Stop.secondiDa(ora: LocalTime): Long =
-    listOfNotNull(scheduledArrival, scheduledDeparture).minOfOrNull { t ->
-        val secondi = abs(Duration.between(t.toLocalTime(), ora).seconds)
-        minOf(secondi, 86_400 - secondi)
-    } ?: Long.MAX_VALUE
+    listOfNotNull(scheduledArrival, scheduledDeparture)
+        .minOfOrNull { secondiCircolari(it.toLocalTime(), ora) } ?: Long.MAX_VALUE
 
 /**
  * Quando la corsa partira' davvero da [codice], se da li' non e' ancora

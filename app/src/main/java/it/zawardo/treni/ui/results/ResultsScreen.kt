@@ -1,5 +1,7 @@
 package it.zawardo.treni.ui.results
 
+import it.zawardo.treni.ui.common.GIORNO_BREVE
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,7 +20,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Info
@@ -30,8 +31,6 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.graphics.compositeOver
 import it.zawardo.treni.domain.model.Coincidenza
 import it.zawardo.treni.domain.model.JourneySource
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -113,8 +112,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import androidx.compose.foundation.layout.widthIn
 
-private val TIME = DateTimeFormatter.ofPattern("HH:mm")
-private val DATE = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALIAN)
 private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIAN)
 
 /**
@@ -189,7 +186,7 @@ fun ResultsScreen(
         topBar = {
             TreniTopBar(
                 title = "${from.name} → ${to.name}",
-                subtitle = departure.format(DATE) + ", dalle " + departure.format(TIME),
+                subtitle = departure.format(GIORNO_BREVE) + ", dalle " + departure.format(ORA_DEL_GIORNO),
                 onBack = onBack,
                 actions = {
                     IconButton(onClick = vm::reload) {
@@ -270,6 +267,26 @@ fun ResultsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(state.alerts) { _, alert -> AlertCard(alert) }
+
+                    if (state.error != null) {
+                        item {
+                            /*
+                             * L'errore con la lista gia' piena: prima si mostrava
+                             * solo a lista vuota, cioe' proprio quando non serviva
+                             * dirlo. Toccando ↻ senza rete non succedeva niente —
+                             * nessuna rotella, nessun messaggio, le stesse righe di
+                             * prima — e sembrava che l'aggiornamento fosse andato.
+                             */
+                            AlertCard(
+                                ServiceAlert(
+                                    title = "Aggiornamento non riuscito",
+                                    message = state.error!! + " Quello che vedi e' l'ultimo " +
+                                        "risultato buono: riprova con ↻.",
+                                    severe = true,
+                                ),
+                            )
+                        }
+                    }
 
                     if (state.nazionaleNonRisponde) {
                         item {
@@ -578,7 +595,7 @@ private fun JourneyCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f)) {
                     Column {
-                        Text(j.departure.format(TIME), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
+                        Text(j.departure.format(ORA_DEL_GIORNO), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
                         OrarioReale(partenzaReale, scarto)
                     }
                     Column(
@@ -596,7 +613,7 @@ private fun JourneyCard(
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(j.arrival.format(TIME), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
+                        Text(j.arrival.format(ORA_DEL_GIORNO), style = Cifre.grandi, color = inchiostro, textDecoration = barrato)
                         OrarioReale(arrivoReale, scarto)
                     }
                 }
@@ -683,6 +700,26 @@ private fun JourneyCard(
                 },
             )
 
+            /*
+             * Quel che Le Frecce dice della soluzione e la scheda non direbbe: un
+             * treno che su quella tratta non porta viaggiatori, quale treno e'
+             * esaurito, i convogli non comunicanti. Vedi `avvisiDelSito`.
+             */
+            j.avvisi.forEach { avviso ->
+                Row(
+                    Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        modifier = Modifier.padding(top = 1.dp).size(15.dp),
+                        tint = scheme.onSurfaceVariant,
+                    )
+                    Text(avviso, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                }
+            }
+
             if (j.assembled) {
                 // Italo si nomina solo se una gamba e' davvero Italo: su EAV piu'
                 // Freccia il prezzo c'e' (parziale, gia' etichettato), e tirare
@@ -707,7 +744,7 @@ private fun JourneyCard(
 @Composable
 private fun OrarioReale(quando: LocalDateTime?, scarto: Int?) {
     Text(
-        quando?.format(TIME) ?: "",
+        quando?.format(ORA_DEL_GIORNO) ?: "",
         style = Cifre.riga.copy(fontSize = 15.sp, lineHeight = 18.sp),
         fontWeight = FontWeight.SemiBold,
         color = scartoColor(scarto ?: 0),
@@ -1076,6 +1113,19 @@ private fun StatoSoluzione(row: JourneyRow) {
             color = scheme.onSurfaceVariant,
             textAlign = TextAlign.End,
         )
+
+        /*
+         * Corsa di oggi che nessuna fonte ha saputo dire: capita quando
+         * ViaggiaTreno non conosce quel treno e non c'e' altro a cui chiederlo.
+         * Anche qui il vuoto si leggerebbe come «in orario», che e' la cosa
+         * sbagliata da far credere: meglio dire che il dato non c'e'.
+         */
+        else -> Text(
+            "stato non disponibile",
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+        )
     }
 }
 
@@ -1208,9 +1258,11 @@ private fun apri(
             boardingRfi = leg.from.rfiCode,
             boardingName = leg.from.name,
             alightingRfi = leg.to.rfiCode,
-            // Il BFF non da' la corsa, solo il numero: dove e quando si sale e'
-            // cio' che distingue due treni omonimi.
+            // Dove e quando si sale distinguono due treni omonimi; l'origine,
+            // quando la ricerca la dice, trova la corsa senza cercarla.
             boardingEpochSec = leg.departure.toEpochSecond(ZoneOffset.UTC),
+            origineCorsa = leg.origineCorsa,
+            alightingName = leg.to.name,
         ),
     )
 }

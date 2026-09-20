@@ -17,6 +17,12 @@ data class NotiziaCorsa(
     /** Il giorno della corsa; null se la pagina non lo dice da nessuna parte. */
     val giorno: LocalDate?,
     val testo: String,
+    /**
+     * Il treno e' solo nell'elenco `trainTags` di un evento, senza collegamento
+     * ne' ora: basta il numero, ma solo per le categorie di cui le notizie
+     * parlano (vedi [riguarda]).
+     */
+    val soloNumero: Boolean = false,
 ) {
     /**
      * Se la notizia parla di [corsa], del giorno [data].
@@ -27,6 +33,12 @@ data class NotiziaCorsa(
      * tutte e due stanno fra le fermate — oppure l'ora di partenza scritta nel
      * nome, uguale a quella di tabella della prima fermata. Una notizia senza
      * data vale solo per le corse di [oggi]: la pagina parla di adesso.
+     *
+     * Chi e' solo in `trainTags` ([soloNumero]) non ha nessuna delle due prove, e
+     * il numero da solo basta per Frecce, Intercity, EuroCity ed EuroNight: sono
+     * le corse di cui le notizie parlano, e fra loro un numero in un giorno non si
+     * ripete. Non per un regionale, che puo' avere lo stesso numero di un
+     * EuroCity: il 178 era tutti e due.
      */
     fun riguarda(corsa: TrainStatus, data: LocalDate, oggi: LocalDate): Boolean {
         if (numero != corsa.number) return false
@@ -34,7 +46,18 @@ data class NotiziaCorsa(
         val origineFraLeFermate = origine != null && corsa.stops.any { stessaStazione(it.stationCode, origine) }
         val stessaPartenza = partenza != null &&
             corsa.stops.firstOrNull()?.scheduledDeparture?.toLocalTime() == partenza
-        return origineFraLeFermate || stessaPartenza
+        val bastaIlNumero = soloNumero && corsa.categoriaDelleNotizie()
+        return origineFraLeFermate || stessaPartenza || bastaIlNumero
+    }
+
+    private fun TrainStatus.categoriaDelleNotizie(): Boolean {
+        val sigla = category?.trim()?.takeIf { it.isNotEmpty() }
+            ?: label.trim().substringBefore(' ')
+        return sigla.uppercase() in CATEGORIE_DELLE_NOTIZIE
+    }
+
+    private companion object {
+        val CATEGORIE_DELLE_NOTIZIE = setOf("FR", "FA", "FB", "IC", "ICN", "EC", "EN")
     }
 }
 
@@ -51,10 +74,12 @@ data class NotiziaCorsa(
  * con l'elenco dei treni coinvolti. Dei regionali danno solo avvisi di linea,
  * senza numeri: quelli qui non si leggono.
  *
- * Non c'e' niente di meglio da leggere. La stessa API ha `news/0/it` in JSON,
- * ferma a una notizia del dicembre 2019; le RSS di RFI sono XML ma parlano di
- * linee, senza un numero di treno. Quindi si legge l'HTML, che e' **scritto a
- * mano da una redazione**, e ogni passo ha un ripiego invece di un'unica
+ * Le stesse notizie arrivano in due forme: `news/infomobility` in JSON, la
+ * strada principale ([daJson]), e la pagina `infomobilitaRSS` in HTML, di
+ * riserva ([parse]). Il JSON risparmia la dipendenza dalla pagina — le classi
+ * delle sezioni, il titolo, la data in `<h4>` — ma non dall'HTML del corpo: la
+ * descrizione e' lo stesso testo **scritto a mano da una redazione**, e i treni
+ * si leggono li' come nella pagina. Ogni passo ha un ripiego invece di un'unica
  * strada:
  *
  * - le notizie si riconoscono dal `<li>` con la loro classe, anche fra altre
@@ -129,6 +154,14 @@ internal object InfomobilitaParser {
      */
     private const val SEZIONE_GENERICA = "INFOTRENI"
 
+    /**
+     * I lavori programmati, una voce per regione: il JSON li ha, la pagina
+     * `infomobilitaRSS/false` no. Portano la data di pubblicazione ma parlano di
+     * altri giorni, e un treno che vi compare senza collegamento verrebbe preso
+     * per la corsa di oggi. Restano fuori, come prima.
+     */
+    private const val SEZIONE_LAVORI = "INFOLAVORI"
+
     fun parse(html: String?): List<NotiziaCorsa> {
         if (html.isNullOrBlank()) return emptyList()
         val aperture = SEZIONE.findAll(html).map { it.range.first }.toList()
@@ -140,6 +173,35 @@ internal object InfomobilitaParser {
         return sezioni.flatMap(::sezione).distinct()
     }
 
+    /**
+     * Le notizie di `news/infomobility`, in JSON: titolo e giorno dai campi, il
+     * corpo letto come quello dell'RSS. E' la strada principale: la pagina RSS
+     * dipende dalle classi del sito (`editModeCollapsibleElement`, `info-text`),
+     * il JSON no. Del testo resta HTML scritto dalla redazione, e se ne leggono i
+     * collegamenti per corsa, che hanno una forma fissa.
+     */
+    fun daJson(voci: List<NotiziaInfomobilitaDto>): List<NotiziaCorsa> = voci.flatMap { voce ->
+        if (voce.title?.trim()?.startsWith(SEZIONE_LAVORI, ignoreCase = true) == true) return@flatMap emptyList()
+        val evento = voce.title?.let(::pulito)
+            ?.takeIf { it.isNotBlank() && !it.startsWith(SEZIONE_GENERICA, ignoreCase = true) }
+        val giorno = voce.pubDate?.let { Instant.ofEpochMilli(it).atZone(ROMA).toLocalDate() }
+        val corpo = voce.description?.let(::sfuggito).orEmpty()
+        val dalCorpo = notizie(corpo, evento, giorno)
+        // Un evento a volte i treni non li scrive nel testo, e li elenca solo nei
+        // `trainTags`: il 19/09/2026 "Linea AV Roma - Firenze" ne aveva otto e un
+        // corpo senza un numero. Il perche' e' il titolo.
+        val soloElencati = if (evento == null) {
+            emptyList()
+        } else {
+            val nelCorpo = dalCorpo.map { it.numero }.toSet()
+            voce.trainTags.map { it.trim() }
+                .filter { it.isNotEmpty() && it.all(Char::isDigit) && it !in nelCorpo }
+                .distinct()
+                .map { NotiziaCorsa(it, null, null, giorno, evento, soloNumero = true) }
+        }
+        dalCorpo + soloElencati
+    }.distinct()
+
     private fun sezione(html: String): List<NotiziaCorsa> {
         val titolo = TITOLO.find(html)
         val evento = titolo?.groupValues?.get(1)?.let(::pulito)
@@ -150,10 +212,27 @@ internal object InfomobilitaParser {
         val corpo = CORPO.find(html)?.let { html.substring(it.range.last + 1) }
             ?: titolo?.let { html.substring(it.range.last + 1) }
             ?: html
-
-        val conSegnaposto = COLLEGAMENTO.replace(corpo) { segnaposto(it) ?: it.value }
-        return FINE_BLOCCO.split(conSegnaposto).flatMap { blocco(it, evento, giornoSezione) }
+        return notizie(corpo, evento, giornoSezione)
     }
+
+    /** Il corpo di una notizia, gia' HTML: i treni che ne sono il soggetto, col loro testo. */
+    private fun notizie(corpo: String, evento: String?, giorno: LocalDate?): List<NotiziaCorsa> {
+        val conSegnaposto = COLLEGAMENTO.replace(corpo) { segnaposto(it) ?: it.value }
+        return FINE_BLOCCO.split(conSegnaposto).flatMap { blocco(it, evento, giorno) }
+    }
+
+    /**
+     * Toglie un livello di sfuggitura: il JSON scrive `&lt;p&gt;` per `<p>`. Le
+     * entita' del testo (`&egrave;`, `&amp;amp;` negli indirizzi) restano, e le
+     * sistema la lettura come nell'RSS. `&amp;` per ultimo, o `&amp;lt;` — un
+     * `&lt;` scritto nel testo — diventerebbe un tag.
+     */
+    private fun sfuggito(testo: String): String = testo
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
 
     /** Il segnaposto di un collegamento a un treno; null se il collegamento e' altro. */
     private fun segnaposto(link: MatchResult): String? {
@@ -258,13 +337,41 @@ internal object InfomobilitaParser {
             .filter { it.isNotEmpty() }
             .joinToString("\n")
 
-    private fun entita(testo: String): String = testo
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace(Regex("""&#(\d+);""")) { m -> m.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value }
+    /**
+     * Le entita' col nome che la redazione usa davvero.
+     *
+     * Le lettere accentate contano: la pagina RSS le scrive gia' come lettere,
+     * il JSON no. Nel campione del 19/09/2026 la stessa frase era «il treno oggi
+     * e' cancellato» nella pagina e `&igrave;`, `&agrave;`, `&egrave;` nel JSON
+     * — 34 occorrenze — e senza scioglierle a schermo si leggeva
+     * «il treno oggi &egrave; cancellato».
+     */
+    private val ENTITA = mapOf(
+        "nbsp" to " ", "amp" to "&", "quot" to "\"", "apos" to "'", "lt" to "<", "gt" to ">",
+        "agrave" to "à", "egrave" to "è", "eacute" to "é", "igrave" to "ì", "ograve" to "ò",
+        "ugrave" to "ù", "aacute" to "á", "iacute" to "í", "oacute" to "ó", "uacute" to "ú",
+        "Agrave" to "À", "Egrave" to "È", "Eacute" to "É", "Igrave" to "Ì", "Ograve" to "Ò",
+        "Ugrave" to "Ù", "ccedil" to "ç", "ntilde" to "ñ", "ecirc" to "ê", "ocirc" to "ô",
+        "auml" to "ä", "ouml" to "ö", "uuml" to "ü", "szlig" to "ß",
+        "rsquo" to "’", "lsquo" to "‘", "ldquo" to "“", "rdquo" to "”",
+        "ndash" to "–", "mdash" to "—", "hellip" to "…", "bull" to "•", "middot" to "·",
+        "laquo" to "«", "raquo" to "»", "deg" to "°", "euro" to "€", "times" to "×",
+    )
+
+    private val ENTITA_SCRITTA = Regex("""&(#\d+|#x[0-9A-Fa-f]+|[A-Za-z]+);""")
+
+    /**
+     * Scioglie le entita': quelle col nome che conosciamo ([ENTITA]) e quelle
+     * numeriche. Quel che non si riconosce resta com'e', com'e' scritto: meglio
+     * un `&frac12;` a schermo che una frase tagliata.
+     */
+    private fun entita(testo: String): String = ENTITA_SCRITTA.replace(testo) { m ->
+        val nome = m.groupValues[1]
+        when {
+            nome.startsWith("#x") || nome.startsWith("#X") ->
+                nome.drop(2).toIntOrNull(16)?.let { String(Character.toChars(it)) } ?: m.value
+            nome.startsWith("#") -> nome.drop(1).toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value
+            else -> ENTITA[nome] ?: m.value
+        }
+    }
 }

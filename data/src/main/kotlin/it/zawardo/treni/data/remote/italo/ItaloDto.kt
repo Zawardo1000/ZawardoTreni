@@ -40,6 +40,17 @@ data class ItaloBoardTrainDto(
     @SerialName("Binario") val platform: String? = null,
     /** Avvisi di servizio, es. "CARROZZA 1 IN TESTA AL TRENO". */
     @SerialName("Informazioni") val notice: String? = null,
+    /**
+     * Il percorso della corsa, a orario di tabella e per nome:
+     * «Roma Tiburtina (18.48) - Firenze Santa Maria Novella (20.17) - …».
+     *
+     * Fra le **partenze** sono le fermate successive col loro orario d'arrivo,
+     * fra gli **arrivi** quelle precedenti col loro orario di partenza. C'e'
+     * anche sulle corse su cui `RicercaTrenoService` tace, che sono la maggior
+     * parte: e' l'unico modo di sapere dove va un Italo che il loro servizio non
+     * sta seguendo. Vedi `fermateDaInfoRoute`.
+     */
+    @SerialName("InfoRoute") val infoRoute: String? = null,
 )
 
 /**

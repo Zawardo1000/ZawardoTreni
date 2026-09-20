@@ -89,3 +89,27 @@ private fun pulita(parola: String): String = parola.lowercase().filter { it.isLe
  */
 fun nomeDelCambio(scesa: Station, salita: Station): String =
     salita.comeDistinguerlaDa(scesa)?.let { "${scesa.name} › $it" } ?: scesa.name
+
+/**
+ * I prefissi delle reti che hanno **stazioni proprie**, fuori dal registro RFI:
+ * EAV, Ferrotramviaria, ARST.
+ *
+ * Non ci sono le svizzere: Chiasso e Bellinzona un codice RFI ce l'hanno, e per
+ * loro ViaggiaTreno ha qualcosa da dire.
+ */
+private val RETI_CON_STAZIONI_PROPRIE = listOf("EAV", "FNB", "ARST")
+
+/**
+ * Vero se il codice indirizza una rete con stazioni proprie.
+ *
+ * A questa domanda il codice rispondeva in tre modi diversi — un confronto di
+ * prefissi nel repository, `covers()` nel caricatore della corsa, `covers()` piu'
+ * il caso svizzero nel tabellone — e le tre risposte potevano divergere. Divergere
+ * qui vuol dire chiedere a ViaggiaTreno una corsa che non e' sua e aprirne
+ * un'altra con lo stesso numero: il guasto dell'EAV 2093, che mostrava il
+ * regionale di Voghera.
+ */
+fun reteConStazioniProprie(codice: String?): Boolean {
+    val pulito = codice?.trim()?.uppercase() ?: return false
+    return RETI_CON_STAZIONI_PROPRIE.any { pulito.startsWith(it) }
+}

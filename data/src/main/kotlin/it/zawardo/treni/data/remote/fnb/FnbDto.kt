@@ -76,3 +76,86 @@ data class FnbCorsaDto(
     /** Affollamento, quando il portale lo pubblica. Non usato. */
     val occupazione: String? = null,
 )
+
+/**
+ * Una soluzione di `cerca/soluzioni/`: la ricerca A→B, che il tabellone non sa
+ * fare e che per questa rete e' l'unico orario esistente — anche per i giorni
+ * futuri, fino alla fine dell'orario.
+ */
+@Serializable
+data class FnbSoluzioneDto(
+    /**
+     * L'id con cui chiederne le fermate. E' negativo ed **effimero**: cambia a
+     * ogni ricerca, e vale solo nella sessione che l'ha prodotto.
+     */
+    val idSoluzione: Long? = null,
+    /** `yyyyMMddHHmmss`. */
+    val timeP: String? = null,
+    val timeA: String? = null,
+    val nomeP: String? = null,
+    val nomeA: String? = null,
+    /** I mezzi, con la sigla: `["ET 91008", "AS 8"]`. */
+    val elencoCorse: List<String> = emptyList(),
+    val cambi: Int = 0,
+    val conBus: Boolean = false,
+    /** Vero quando un tratto e' fatto in bus al posto del treno. */
+    val conServizioSostitutivo: Boolean = false,
+    /** Centesimi di euro: 620 sono 6,20. */
+    val prezzo: Int? = null,
+    val durataSecondi: Int? = null,
+)
+
+/**
+ * Il dettaglio di una soluzione: `soluzioni/id/{id}`.
+ *
+ * **Vuole la sessione** della ricerca che l'ha prodotta: senza il cookie
+ * risponde `{}` con 200, che e' indistinguibile da una soluzione senza tratte.
+ * Vedi `FnbApi.apriSessione`.
+ */
+@Serializable
+data class FnbDettaglioDto(
+    val idSoluzione: Long? = null,
+    val tratte: List<FnbTrattaDto> = emptyList(),
+    /** Centesimi, come nella ricerca. */
+    val prezzo: Int? = null,
+)
+
+/** Un mezzo dentro una soluzione, con le sue fermate. */
+@Serializable
+data class FnbTrattaDto(
+    /** Numero con la sigla: `ET 91008`, `AS 8`. */
+    val numero: String? = null,
+    /** `T` treno, `B` bus, `S` autoservizio sostitutivo. */
+    val servizio: String? = null,
+    val gestore: String? = null,
+    val timePartenza: String? = null,
+    val timeArrivo: String? = null,
+    val sitoPartenza: FnbSitoRifDto? = null,
+    val sitoArrivo: FnbSitoRifDto? = null,
+    val fermate: List<FnbFermataDto> = emptyList(),
+)
+
+/** Una fermata dentro una tratta. */
+@Serializable
+data class FnbFermataDto(
+    val ordine: Int? = null,
+    val sito: FnbSitoRifDto? = null,
+    /** Assente alla prima fermata. */
+    val timeArrivo: String? = null,
+    /** Assente all'ultima. */
+    val timePartenza: String? = null,
+    /** `Y` quando l'orario e' indicativo. */
+    val orarioIndicativo: String? = null,
+    /** `Y` quando la fermata e' a richiesta. */
+    val facoltativa: String? = null,
+)
+
+/** La fermata come la scrive il dettaglio: col codice nativo e le coordinate vere. */
+@Serializable
+data class FnbSitoRifDto(
+    val codSito: String? = null,
+    val nome: String? = null,
+    val lat: Double? = null,
+    val lon: Double? = null,
+)
+

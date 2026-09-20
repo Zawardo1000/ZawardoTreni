@@ -1,5 +1,6 @@
 package it.zawardo.treni.service
 
+import it.zawardo.treni.ui.common.ORA_DEL_GIORNO
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,6 +17,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import it.zawardo.treni.R
 import it.zawardo.treni.ServiceLocator
+import it.zawardo.treni.domain.model.reteConStazioniProprie
+import it.zawardo.treni.domain.model.oggiInItalia
+import it.zawardo.treni.domain.model.adessoInItalia
 import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Stop
 import it.zawardo.treni.domain.model.StopStatus
@@ -25,6 +29,8 @@ import it.zawardo.treni.domain.model.TrainStatus
 import it.zawardo.treni.domain.model.variazione
 import it.zawardo.treni.domain.model.indiceFermata
 import it.zawardo.treni.domain.model.stessoBinario
+import it.zawardo.treni.ui.common.stateLabel
+import it.zawardo.treni.ui.train.CaricatoreCorsa
 import it.zawardo.treni.ui.MainActivity
 import it.zawardo.treni.ui.TrattaViaggio
 import it.zawardo.treni.ui.comeJson
@@ -40,12 +46,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-
-private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
  * Segui treno: sorveglia la partenza dalla **tua** stazione e avvisa quando lo
@@ -146,6 +150,40 @@ class TrainFollowService : Service() {
         var finita = false
 
         val numero: String get() = tratta.numero.orEmpty()
+
+        /**
+         * Vero se si sale da una rete con stazioni proprie — EAV, ARST,
+         * Ferrotramviaria — che ViaggiaTreno non ha: vedi come si legge in
+         * [comeNelDettaglio]. Il codice di salita basta a riconoscerla, perche'
+         * quelle stazioni hanno un codice sintetico tutto loro.
+         */
+        val reteSua: Boolean get() = reteConStazioniProprie(tratta.salitaRfi)
+
+        /**
+         * Vero se di questa corsa **nessuno rileva i passaggi**: le reti con
+         * stazioni proprie, e Italo quando la corsa viene dal tabellone invece
+         * che dal suo dettaglio. Vedi `haFinito`: li' la fine la da' l'orologio.
+         */
+        val senzaRilevamenti: Boolean
+            get() = (reteSua || status?.category.equals("Italo", ignoreCase = true)) &&
+                status?.stops?.none { it.detected } != false
+
+        /**
+         * La corsa come la apre il dettaglio: la cascata intera, che comprende
+         * le reti con stazioni proprie (orario del giorno, e il ritardo dove la
+         * rete lo pubblica, come il pianificatore EAV) e Italo, che ViaggiaTreno
+         * non ha.
+         */
+        suspend fun comeNelDettaglio(giorno: LocalDate): TrainStatus? = CaricatoreCorsa(
+            trainNumber = numero,
+            date = giorno,
+            boardingCode = tratta.salitaRfi,
+            boardingAt = tratta.partenzaNota,
+            boardingName = tratta.salitaNome,
+            alightingCode = tratta.discesaRfi,
+            alightingName = tratta.discesaNome,
+            origineCorsa = tratta.origineRfi,
+        ).carica()
 
         /**
          * Il nome della stazione come lo scriviamo in notifica: quello del
@@ -269,7 +307,7 @@ class TrainFollowService : Service() {
 
                 for (corsa in daFare) {
                     val giorno = corsa.tratta.giorno
-                    if (!corsa.risolta) {
+                    if (!corsa.risolta && !corsa.reteSua) {
                         /*
                          * La corsa si risolve UNA volta sola. Risolverla a ogni
                          * giro costava una chiamata in piu' al minuto, ma
@@ -277,21 +315,62 @@ class TrainFollowService : Service() {
                          * piu' corse, e la scelta poteva cambiare spostando la
                          * notifica su un altro treno senza preavviso.
                          */
-                        corsa.ref = runCatching { trains.resolveFor(corsa.numero, giorno) }.getOrNull()
+                        corsa.ref = runCatching {
+                            trains.resolveFor(
+                                corsa.numero, giorno, corsa.tratta.salitaRfi, corsa.tratta.partenzaNota,
+                                origine = corsa.tratta.origineRfi,
+                            )
+                        }.getOrNull()
                         corsa.risolta = true
                     }
 
+                    // Vero solo se la corsa l'ha data ViaggiaTreno: e' l'unico caso
+                    // in cui ha senso chiedere a Trenord di completarne i binari.
+                    var daViaggiaTreno = false
                     val status = runCatching {
-                        val letto = corsa.ref?.let { trains.status(it) }
-                            ?: trains.statusByNumber(
-                                corsa.numero,
-                                giorno,
-                                corsa.tratta.salitaRfi,
-                                corsa.tratta.partenzaNota,
-                            )
-                        // Il binario e' la meta' del motivo per cui si segue un
-                        // treno, e ViaggiaTreno da solo spesso non ce l'ha.
-                        letto?.let { if (trenordAcceso) trains.completaBinari(it, giorno) else it }
+                        val letto = if (corsa.reteSua) {
+                            /*
+                             * Le reti con stazioni proprie — EAV, ARST,
+                             * Ferrotramviaria — ViaggiaTreno non le ha affatto:
+                             * chiedergliele e' una chiamata buttata, e la notifica
+                             * restava per sempre su «Ricerca dello stato in corso…»
+                             * finche' il viaggio non smetteva di farsi seguire da
+                             * solo (visto il 20/09/2026 seguendo Sorrento-Roma, con
+                             * la Circumvesuviana in testa). Quelle corse le sa la
+                             * loro rete, e la cascata che le interroga e' la stessa
+                             * del dettaglio.
+                             */
+                            corsa.comeNelDettaglio(giorno)
+                        } else {
+                            val nazionale = corsa.ref?.let { trains.status(it) }
+                                ?: trains.statusByNumber(
+                                    corsa.numero,
+                                    giorno,
+                                    corsa.tratta.salitaRfi,
+                                    corsa.tratta.partenzaNota,
+                                    origine = corsa.tratta.origineRfi,
+                                )
+                            daViaggiaTreno = nazionale != null
+                            /*
+                             * Dove ViaggiaTreno tace resta la cascata intera, la
+                             * stessa del dettaglio: e' il caso di **Italo**, che
+                             * ViaggiaTreno non pubblica affatto e che dentro un
+                             * viaggio misto e' proprio la gamba lunga. Senza, la sua
+                             * notifica restava su «Ricerca dello stato in corso…»
+                             * fino a spegnersi da sola.
+                             */
+                            nazionale ?: corsa.comeNelDettaglio(giorno)
+                        }
+                        /*
+                         * Il binario e' la meta' del motivo per cui si segue un treno,
+                         * e ViaggiaTreno da solo spesso non ce l'ha. Ma a Trenord si
+                         * chiedono **solo le corse di ViaggiaTreno**: un numero EAV o
+                         * Italo li' e' un altro treno, e i suoi binari finirebbero su
+                         * questa corsa (e' il guasto dell'EAV 2093, in CLAUDE.md).
+                         */
+                        letto?.let {
+                            if (trenordAcceso && daViaggiaTreno) trains.completaBinari(it, giorno) else it
+                        }
                     }.getOrNull()
 
                     /*
@@ -304,11 +383,19 @@ class TrainFollowService : Service() {
                     if (status == null) {
                         if (corsa.status == null && ++corsa.vuoti >= LETTURE_A_VUOTO) {
                             corsa.finita = true
+                            /*
+                             * E lo si dice. Prima la notifica spariva in silenzio,
+                             * ferma su «Ricerca dello stato in corso…»: succede
+                             * toccando la campanella dove non prende — nel
+                             * sottopasso di una stazione, per dirne una — e chi
+                             * l'aveva accesa restava convinto di essere seguito.
+                             */
+                            notifyMai(corsa)
                         }
                         continue
                     }
 
-                    lastPollAt = LocalDateTime.now()
+                    lastPollAt = adessoInItalia()
                     corsa.status = status
                     corsa.boarding = status.fermata(corsa.tratta.salitaRfi, corsa.tratta.partenzaNota)
                     corsa.alighting = status.fermata(corsa.tratta.discesaRfi, corsa.tratta.arrivoNoto)
@@ -355,6 +442,23 @@ class TrainFollowService : Service() {
      * quando arriva a destinazione.
      */
     private fun haFinito(corsa: Sorvegliata): Boolean {
+        /*
+         * Le corse di cui nessuno rileva i passaggi — EAV, ARST, Ferrotramviaria,
+         * e Italo quando il suo dettaglio tace — non dicono mai che una fermata e'
+         * stata fatta: restano «da fare» anche un'ora dopo essere arrivate, e
+         * nessuna delle prove qui sotto scatterebbe mai. Li' la fine la da'
+         * l'orologio: passato l'orario previsto di dove scendi, con un margine,
+         * non c'e' piu' niente da annunciare. Senza, seguirne una avrebbe tenuto
+         * acceso il servizio per sempre.
+         */
+        if (corsa.senzaRilevamenti) {
+            val fine = corsa.alighting?.let { it.projectedArrival ?: it.scheduledArrival }
+                ?: corsa.tratta.arrivoNoto
+                ?: corsa.boarding?.let { it.projectedDeparture ?: it.scheduledDeparture }
+                ?: corsa.tratta.partenzaNota
+                ?: return false
+            return adessoInItalia().isAfter(fine.plusMinutes(MARGINE_SENZA_RILEVAMENTI))
+        }
         val discesa = corsa.alighting
         if (discesa != null) {
             return discesa.status == StopStatus.DONE ||
@@ -377,7 +481,7 @@ class TrainFollowService : Service() {
      */
     private fun pollIntervalMs(corsa: Sorvegliata): Long {
         val quando = corsa.prossimoEvento() ?: return POLL_NEAR_MS
-        val minutes = Duration.between(LocalDateTime.now(), quando).toMinutes()
+        val minutes = Duration.between(adessoInItalia(), quando).toMinutes()
         return when {
             minutes > 30 -> POLL_FAR_MS
             minutes > 10 -> POLL_MID_MS
@@ -413,10 +517,10 @@ class TrainFollowService : Service() {
          */
         val corrente = vive.first()
         val detection = corrente.status?.lastDetectionStation?.let { st ->
-            val at = corrente.status?.lastDetectionTime?.format(HHMM)
+            val at = corrente.status?.lastDetectionTime?.format(ORA_DEL_GIORNO)
             if (at != null) "$st alle $at" else st
         }
-        val checked = lastPollAt?.format(HHMM)?.let { "aggiornato $it" }
+        val checked = lastPollAt?.format(ORA_DEL_GIORNO)?.let { "aggiornato $it" }
         val sub = listOfNotNull(detection, checked).joinToString(" · ").ifBlank { null }
 
         /*
@@ -467,8 +571,8 @@ class TrainFollowService : Service() {
             (salita.status == StopStatus.DONE || salita.actualDeparture != null)
 
         if (!salito && salita != null) {
-            val time = salita.effectiveDeparture?.format(HHMM)
-                ?: salita.scheduledDeparture?.format(HHMM)
+            val time = salita.effectiveDeparture?.format(ORA_DEL_GIORNO)
+                ?: salita.scheduledDeparture?.format(ORA_DEL_GIORNO)
             val delay = salita.departureDelayMinutes
             val where = corsa.nomeSalita
             val suffix = when {
@@ -491,8 +595,8 @@ class TrainFollowService : Service() {
 
         val discesa = corsa.alighting
         if (salito && discesa != null) {
-            val time = discesa.effectiveArrival?.format(HHMM)
-                ?: discesa.scheduledArrival?.format(HHMM)
+            val time = discesa.effectiveArrival?.format(ORA_DEL_GIORNO)
+                ?: discesa.scheduledArrival?.format(ORA_DEL_GIORNO)
             val delay = discesa.arrivalDelayMinutes
             val suffix = when {
                 delay > 0 -> " (+$delay)"
@@ -512,12 +616,26 @@ class TrainFollowService : Service() {
         }
     }
 
-    private fun stateWord(state: TrainState): String? = when (state) {
-        TrainState.CANCELLED -> "Soppresso"
-        TrainState.PARTIALLY_CANCELLED -> "Soppresso in parte"
-        TrainState.DIVERTED -> "Percorso variato"
-        TrainState.ARRIVED -> "Arrivato"
-        else -> null
+    /**
+     * La parola di stato nella notifica: **la stessa dell'app**, da
+     * `stateLabel`, perche' notifica e schermata non possono chiamare la stessa
+     * cosa in due modi.
+     *
+     * L'unica eccezione e' «non ancora partito», che qui si tace: nella notifica
+     * la partenza e' gia' scritta per esteso («Parte da Milano alle 18:09»), e
+     * ripeterla come stato la renderebbe una riga piu' lunga senza dire niente
+     * di nuovo.
+     */
+    private fun stateWord(state: TrainState): String? =
+        if (state == TrainState.NOT_DEPARTED) null else stateLabel(state)
+
+    /**
+     * Vero se, dentro il viaggio seguito, dopo questa tratta ce n'e' un'altra
+     * ancora da prendere: e' la differenza fra un diretto e una coincidenza.
+     */
+    private fun haUnaCoincidenzaDopo(corsa: Sorvegliata): Boolean {
+        val i = sorvegliate.indexOf(corsa)
+        return i >= 0 && sorvegliate.drop(i + 1).any { !it.finita }
     }
 
     /**
@@ -528,8 +646,38 @@ class TrainFollowService : Service() {
     private fun maybeAlert(corsa: Sorvegliata) {
         val status = corsa.status ?: return
         val boarding = corsa.boarding
-        // Quando si conosce la fermata di salita e' il suo scarto a contare.
-        val current = boarding?.departureDelayMinutes ?: status.delayMinutes
+        val salito = boarding != null &&
+            (boarding.status == StopStatus.DONE || boarding.actualDeparture != null)
+
+        /*
+         * **Una volta a bordo si tace, a meno che ci sia un cambio da prendere.**
+         *
+         * Deciso con l'utente il 20/09/2026. Su un viaggio diretto, quando sei
+         * salito non c'e' piu' niente su cui agire: il treno ti porta comunque, e
+         * far suonare il telefono a ogni oscillazione del ritardo sarebbe rumore.
+         * Se invece dopo questa tratta ce n'e' un'altra, il ritardo con cui arrivi
+         * e' esattamente cio' che decide se la prendi, e va detto.
+         *
+         * Il ritardo del treno **successivo**, finche' non ci sali, lo annuncia la
+         * sua sorvegliata, con la sua partenza: quella regola non cambia.
+         */
+        if (salito && !haUnaCoincidenzaDopo(corsa)) return
+
+        /*
+         * Lo scarto che conta e' quello dell'evento che stai aspettando: la tua
+         * partenza finche' non sei salito, il tuo arrivo da li' in poi — la stessa
+         * regola con cui la notifica scrive l'orario (`orarioTuo`).
+         *
+         * Prima si guardava sempre la partenza, e quel numero appena sali si
+         * congela: il treno accumulava venti minuti fra Milano e Verona, la
+         * notifica li mostrava, ma nessun avviso suonava piu' — proprio mentre il
+         * ritardo stava mangiando la coincidenza.
+         */
+        val current = when {
+            salito -> corsa.alighting?.arrivalDelayMinutes ?: status.delayMinutes
+            boarding != null -> boarding.departureDelayMinutes
+            else -> status.delayMinutes
+        }
 
         if (status.state == TrainState.CANCELLED && !corsa.alertedCancellation) {
             corsa.alertedCancellation = true
@@ -556,7 +704,7 @@ class TrainFollowService : Service() {
 
         corsa.lastAlertedDelay = current
         val where = corsa.nomeSalita
-        val at = boarding?.effectiveDeparture?.format(HHMM)
+        val at = boarding?.effectiveDeparture?.format(ORA_DEL_GIORNO)
         val tail = if (at != null) " Partenza da $where prevista alle $at." else ""
         emitAlert(corsa, "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail")
     }
@@ -633,18 +781,28 @@ class TrainFollowService : Service() {
             discesa != null && discesa.status == StopStatus.CANCELLED ->
                 "La fermata di ${corsa.nomeDiscesa} è stata soppressa.$coda"
             discesa != null -> {
-                val at = (discesa.actualArrival ?: discesa.effectiveArrival)?.format(HHMM)
+                val at = (discesa.actualArrival ?: discesa.effectiveArrival)?.format(ORA_DEL_GIORNO)
                 if (at != null) "Arrivato a ${corsa.nomeDiscesa} alle $at.$coda"
                 else "Arrivato a ${corsa.nomeDiscesa}.$coda"
             }
             salita != null -> {
-                val at = salita.actualDeparture?.format(HHMM)
+                val at = salita.actualDeparture?.format(ORA_DEL_GIORNO)
                 if (at != null) "Partito da ${corsa.nomeSalita} alle $at.$coda"
                 else "Partito da ${corsa.nomeSalita}.$coda"
             }
             else -> "Arrivato a ${corsa.status?.destination.orEmpty()}.$coda"
         }
         emitAlert(corsa, body)
+    }
+
+    /** Quando di una corsa non si e' mai saputo niente e si smette di chiederlo. */
+    private fun notifyMai(corsa: Sorvegliata) {
+        emitAlert(
+            corsa,
+            "Di questa corsa non risulta nulla: nessuna fonte la conosce, o la rete non " +
+                "rispondeva. Ho smesso di controllarla — riapri la corsa e tocca di nuovo " +
+                "la campanella per riprovare.",
+        )
     }
 
     private fun notifyStoppedByBudget() {
@@ -667,7 +825,14 @@ class TrainFollowService : Service() {
     private fun emitAlert(corsa: Sorvegliata, body: String) {
         if (!hasNotificationPermission()) return
         NotificationManagerCompat.from(this).notify(
-            NOTIF_ALERT_ID,
+            /*
+             * Un id per corsa, non uno per tutte. Su un viaggio con cambio due
+             * tratte possono avere qualcosa da dire nello stesso giro — la prima
+             * e' arrivata, la seconda ha preso ritardo — e con un id solo la
+             * seconda notifica sostituiva la prima: l'utente ne vedeva una, e
+             * dell'altra non restava traccia.
+             */
+            NOTIF_ALERT_ID + corsa.numero.hashCode().absoluteValue % ALERT_PER_CORSA,
             NotificationCompat.Builder(this, CHANNEL_ALERTS)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setContentTitle(etichetta(corsa))
@@ -726,8 +891,15 @@ class TrainFollowService : Service() {
             intent.putExtra(EXTRA_OPEN_TRAIN, sola?.numero)
             intent.putExtra(
                 EXTRA_OPEN_DATE,
-                sola?.tratta?.giornoEpoch ?: LocalDate.now().toEpochDay(),
+                sola?.tratta?.giornoEpoch ?: oggiInItalia().toEpochDay(),
             )
+            /*
+             * E la tratta intera, non il solo numero: dice da dove sali e dove
+             * scendi. Senza quelle due, una corsa di un giorno futuro non si sa
+             * nemmeno cercare — la si cerca per tratta — e lo stesso numero puo'
+             * essere di due treni diversi nello stesso giorno.
+             */
+            sola?.let { intent.putExtra(EXTRA_OPEN_TRATTA, listOf(it.tratta).comeJson()) }
         }
         return PendingIntent.getActivity(
             this,
@@ -795,10 +967,20 @@ class TrainFollowService : Service() {
         const val EXTRA_OPEN_DATE = "open_train_epoch_day"
         const val EXTRA_OPEN_VIAGGIO = "open_viaggio"
 
+        /** La tratta della corsa sola, per aprirla sapendo salita e discesa. */
+        const val EXTRA_OPEN_TRATTA = "open_train_tratta"
+
         private const val CHANNEL_ONGOING = "follow_ongoing"
         private const val CHANNEL_ALERTS = "follow_alerts"
         private const val NOTIF_ONGOING_ID = 1001
         private const val NOTIF_ALERT_ID = 1002
+
+        /**
+         * Quanti id distinti riservare agli avvisi delle corse seguite: vedi
+         * [emitAlert]. Un viaggio ne ha al piu' tre o quattro, e restano tutti
+         * sopra [NOTIF_ONGOING_ID] senza avvicinarsi ad altri id dell'app.
+         */
+        private const val ALERT_PER_CORSA = 50
 
         /** Ultimi dieci minuti: qui cambiano binario e ritardo, si guarda spesso. */
         private const val POLL_NEAR_MS = 60_000L
@@ -818,6 +1000,12 @@ class TrainFollowService : Service() {
          * Una corsa gia' letta almeno una volta non si molla mai per un buco.
          */
         private const val LETTURE_A_VUOTO = 5
+
+        /**
+         * Quanto si aspetta, oltre l'orario previsto, prima di dare per conclusa
+         * una corsa di una rete che i passaggi non li rileva: vedi `haFinito`.
+         */
+        private const val MARGINE_SENZA_RILEVAMENTI = 10L
 
         private const val WAKE_LOCK_TAG = "ZawardoTreni:segui-treno"
 

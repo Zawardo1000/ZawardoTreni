@@ -28,11 +28,27 @@ data class SvizzeraStationDto(
 data class SvizzeraJourneyDto(
     /** `R`, `RE`, `PE`: regionale, regio-express, Panoramic Express. */
     val category: String? = null,
-    /** Il numero della corsa. Puo' arrivare con zeri davanti. */
+    /**
+     * **La linea, non la corsa**, per i regionali: `72` per tutte le Panoramic
+     * Express della Vigezzina, `80` per tutte le RE80. Per le corse senza linea
+     * (EC, IR) e' il numero. Va sulla scritta, come sui cartelli svizzeri.
+     */
     val number: String? = null,
+    /**
+     * Il numero della corsa, con gli zeri davanti (`000041`, `025535`).
+     *
+     * E' l'unico che distingua una corsa dall'altra: fino al 19/09/2026 l'app
+     * leggeva [number], e ogni Panoramic Express della Vigezzina era la corsa
+     * «72» (vedi `data/fonti/MINORI.md`).
+     */
+    val name: String? = null,
     /** Il vettore: `FART` per la Vigezzina, ma a Domodossola anche altri. */
     val operator: String? = null,
-    /** Il capolinea. Anche nel tabellone degli arrivi: vedi [SvizzeraApi]. */
+    /**
+     * Il capolinea fra le partenze; **l'origine fra gli arrivi** (`type=arrival`):
+     * a Locarno FART, capolinea della Vigezzina, gli arrivi hanno
+     * `to = "Domodossola (I)"`. Verificato il 19/09/2026.
+     */
     val to: String? = null,
     val stop: SvizzeraStopDto? = null,
 )
@@ -44,7 +60,7 @@ data class SvizzeraStopDto(
      * L'orario, `yyyy-MM-dd'T'HH:mm:ssZ`.
      *
      * E' l'unico campo che porti l'ora: nei tabelloni `arrival` resta null
-     * anche quando si chiedono gli arrivi.
+     * anche quando si chiedono gli arrivi, e qui c'e' l'ora d'arrivo.
      */
     val departure: String? = null,
     val arrival: String? = null,

@@ -85,6 +85,9 @@ class RiprovaLeFrecceTest {
 
         // Il sito qui non c'entra: risponde vuoto, e i prezzi restano quelli dell'app.
         override suspend fun soluzioniDelSito(richiesta: RichiestaSito) = RispostaSito()
+
+        override suspend fun fermateDelSito(cartId: String, solutionId: String) =
+            emptyList<it.zawardo.treni.data.remote.lefrecce.TrattaDelSito>()
     }
 
     @Test

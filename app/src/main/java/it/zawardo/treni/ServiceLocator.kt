@@ -53,7 +53,7 @@ object ServiceLocator {
      * ed e' l'unica a fornire gli avvisi di lavori e sospensione.
      */
     val trenordRepository: TrenordRepository by lazy {
-        TrenordRepository(NetworkModule.trenordApi, NetworkModule.json)
+        TrenordRepository(NetworkModule.trenordApi, NetworkModule.json, NetworkModule.cantieriApi)
     }
 
     val italoRepository: ItaloRepository by lazy { ItaloRepository(NetworkModule.italoApi) }
@@ -72,7 +72,9 @@ object ServiceLocator {
     val fnbRepository: FnbRepository by lazy { FnbRepository(NetworkModule.fnbApi) }
 
     val svizzeraRepository: SvizzeraRepository by lazy {
-        SvizzeraRepository(NetworkModule.svizzeraApi)
+        // `search.ch` sta sotto a `transport.opendata.ch` e ne sa di piu':
+        // soppressioni e ritardo degli arrivi. E' un'aggiunta, col ripiego di sempre.
+        SvizzeraRepository(NetworkModule.svizzeraApi, NetworkModule.searchChApi, NetworkModule.json)
     }
 
     /**
@@ -166,14 +168,17 @@ object ServiceLocator {
      * guardato viene saltato dal coordinatore, quindi spegnere una rete non
      * scarica niente.
      *
-     * Si rilegge l'orario ARST dopo ogni giro: e' un file da sei KB, e non
-     * farlo significherebbe tenere in memoria quello vecchio fino al riavvio,
-     * cioe' scaricare un aggiornamento e poi non usarlo.
+     * Si rileggono **tutti e due** gli orari imbarcati dopo ogni giro: sono file
+     * da pochi KB, e non farlo significherebbe tenere in memoria quello vecchio
+     * fino al riavvio, cioe' scaricare un aggiornamento e poi non usarlo. EAV
+     * restava fuori per dimenticanza: i suoi tre megabyte si scaricavano e non
+     * entravano in servizio fino alla chiusura dell'app.
      */
     suspend fun sorvegliaOrari() {
         settings.enabledSources.collect { accese ->
             aggiornamentoOrari.controlla(accese)
             arstRepository.ricarica()
+            eavRepository.ricarica()
         }
     }
 }

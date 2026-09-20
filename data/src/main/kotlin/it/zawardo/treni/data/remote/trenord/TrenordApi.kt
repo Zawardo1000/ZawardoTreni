@@ -51,6 +51,44 @@ interface TrenordApi {
     ): ResponseBody
 
     /**
+     * La stessa ricerca di [search], **in chiaro**.
+     *
+     * Il gemello sotto `mgmt/store-management-api/mia/` risponde gli stessi dati
+     * del BFF — verificati campo per campo il 19/09/2026, prezzi compresi — ma in
+     * JSON compresso: 2-3 KB invece dei ~35 del BFF, che cifrato non si comprime.
+     * Il sito pero' da li' chiama solo `direttrici/`, quindi questa porta puo'
+     * sparire senza avviso: si usa per prima, col BFF come riserva, e la presidia
+     * `TrenordInChiaroLiveTest`. Vedi `data/fonti/TRENORD.md`.
+     */
+    @GET("https://www.trenord.it/mgmt/store-management-api/mia/hafas/v2")
+    suspend fun searchInChiaro(
+        @Query("orig") origin: String,
+        @Query("dest") destination: String,
+        @Query("departure_date") departureDate: String,
+        @Query("departure_hour") departureHour: String,
+        @Query("products") products: String = "tickets",
+        @Query("transfers") transfers: Int = 1,
+        @Query("live_data") liveData: Boolean = true,
+        @Query("with_routes") withRoutes: Boolean = true,
+        @Query("language") language: String = "it",
+    ): ResponseBody
+
+    /** La stessa corsa di [train], in chiaro: 1,5-2,4 KB invece di 8-25. Vedi [searchInChiaro]. */
+    @GET("https://www.trenord.it/mgmt/store-management-api/mia/train/{id}")
+    suspend fun trainInChiaro(
+        @Path("id") trainId: String,
+        @Query("date") date: String? = null,
+    ): ResponseBody
+
+    /**
+     * Le notizie di circolazione per direttrice, in chiaro: 42 direttrici, 6 KB
+     * compressi, le stesse per tutte le corse. E' la chiamata che fa il sito
+     * stesso (widget `tn-wc-train-info`). Vedi [NotizieDirettrici].
+     */
+    @GET("https://www.trenord.it/mgmt/store-management-api/mia/direttrici/")
+    suspend fun direttrici(): List<DirettriceDto>
+
+    /**
      * Tabellone di stazione: l'elenco delle corse **programmate**.
      *
      * Sta fuori dal BFF e non e' cifrato — risponde JSON con dentro l'HTML gia'

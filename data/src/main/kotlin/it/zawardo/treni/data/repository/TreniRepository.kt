@@ -1,5 +1,6 @@
 package it.zawardo.treni.data.repository
 
+import it.zawardo.treni.domain.model.reteConStazioniProprie
 import it.zawardo.treni.data.mapper.ROME
 import it.zawardo.treni.data.mapper.parseTrainRefLine
 import it.zawardo.treni.data.mapper.toBoardEntry
@@ -16,12 +17,15 @@ import it.zawardo.treni.data.remote.lefrecce.RicercaAvanzataSito
 import it.zawardo.treni.data.remote.lefrecce.RichiestaSito
 import it.zawardo.treni.data.remote.lefrecce.SolutionDto
 import it.zawardo.treni.data.remote.lefrecce.SoluzioneSito
+import it.zawardo.treni.data.remote.lefrecce.avvisiDelSito
 import it.zawardo.treni.data.remote.viaggiatreno.InfomobilitaParser
+import it.zawardo.treni.data.remote.viaggiatreno.NotaSmartCaringDto
 import it.zawardo.treni.data.remote.viaggiatreno.NotiziaCorsa
 import it.zawardo.treni.data.remote.viaggiatreno.ViaggiaTrenoApi
 import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.Biglietto
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Imprese
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.Leg
 import it.zawardo.treni.domain.model.NearbyStation
@@ -31,6 +35,10 @@ import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainRun
 import it.zawardo.treni.domain.model.TrainStatus
+import it.zawardo.treni.data.remote.lefrecce.TrattaDelSito
+import it.zawardo.treni.domain.model.Stop
+import it.zawardo.treni.domain.model.StopStatus
+import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.conAvvisiDa
 import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.conRitardoDaFermo
@@ -254,12 +262,27 @@ class JourneyRepository(
             }
         }
 
+        /*
+         * I cantieri Trenord: lavori programmati con le loro date, che gli
+         * avvisi della ricerca dicono solo quando la corsa di oggi ne e' toccata.
+         * Si chiedono dove possono esistere — una delle due stazioni nel
+         * catalogo Trenord — e l'elenco vale un'ora per tutte le ricerche.
+         */
+        val cantieriJob = async {
+            if (DataSource.TRENORD in sources && trenord?.conosce(from, to) == true) {
+                runCatching { trenord.cantieriPer(listOf(from.name, to.name), departure.toLocalDate()) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
         val fromLefrecce = lefrecceJob.await()
         val fromTrenord = trenordJob.await()
 
         SearchOutcome(
             journeys = merge(fromLefrecce.journeys, fromTrenord?.journeys.orEmpty(), departure, limit),
-            alerts = fromTrenord?.alerts.orEmpty(),
+            alerts = (fromTrenord?.alerts.orEmpty() + cantieriJob.await()).distinctBy { it.message },
             prezziAssenti = fromLefrecce.senzaPrezzi,
             nazionaleNonRisponde = fromLefrecce.nonRisponde,
         )
@@ -320,6 +343,154 @@ class JourneyRepository(
             .mapNotNull { j -> j.price?.let { chiavePrezzoLeFrecce(j) to it } }
             .distinctBy { it.first }
             .toMap()
+    }
+
+    /**
+     * Le fermate di una corsa **in un giorno qualunque**, da Le Frecce, con gli
+     * orari di quel giorno; null se Le Frecce quel treno a quell'ora non lo ha.
+     *
+     * Serve al giorno futuro, dove ViaggiaTreno non risponde (204) e ricavare il
+     * percorso dalla corsa di oggi con lo stesso numero era sbagliato tre volte:
+     * un treno che oggi non circola restava senza niente (i regionali siciliani
+     * della domenica, il 19/09/2026), una corsa oggi variata prestava il percorso
+     * sbagliato, e il binario di oggi non e' quello di quel giorno. Vedi
+     * `data/FONTI.md`.
+     *
+     * Tre passi: la ricerca della tratta ([salita] → [discesa]) trova la soluzione
+     * con quel treno a quell'ora; le sue fermate (`stops`) danno il pezzo
+     * percorso e l'origine della corsa (`bdoOrigin`); una seconda ricerca senza
+     * cambi dall'origine a uno dei [capolinea] indiziati da' la corsa intera, se
+     * contiene lo stesso treno alla stessa ora di salita. Il capolinea Le Frecce
+     * non lo dice: lo indica chi chiama (il tabellone di quel giorno, o la corsa
+     * di oggi), e vale solo se la ricerca di quel giorno lo conferma. Senza, la
+     * corsa va dall'origine alla discesa, e senza nemmeno quella resta il pezzo
+     * percorso.
+     */
+    suspend fun corsaDelGiorno(
+        numero: String,
+        salita: Station,
+        discesa: Station,
+        partenza: LocalDateTime,
+        capolinea: List<Station> = emptyList(),
+    ): TrainStatus? = withContext(Dispatchers.IO) {
+        // Anche per nome: la discesa puo' essere il capolinea letto dal tabellone,
+        // che un codice non ce l'ha (vedi `CaricatoreCorsa.delGiornoDaLeFrecce`).
+        val da = stazioneLeFrecce(salita) ?: return@withContext null
+        val a = stazioneLeFrecce(discesa) ?: return@withContext null
+        val stessaSalita: (TrattaDelSito) -> Boolean = { t ->
+            t.stops.any { f -> f.departureTime.inOraDiRoma()?.let { stessoMinuto(it, partenza) } == true }
+        }
+        val tratta = trattaDelTreno(numero, da, a, partenza.minusMinutes(1), senzaCambi = false, verifica = stessaSalita)
+            ?: return@withContext null
+        val origine = tratta.summary?.bdoOrigin?.let { codice ->
+            idLeFrecceDaCodice(codice)?.let { Station(codice, it, codice) }
+        }
+        /*
+         * La corsa intera si cerca provando piu' capolinea e piu' finestre: nel
+         * caso peggiore sono una decina di ricerche in fila, e ognuna e' una
+         * chiamata al sito. Se ci vuole troppo si tiene il tratto che si percorre,
+         * che le fermate ce l'ha gia': meglio una pagina in meno di una pagina che
+         * non arriva.
+         */
+        val intera = origine?.let { o ->
+            withTimeoutOrNull(ATTESA_CORSA_INTERA_MS) {
+                (capolinea.mapNotNull { stazioneLeFrecce(it) } + a).asSequence()
+                    .distinctBy { it.locationId }
+                    .firstNotNullOfOrNull { fine ->
+                        // Dall'origine la salita e' ore prima: finestre sempre piu' larghe.
+                        ANTICIPI_ORIGINE.asSequence().firstNotNullOfOrNull { ore ->
+                            trattaDelTreno(numero, o, fine, partenza.minusHours(ore), senzaCambi = true, verifica = stessaSalita)
+                        }
+                    }
+            }
+        }
+        (intera ?: tratta).comeCorsa(numero, listOf(salita, discesa), intera != null)
+    }
+
+    /**
+     * La tratta di [numero] nella ricerca da [da] a [a] dalle [daOra]: la prima
+     * soluzione che lo contiene e passa [verifica], con le sue fermate.
+     */
+    private suspend fun trattaDelTreno(
+        numero: String,
+        da: Station,
+        a: Station,
+        daOra: LocalDateTime,
+        senzaCambi: Boolean,
+        verifica: (TrattaDelSito) -> Boolean,
+    ): TrattaDelSito? {
+        val risposta = try {
+            lefrecce.soluzioniDelSito(richiestaSito(da, a, daOra, offset = 0, senzaCambi = senzaCambi))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return null
+        }
+        val carrello = risposta.cartId ?: return null
+        for (soluzione in risposta.solutions.mapNotNull { it.solution }) {
+            if (soluzione.nodes.none { it.train?.name == numero }) continue
+            val id = soluzione.id ?: continue
+            val tratte = try {
+                lefrecce.fermateDelSito(carrello, id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Una soluzione che non si apre non dice niente delle altre: la
+                // corsa cercata puo' essere nella prossima. Prima si tornava a
+                // mani vuote, e un singolo errore costava tutta la lettura.
+                continue
+            }
+            tratte.firstOrNull { t ->
+                (t.summary?.trainInfo?.name == numero || t.stops.firstOrNull()?.trainNumber == numero) && verifica(t)
+            }?.let { return it }
+        }
+        return null
+    }
+
+    /** L'id di Le Frecce di un indizio di capolinea: dal codice, o dal nome. */
+    private suspend fun stazioneLeFrecce(indizio: Station): Station? {
+        if (indizio.rfiCode != null) perLeFrecce(indizio, emptyList())?.let { return it }
+        if (indizio.name.isBlank()) return null
+        return stazioniPerNome(setOf(indizio.name), noti = emptyList())[indizio.name]
+            ?.takeIf { it.rfiCode != null && it.locationId > 0 }
+    }
+
+    /** Una tratta di `stops` come corsa di tabella: niente ritardo, niente binari. */
+    private fun TrattaDelSito.comeCorsa(numero: String, note: List<Station>, intera: Boolean): TrainStatus? {
+        val fermate = stops.mapIndexedNotNull { i, f ->
+            val nome = f.location?.name?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+            val nota = note.firstOrNull { it.name.equals(nome, ignoreCase = true) }
+            Stop(
+                index = i,
+                stationName = nome,
+                stationCode = nota?.rfiCode ?: codiceDaIdLeFrecce(f.location.id),
+                scheduledArrival = f.arrivalTime.inOraDiRoma(),
+                actualArrival = null,
+                arrivalDelayMinutes = 0,
+                scheduledDeparture = f.departureTime.inOraDiRoma(),
+                actualDeparture = null,
+                departureDelayMinutes = 0,
+                scheduledPlatform = null,
+                actualPlatform = null,
+                status = StopStatus.FUTURE,
+            )
+        }
+        if (fermate.size < 2) return null
+        val sigla = summary?.trainInfo?.acronym?.takeIf { it.isNotBlank() }
+        return TrainStatus(
+            number = numero,
+            category = sigla,
+            label = listOfNotNull(sigla, numero).joinToString(" "),
+            origin = fermate.first().stationName,
+            destination = fermate.last().stationName,
+            delayMinutes = 0,
+            state = TrainState.REGULAR,
+            lastDetectionStation = null,
+            lastDetectionTime = null,
+            notice = if (intera) null else "Le fermate sono quelle del tratto che percorri.",
+            stops = fermate,
+            realtime = false,
+        )
     }
 
     /**
@@ -568,12 +739,9 @@ class JourneyRepository(
         }
 
         val (soluzioni, dellApp) = dallApp.await().getOrThrow()
-        // Coi prezzi gia' tutti, il sito non aggiungerebbe niente.
-        val viaggi = if (dellApp.none { it.price == null }) {
-            dellApp
-        } else {
-            conPrezziDelSito(dellApp, from, to, departure, pagine)
-        }
+        // Anche coi prezzi gia' tutti, il sito porta i messaggi delle soluzioni:
+        // le sue pagine sono gia' arrivate, e altre si chiedono solo per i prezzi.
+        val viaggi = conPrezziDelSito(dellApp, from, to, departure, pagine)
         RisultatoLeFrecce(
             journeys = viaggi,
             /*
@@ -761,6 +929,7 @@ class JourneyRepository(
                         arrival = arrivo,
                         kind = if (bus) TransportKind.BUS else TransportKind.TRAIN,
                         kindLabel = treno.trainCategory,
+                        origineCorsa = nodo.bdoOrigin?.takeIf { it.isNotBlank() },
                     )
                 }
             }
@@ -772,6 +941,7 @@ class JourneyRepository(
             duration = Duration.between(tratte.first().departure, tratte.last().arrival),
             legs = tratte,
             price = prezzo(),
+            avvisi = avvisiDelSito(messaggi),
         )
     }
 
@@ -789,6 +959,10 @@ class JourneyRepository(
      *
      * Il sito che non risponde non toglie niente: restano i prezzi che l'app
      * aveva, e gli altri li cerca chi viene dopo.
+     *
+     * Con la stessa chiave arrivano i messaggi della soluzione ([avvisiDelSito]):
+     * l'app i suoi li scrive a volte in francese. Per quelli non si chiedono
+     * pagine in piu'.
      */
     private suspend fun conPrezziDelSito(
         viaggi: List<Journey>,
@@ -799,26 +973,30 @@ class JourneyRepository(
     ): List<Journey> {
         // Una pagina che non risponde interrompe la fila: le successive non si sanno accostare.
         val arrivate = pagineArrivate.takeWhile { it != null }.filterNotNull()
-        if (viaggi.none { it.price == null } || arrivate.isEmpty()) return viaggi
+        if (viaggi.isEmpty() || arrivate.isEmpty()) return viaggi
         val delSito = arrivate.flatten().toMutableList()
-        var pagine = arrivate.size
-        val ultima = viaggi.maxOf { it.departure }
-        while (pagine < PAGINE_DEL_SITO && delSito.size == pagine * SOLUZIONI_PER_PAGINA &&
-            delSito.mapNotNull { it.partenza() }.maxOrNull()?.isBefore(ultima) == true
-        ) {
-            val altra = paginaDelSito(from, to, departure, offset = pagine * SOLUZIONI_PER_PAGINA) ?: break
-            delSito += altra
-            pagine++
+        if (viaggi.any { it.price == null }) {
+            var pagine = arrivate.size
+            val ultima = viaggi.maxOf { it.departure }
+            while (pagine < PAGINE_DEL_SITO && delSito.size == pagine * SOLUZIONI_PER_PAGINA &&
+                delSito.mapNotNull { it.partenza() }.maxOrNull()?.isBefore(ultima) == true
+            ) {
+                val altra = paginaDelSito(from, to, departure, offset = pagine * SOLUZIONI_PER_PAGINA) ?: break
+                delSito += altra
+                pagine++
+            }
         }
-        val prezzi = delSito.mapNotNull { sito ->
-            val partenza = sito.partenza() ?: return@mapNotNull null
-            val prezzo = sito.prezzo() ?: return@mapNotNull null
-            chiavePrezzo(partenza, sito.trains.mapNotNull { it.name }) to prezzo
-        }.toMap()
+        val chiavi = delSito.mapNotNull { sito ->
+            sito.partenza()?.let { chiavePrezzo(it, sito.trains.mapNotNull { t -> t.name }) to sito }
+        }
+        val prezzi = chiavi.mapNotNull { (chiave, sito) -> sito.prezzo()?.let { chiave to it } }.toMap()
+        val avvisi = chiavi.mapNotNull { (chiave, sito) -> avvisiDelSito(sito.messaggi).takeIf { it.isNotEmpty() }?.let { chiave to it } }.toMap()
         return viaggi.map { viaggio ->
-            if (viaggio.price != null) return@map viaggio
             val chiave = chiavePrezzo(viaggio.departure, viaggio.legs.filter { it.isTrain }.mapNotNull { it.trainNumber })
-            prezzi[chiave]?.let { viaggio.copy(price = it) } ?: viaggio
+            viaggio.copy(
+                price = viaggio.price ?: prezzi[chiave],
+                avvisi = viaggio.avvisi.ifEmpty { avvisi[chiave].orEmpty() },
+            )
         }
     }
 
@@ -846,26 +1024,33 @@ class JourneyRepository(
         departure: LocalDateTime,
         offset: Int,
     ): List<SoluzioneSito> =
-        lefrecce.soluzioniDelSito(
-            RichiestaSito(
-                departureLocationId = from.locationId,
-                arrivalLocationId = to.locationId,
-                departureTime = departure.format(orarioDelSito),
-                adults = 1,
-                children = 0,
-                criteria = CriteriSito(
-                    frecceOnly = false,
-                    regionalOnly = false,
-                    intercityOnly = false,
-                    tourismOnly = false,
-                    noChanges = false,
-                    order = "DEPARTURE_DATE",
-                    offset = offset,
-                    limit = SOLUZIONI_PER_PAGINA,
-                ),
-                advancedSearchRequest = RicercaAvanzataSito(bestFare = false),
-            ),
-        ).solutions.mapNotNull { it.solution }
+        lefrecce.soluzioniDelSito(richiestaSito(from, to, departure, offset)).solutions
+            .mapNotNull { voce -> voce.solution?.copy(messaggi = voce.messages.filterNotNull()) }
+
+    private fun richiestaSito(
+        from: Station,
+        to: Station,
+        departure: LocalDateTime,
+        offset: Int,
+        senzaCambi: Boolean = false,
+    ) = RichiestaSito(
+        departureLocationId = from.locationId,
+        arrivalLocationId = to.locationId,
+        departureTime = departure.format(orarioDelSito),
+        adults = 1,
+        children = 0,
+        criteria = CriteriSito(
+            frecceOnly = false,
+            regionalOnly = false,
+            intercityOnly = false,
+            tourismOnly = false,
+            noChanges = senzaCambi,
+            order = "DEPARTURE_DATE",
+            offset = offset,
+            limit = SOLUZIONI_PER_PAGINA,
+        ),
+        advancedSearchRequest = RicercaAvanzataSito(bestFare = false),
+    )
 
     /**
      * Le pagine del sito da chiedere subito per [limit] soluzioni. Una basta alla
@@ -933,6 +1118,19 @@ class JourneyRepository(
         /** Come il sito segna una camminata: `logoId` "WK", «Walking route». */
         const val CAMMINATA_SITO = "WK"
 
+        /**
+         * Quante ore prima della salita cercare la corsa dalla sua origine: prima
+         * la finestra stretta, poi via via piu' larga. Il FR 9583 Torino-Reggio
+         * Calabria viaggia undici ore.
+         */
+        val ANTICIPI_ORIGINE = listOf(3L, 8L, 14L)
+
+        /**
+         * Quanto si aspetta la corsa intera di un giorno futuro prima di
+         * accontentarsi del tratto percorso: vedi [corsaDelGiorno].
+         */
+        const val ATTESA_CORSA_INTERA_MS = 12_000L
+
         /** Il tetto delle soluzioni chieste per averne [limit] utilizzabili: vedi `unaRicercaLeFrecce`. */
         const val OVERFETCH = 3
 
@@ -998,6 +1196,11 @@ fun chiavePrezzoLeFrecce(j: Journey): String =
  * 797 Napoli-Salerno a 9,50 € usciva senza cifra, e cosi' due RV Torino-Milano.
  * Ora la copia Trenord vince ancora, ma eredita il prezzo. Se il prezzo ce l'ha
  * gia', resta il suo.
+ *
+ * **E nemmeno gli avvisi.** I messaggi che il sito di Le Frecce scrive sulla
+ * soluzione — «Il treno non effettua servizio viaggiatori», «Posti Esauriti sul
+ * treno 9588» — arrivano solo da li': la copia Trenord che prende il posto li
+ * porterebbe via. Si sommano ai suoi, senza ripetere quelli uguali.
  */
 internal fun unisciSoluzioni(
     lefrecce: List<Journey>,
@@ -1012,7 +1215,13 @@ internal fun unisciSoluzioni(
         val tn = byKey[chiave]
         when {
             tn == null -> byKey[chiave] = lf
-            tn.price == null && lf.price != null -> byKey[chiave] = tn.copy(price = lf.price)
+            else -> {
+                val prezzo = tn.price ?: lf.price
+                val avvisi = (tn.avvisi + lf.avvisi).distinct()
+                if (prezzo !== tn.price || avvisi != tn.avvisi) {
+                    byKey[chiave] = tn.copy(price = prezzo, avvisi = avvisi)
+                }
+            }
         }
     }
 
@@ -1031,6 +1240,29 @@ internal fun unisciSoluzioni(
         .filter { !it.departure.isBefore(daQuando) }
         .sortedBy { it.departure }
         .take(limit)
+}
+
+/**
+ * Fin dove rispondono i tabelloni futuri di ViaggiaTreno, e quanti chiederne
+ * insieme.
+ *
+ * Stanno qui, accanto a chi quei tabelloni li interroga ([TrainStatusRepository.rigaDelGiorno]),
+ * e non nelle schermate: e' un fatto della fonte, non della pagina. Erano
+ * scritti due volte, con gli stessi nomi e gli stessi valori, nel dettaglio di
+ * una corsa e nell'elenco dei risultati — e il giorno in cui la finestra fosse
+ * cambiata, una delle due schermate avrebbe continuato a chiedere binari che la
+ * fonte non ha piu'.
+ */
+object TabelloniFuturi {
+    /** Da +1 a +8 giorni: oltre, nessuna fonte ha un binario. */
+    const val GIORNI = 8L
+
+    /**
+     * Quanti tabelloni chiedere insieme: una corsa lunga ha venti fermate, e
+     * chiederle tutte in una raffica sarebbe scortese verso un servizio che
+     * risponde in mezzo secondo.
+     */
+    const val INSIEME = 4
 }
 
 /** Stato realtime delle corse, da ViaggiaTreno. */
@@ -1193,6 +1425,14 @@ class TrainStatusRepository(
         // Su una corsa che viene dall'orario i binari sono inconoscibili, non
         // mancanti: riempirli con quelli di oggi sarebbe inventare.
         if (!status.realtime) return status
+        /*
+         * Un treno che ViaggiaTreno dice di un'altra impresa Trenord non lo ha: il
+         * 19/09/2026, su 91 treni non Trenord dei tabelloni lombardi del 21,
+         * Trenord ne conosceva 4, e tutti e 4 erano un suo treno con lo stesso
+         * numero (l'IC 657 per La Spezia era il suo Milano Cadorna-Asso).
+         * Chiederglielo costava una chiamata per non avere niente.
+         */
+        if (status.impresa != null && status.impresa != Imprese.TRENORD) return status
         val numero = status.number.takeIf { it.isNotBlank() } ?: return status
         if (status.stops.none { it.scheduledPlatform == null || it.actualPlatform == null }) return status
 
@@ -1312,7 +1552,11 @@ class TrainStatusRepository(
         date: LocalDate,
         boardingCode: String? = null,
         boardingAt: LocalDateTime? = null,
+        /** L'origine della corsa, se la fonte la dice: vedi [dallOrigine]. */
+        origine: String? = null,
     ): TrainRef? {
+        if (salitaFuoriDaViaggiaTreno(boardingCode)) return null
+        dallOrigine(trainNumber, origine, date, boardingCode, boardingAt)?.let { return it.first }
         val refs = resolve(trainNumber)
         if (refs.isEmpty()) return null
 
@@ -1356,6 +1600,21 @@ class TrainStatusRepository(
         }!!.first
     }
 
+    /**
+     * Vero se si sale da una rete con stazioni proprie, i cui treni ViaggiaTreno
+     * non ha: EAV, Ferrotramviaria, ARST. Lo stesso numero, li', e' sempre un
+     * altro treno. Misurato il 20/09/2026: di 25 corse EAV prese a caso, 3
+     * avevano il numero di un treno RFI — il 2093 da Voghera, il 5084 da
+     * Salerno, il 5136 da Roma Ostiense — e [resolveFor], trovando una corsa
+     * sola, la restituiva senza guardare la salita: il dettaglio dell'EAV 2093
+     * mostrava il treno di Voghera, e l'elenco il suo ritardo.
+     *
+     * Le svizzere no: gli EuroCity che passano il confine ViaggiaTreno li ha, e
+     * il dettaglio di un EC preso a Lugano e' proprio il suo.
+     */
+    private fun salitaFuoriDaViaggiaTreno(boardingCode: String?): Boolean =
+        reteConStazioniProprie(boardingCode)
+
     private fun TrainRef.departureDateInRome(): LocalDate =
         Instant.ofEpochMilli(departureDateMillis).atZone(ROME).toLocalDate()
 
@@ -1368,14 +1627,69 @@ class TrainStatusRepository(
         date: LocalDate,
         boardingCode: String? = null,
         boardingAt: LocalDateTime? = null,
-    ): TrainStatus? = resolveFor(trainNumber, date, boardingCode, boardingAt)?.let { status(it) }
+        /** L'origine della corsa, se la fonte la dice: vedi [dallOrigine]. */
+        origine: String? = null,
+    ): TrainStatus? {
+        if (salitaFuoriDaViaggiaTreno(boardingCode)) return null
+        dallOrigine(trainNumber, origine, date, boardingCode, boardingAt)?.let { return it.second }
+        return resolveFor(trainNumber, date, boardingCode, boardingAt)?.let { status(it) }
+    }
 
-    suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
+    /**
+     * La corsa chiesta direttamente con la sua chiave: origine, numero, data
+     * d'origine. Null se non si trova, e allora si cerca per numero come prima.
+     *
+     * `cercaNumeroTreno` restituisce una corsa sola anche quando ce ne sono tre
+     * (il 795 il 19/09/2026), e `resolveFor` deve poi aprirle tutte per vedere
+     * quale passa dalla salita. L'origine invece Le Frecce la dice gia' nella
+     * ricerca (`bdoOrigin`): 12 treni su 12 trovati al primo colpo, compresi i
+     * Trenord e gli FNM (vedi `data/fonti/LEFRECCE.md`).
+     *
+     * La data d'origine puo' essere il giorno prima, per chi sale su un notturno
+     * dopo la mezzanotte: si prova anche quella. E la corsa trovata si tiene solo
+     * se passa dalla salita **all'ora giusta**: un notturno quotidiano ha anche
+     * la corsa che parte stasera, e ferma nella stessa stazione.
+     */
+    private suspend fun dallOrigine(
+        numero: String,
+        origine: String?,
+        date: LocalDate,
+        boardingCode: String?,
+        boardingAt: LocalDateTime?,
+    ): Pair<TrainRef, TrainStatus>? {
+        if (origine.isNullOrBlank()) return null
+        for (giorno in listOf(date, date.minusDays(1))) {
+            // La corsa partita il giorno prima vale solo se l'ora di salita la
+            // conferma: senza, per domani si prenderebbe la corsa di oggi.
+            if (giorno != date && boardingAt == null) continue
+            val ref = TrainRef(numero, origine, giorno.atStartOfDay(ROME).toInstant().toEpochMilli())
+            val corsa = runCatching { status(ref) }.getOrNull() ?: continue
+            if (boardingCode.isNullOrBlank()) return ref to corsa
+            val fermata = corsa.stops.firstOrNull { stessaStazione(it.stationCode, boardingCode) } ?: continue
+            val quando = fermata.scheduledDeparture ?: fermata.scheduledArrival
+            if (boardingAt == null || quando == null ||
+                abs(Duration.between(boardingAt, quando).toMinutes()) <= SCARTO_SALITA_MINUTI
+            ) {
+                return ref to corsa
+            }
+        }
+        return null
+    }
+
+    suspend fun departures(stationCode: String, at: ZonedDateTime = ZonedDateTime.now(ROME)): List<BoardEntry> =
         withContext(Dispatchers.IO) {
             val adesso = LocalDateTime.now(ROME)
             val righe = runCatching { viaggiaTreno.partenze(stationCode, at.format(boardFormat)) }
                 .getOrDefault(emptyList())
                 .mapNotNull { it.toBoardEntry() }
+            /*
+             * Il treno fermo oltre la sua ora e' una cosa di **oggi**. Sul tabellone
+             * di un altro giorno «non partito» e' lo stato di tutte le righe, e
+             * confrontarle con l'ora di adesso inventerebbe ritardi di ore — oltre a
+             * chiedere `andamentoTreno` per ognuna, decine di chiamate per un
+             * tabellone che serviva solo a leggere i binari di lunedi'.
+             */
+            if (at.withZoneSameInstant(ROME).toLocalDate() != adesso.toLocalDate()) return@withContext righe
             // Come per la corsa, vedi [nonPartitoVuolDireFermo]; in parallelo, perche'
             // su un tabellone i treni fermi oltre la loro ora possono essere piu' d'uno.
             coroutineScope {
@@ -1389,12 +1703,28 @@ class TrainStatusRepository(
             }
         }
 
-    suspend fun arrivals(stationCode: String, at: ZonedDateTime = ZonedDateTime.now()): List<BoardEntry> =
+    suspend fun arrivals(stationCode: String, at: ZonedDateTime = ZonedDateTime.now(ROME)): List<BoardEntry> =
         withContext(Dispatchers.IO) {
             runCatching { viaggiaTreno.arrivi(stationCode, at.format(boardFormat)) }
                 .getOrDefault(emptyList())
                 .mapNotNull { it.toBoardEntry() }
         }
+
+    /**
+     * La riga di un treno nel tabellone di una stazione, in un giorno qualunque
+     * entro l'orizzonte dei tabelloni: partenze, o arrivi con [arrivo].
+     *
+     * I tabelloni di ViaggiaTreno rispondono anche per i giorni futuri, da +1 a +8,
+     * col binario **programmato di quel giorno** (verificato il 19/09/2026: a
+     * Milano Centrale 10 corse su 33 avevano un binario diverso il 27 rispetto al
+     * 19) e con la destinazione della corsa. Seguono il calendario di quel giorno:
+     * ci sono anche i treni che oggi non circolano. Vedi `data/FONTI.md`.
+     */
+    suspend fun rigaDelGiorno(stazione: String, numero: String, quando: LocalDateTime, arrivo: Boolean = false): BoardEntry? {
+        val at = quando.atZone(ROME)
+        val righe = if (arrivo) arrivals(stazione, at) else departures(stazione, at)
+        return righe.firstOrNull { it.trainRef.number == numero }
+    }
 
     /** Le notizie di ViaggiaTreno gia' lette, e quando: vedi [conNotizie]. */
     @Volatile
@@ -1405,9 +1735,10 @@ class TrainStatusRepository(
      * perche' di un ritardo o di una variazione, che la corsa non dice mai.
      * Vedi `InfomobilitaParser`.
      *
-     * La pagina e' una sola per tutta Italia, 17 KB, e cambia di rado: si tiene
+     * Le notizie sono le stesse per tutta Italia e cambiano di rado: si tengono
      * per [NOTIZIE_VALIDE_MS], cosi' aprire dieci treni costa una chiamata sola.
-     * Se non risponde la corsa resta com'era.
+     * Prima in JSON, e solo se quello fallisce dalla pagina HTML; se non risponde
+     * nessuno dei due la corsa resta com'era.
      *
      * Quando una notizia vale per la corsa lo decide [NotiziaCorsa.riguarda].
      */
@@ -1422,11 +1753,156 @@ class TrainStatusRepository(
         return status.copy(avvisi = (suoi + status.avvisi).distinct())
     }
 
+    /** Le note SmartCaring gia' lette, per numero e giorno, e quando: vedi [conNoteDelGiorno]. */
+    private val noteLette = ConcurrentHashMap<String, Pair<Long, List<NotaSmartCaringDto>>>()
+
+    /**
+     * Aggiunge a una corsa le note SmartCaring di ViaggiaTreno per quel giorno: il
+     * **perche' dei regionali Trenitalia**, corsa per corsa, che la corsa non dice
+     * e le notizie nemmeno. Alle 19 del 19/09/2026 il REG 20175 aveva «Per un guasto
+     * ad un passaggio a livello tra le stazioni di CECCHINA e PAVONA, i treni del
+     * Regionale della relazione ROMA-VELLETRI [...] potranno subire ritardi fino a
+     * 30 minuti», con l'elenco delle 18 corse coinvolte.
+     *
+     * Vale anche **per un giorno futuro**: le note hanno una validita', e i lavori
+     * si annunciano prima. Il 5895 del 22/09 aveva la nota sui lavori di Roma
+     * Termini dal 21 al 26 settembre, mentre il tabellone di quel giorno mostrava
+     * l'orario normale. Vedi `data/fonti/VIAGGIATRENO.md`.
+     *
+     * Si chiede come fa il sito di ViaggiaTreno: non per i treni Trenord (63) e
+     * DB-OBB (64), non per Frecce e Intercity, che note non ne hanno. Si chiede
+     * per numero e giorno **senza l'origine**, che il server usa come filtro: una
+     * corsa letta a pezzi (vedi `JourneyRepository.corsaDelGiorno`) comincia alla
+     * salita, e un'origine sbagliata darebbe zero note. L'origine si controlla
+     * qui: quella nota di chi chiama ([origine]), o una delle fermate della corsa.
+     * E si controlla qui anche la validita', che il server gia' rispetta: senza
+     * il giorno arriva l'intero storico, 50 note per il 18686.
+     *
+     * Il testo e' quello della fonte. Le note arrivano spesso doppie, stesso id o
+     * stesso testo: se ne tiene una. Tenute [NOTIZIE_VALIDE_MS], come le
+     * notizie; se il servizio non risponde, la corsa resta com'era.
+     */
+    suspend fun conNoteDelGiorno(status: TrainStatus, date: LocalDate, origine: String? = null): TrainStatus {
+        val testi = noteDelGiorno(status, date, origine)
+        if (testi.isEmpty()) return status
+        return status.copy(avvisi = (testi + status.avvisi).distinct())
+    }
+
+    /** I testi di [conNoteDelGiorno], senza attaccarli alla corsa. */
+    suspend fun noteDelGiorno(status: TrainStatus, date: LocalDate, origine: String? = null): List<String> {
+        if (!status.haNoteSmartCaring()) return emptyList()
+        val note = noteSmartCaring(status.number, date) ?: return emptyList()
+        val giorno = { millis: Long -> Instant.ofEpochMilli(millis).atZone(ROME).toLocalDate() }
+        return note
+            .filter { nota ->
+                val dal = nota.startValidity?.let(giorno)
+                val al = nota.endValidity?.let(giorno)
+                (dal == null || !date.isBefore(dal)) && (al == null || !date.isAfter(al))
+            }
+            .filter { nota ->
+                nota.trains.any { treno ->
+                    treno.commercialTrainNumber?.trim() == status.number && status.partivaDa(treno.originCode, origine)
+                }
+            }
+            .mapNotNull { it.infoNote?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+    }
+
+    /**
+     * Quel che le notizie delle direttrici Trenord dicono di questa corsa in
+     * quel giorno: vedi `NotizieDirettrici`. Solo per i treni Trenord, o per
+     * quelli di cui l'impresa non si sa: gli altri Trenord non li nomina.
+     *
+     * Il chiamante deve rispettare l'interruttore della sorgente: qui non si
+     * leggono le impostazioni.
+     */
+    suspend fun notizieDiTrenord(status: TrainStatus, date: LocalDate): List<String> {
+        val trenord = trenord ?: return emptyList()
+        if (status.impresa != null && status.impresa != Imprese.TRENORD) return emptyList()
+        if (status.number.isBlank() || !status.sullaReteRfi()) return emptyList()
+        if (SENZA_NOTIZIE_TRENORD.any { status.sigla().startsWith(it) }) return emptyList()
+        return trenord.notizieDelleCorse().filter { it.riguarda(status, date) }.map { it.testo }.distinct()
+    }
+
+    private suspend fun noteSmartCaring(numero: String, date: LocalDate): List<NotaSmartCaringDto>? =
+        withContext(Dispatchers.IO) {
+            val chiave = "$numero|$date"
+            val adesso = System.currentTimeMillis()
+            noteLette[chiave]?.let { (quando, lette) -> if (adesso - quando < NOTIZIE_VALIDE_MS) return@withContext lette }
+            val lette = try {
+                viaggiaTreno.noteSmartCaring(numero, date.toString())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return@withContext noteLette[chiave]?.second
+            }
+            noteLette[chiave] = adesso to lette
+            lette
+        }
+
+    /** Se la corsa e' di quelle per cui ViaggiaTreno scrive note SmartCaring: vedi [conNoteDelGiorno]. */
+    private fun TrainStatus.haNoteSmartCaring(): Boolean {
+        if (number.isBlank() || !number.all(Char::isDigit)) return false
+        if (impresa == Imprese.TRENORD || impresa == Imprese.DB_OBB) return false
+        if (SENZA_NOTE_SMARTCARING.any { sigla().startsWith(it) }) return false
+        return sullaReteRfi()
+    }
+
+    /** La sigla della corsa, dalla categoria o, se vuota, dall'etichetta: ViaggiaTreno a volte la lascia vuota. */
+    private fun TrainStatus.sigla(): String =
+        (category?.trim()?.takeIf { it.isNotEmpty() } ?: label.trim().substringBefore(' ')).uppercase()
+
+    /** Se la corsa passa da stazioni RFI: EAV, ARST, Ferrotramviaria e le svizzere hanno codici loro. */
+    private fun TrainStatus.sullaReteRfi(): Boolean = stops.any { it.stationCode?.startsWith("S") == true }
+
+    /**
+     * Se il treno di una nota e' questa corsa: parte dall'[origine] che chi chiama
+     * conosce, o in mancanza da una delle sue fermate. Una nota senza origine vale
+     * per il numero, gia' filtrato dal server.
+     */
+    private fun TrainStatus.partivaDa(daNota: String?, origine: String?): Boolean {
+        val codice = daNota?.trim()?.takeIf { it.isNotEmpty() } ?: return true
+        if (!origine.isNullOrBlank()) return stessaStazione(codice, origine)
+        return stops.any { stessaStazione(it.stationCode, codice) }
+    }
+
     private suspend fun notizieDiOggi(): List<NotiziaCorsa> = withContext(Dispatchers.IO) {
         val adesso = System.currentTimeMillis()
         notizie?.let { (quando, lette) -> if (adesso - quando < NOTIZIE_VALIDE_MS) return@withContext lette }
-        val lette = runCatching { InfomobilitaParser.parse(viaggiaTreno.infomobilita().string()) }
-            .getOrElse { return@withContext notizie?.second.orEmpty() }
+        // Una risposta senza nemmeno la voce "circolazione regolare" non e' una
+        // giornata tranquilla: e' il JSON che non va, e si chiede alla pagina.
+        val voci = try {
+            viaggiaTreno.notizieInfomobilita()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        // Anche la lettura sta dentro il `try`: se un giorno una voce arriva in una
+        // forma che il parser non regge, si ripiega sulla pagina come se il JSON
+        // non avesse risposto — invece di far fallire la schermata del treno.
+        val dalJson = if (voci.isEmpty()) {
+            null
+        } else {
+            try {
+                InfomobilitaParser.daJson(voci)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        }
+        val lette = if (dalJson != null) {
+            dalJson
+        } else {
+            try {
+                InfomobilitaParser.parse(viaggiaTreno.infomobilita().string())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return@withContext notizie?.second.orEmpty()
+            }
+        }
         notizie = adesso to lette
         lette
     }
@@ -1437,5 +1913,41 @@ class TrainStatusRepository(
 
         /** Per quanto vale una lettura delle notizie di ViaggiaTreno. */
         const val NOTIZIE_VALIDE_MS = 5 * 60_000L
+
+        /**
+         * Le sigle per cui il sito di ViaggiaTreno le note SmartCaring non le
+         * chiede: Frecce e Intercity, Intercity Notte compresi. E Italo, che non e'
+         * di Trenitalia.
+         */
+        val SENZA_NOTE_SMARTCARING = listOf("FR", "FA", "FB", "IC", "ITALO")
+
+        /** Le sigle che Trenord non ha: le sue notizie non le nominano. */
+        val SENZA_NOTIZIE_TRENORD = listOf("FR", "FA", "FB", "IC", "EC", "EN", "ITALO")
+
+        /**
+         * Quanto puo' scostarsi dall'ora di salita la fermata della corsa trovata
+         * dall'origine: oltre, e' un'altra corsa dello stesso numero (vedi
+         * `dallOrigine`). Un'ora tiene conto di orari di tabella ritoccati.
+         */
+        const val SCARTO_SALITA_MINUTI = 60L
     }
 }
+
+/** Un orario di Le Frecce col fuso (`…T13:21:00.000+02:00`) nell'ora di Roma. */
+private fun String?.inOraDiRoma(): LocalDateTime? =
+    this?.let { runCatching { OffsetDateTime.parse(it).atZoneSameInstant(ROME).toLocalDateTime() }.getOrNull() }
+
+private fun stessoMinuto(a: LocalDateTime, b: LocalDateTime): Boolean =
+    a.withSecond(0).withNano(0) == b.withSecond(0).withNano(0)
+
+/**
+ * L'id di Le Frecce di un codice RFI: `S12328` → `830012328`. E' la regola quasi
+ * sempre; le eccezioni (il Passante di Garibaldi e' `830001662`, non `…1647`)
+ * fanno fallire la ricerca, e chi la usa ha un ripiego.
+ */
+private fun idLeFrecceDaCodice(codice: String): Long? =
+    codice.takeIf { it.length == 6 && it.startsWith("S") }?.drop(1)?.toLongOrNull()?.let { 830_000_000L + it }
+
+/** Il codice RFI di un id di Le Frecce, con la stessa regola di [idLeFrecceDaCodice]. */
+private fun codiceDaIdLeFrecce(id: Long): String? =
+    (id - 830_000_000L).takeIf { it in 1 until 100_000 }?.let { "S%05d".format(it) }

@@ -1,13 +1,23 @@
 package it.zawardo.treni.ui.train
 
+import it.zawardo.treni.data.repository.TabelloniFuturi
 import it.zawardo.treni.ServiceLocator
 import it.zawardo.treni.data.mapper.ROME
+import it.zawardo.treni.domain.model.oggiInItalia
+import it.zawardo.treni.domain.model.BoardEntry
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.Station
 import it.zawardo.treni.domain.model.TrainRef
 import it.zawardo.treni.domain.model.TrainStatus
-import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.soloOrarioPrevistoPer
 import it.zawardo.treni.domain.model.stessaStazione
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.LocalDate
@@ -17,8 +27,9 @@ import java.time.LocalDateTime
  * Come si arriva a una corsa, da qualunque schermata la si guardi.
  *
  * La cascata e' una sola e non e' banale — ViaggiaTreno, poi Trenord, poi
- * Italo, poi le reti col solo orario, infine l'orario ricavato dalla corsa di
- * oggi — e adesso serve in due posti: il dettaglio di un treno singolo e la
+ * Italo, poi le reti col solo orario, e per un giorno futuro le fermate di quel
+ * giorno da Le Frecce coi binari dei tabelloni di quel giorno — e serve in due
+ * posti: il dettaglio di un treno singolo e la
  * pagina di un viaggio con cambi, che ne carica una per tratta. Scriverla due
  * volte avrebbe voluto dire, alla prima correzione fatta da una parte sola,
  * due schermate che rispondono in modo diverso sullo stesso treno.
@@ -43,6 +54,8 @@ internal class CaricatoreCorsa(
     private val boardingName: String? = null,
     /** Dove si scende: con Italo e' anche il modo piu' diretto di avere il percorso. */
     private val alightingCode: String? = null,
+    /** Il nome della stazione di discesa: serve a Le Frecce per trovarla. */
+    private val alightingName: String? = null,
     /**
      * Corsa gia' identificata da chi ci ha portati qui.
      *
@@ -52,13 +65,21 @@ internal class CaricatoreCorsa(
      */
     private val originCode: String? = null,
     private val departureMillis: Long? = null,
+    /**
+     * L'origine della corsa detta dalla ricerca (`bdoOrigin` di Le Frecce), senza
+     * la data: con questa ViaggiaTreno si interroga direttamente, invece di
+     * cercare il numero. Vedi `TrainStatusRepository.resolveFor`.
+     */
+    private val origineCorsa: String? = null,
 ) {
 
     private val trains = ServiceLocator.trainStatusRepository
+    private val journeys = ServiceLocator.journeyRepository
     private val trenord = ServiceLocator.trenordRepository
     private val italo = ServiceLocator.italoRepository
     private val eav = ServiceLocator.eavRepository
     private val arst = ServiceLocator.arstRepository
+    private val fnb = ServiceLocator.fnbRepository
     private val settings = ServiceLocator.settings
 
     /**
@@ -70,8 +91,17 @@ internal class CaricatoreCorsa(
         val sources = runCatching { settings.enabledSources.first() }
             .getOrDefault(DataSource.defaultEnabled)
 
+        /*
+         * Una corsa che sale da una rete con stazioni proprie — EAV, ARST,
+         * Ferrotramviaria — si chiede alla sua rete e basta. ViaggiaTreno e
+         * Trenord quei treni non li hanno, e lo stesso numero da loro e' un altro
+         * treno: il 20/09/2026 3 corse EAV su 25 avevano il numero di un treno
+         * RFI, e il dettaglio dell'EAV 2093 mostrava il 2093 da Voghera.
+         */
+        val retePropria = eav.covers(boardingCode) || arst.covers(boardingCode) || fnb.covers(boardingCode)
+
         // Il tempo reale per la data cercata, dalle fonti che lo hanno.
-        val status = realtime(date, sources)
+        val status = (if (retePropria) null else realtime(date, sources))
             /*
              * Poi le reti col solo orario. EAV per le corse che il suo monitor
              * non copre — quelle di domani, e le linee senza monitor — e ARST,
@@ -79,50 +109,181 @@ internal class CaricatoreCorsa(
              * giorno giusto: si riconosce di chi e' la corsa dal codice di salita.
              */
             ?: eav.takeIf { DataSource.EAV in sources && it.covers(boardingCode) }
-                ?.dettaglioCorsa(trainNumber, date)
-            ?: arst.takeIf { DataSource.ARST in sources && it.covers(boardingCode) }
-                ?.dettaglioCorsa(trainNumber, date)
+                ?.dettaglioCorsa(trainNumber, date, boardingCode, alightingCode)
             /*
-             * Ultimo, per una data futura: l'orario previsto dalla corsa di
-             * **oggi** con lo stesso numero, da qualunque fonte in tempo reale.
-             * Un treno che circola ogni giorno ha lo stesso tragitto; si prende
-             * quello di oggi, gli si tolgono i dati di oggi e si sposta la data.
-             * Niente se oggi quel numero non circola: meglio nessun percorso che
-             * quello di un altro treno.
+             * Ad ARST si dice anche **da dove si sale**: il suo numero non
+             * identifica una corsa. Le linee sono numerate ognuna per conto suo e
+             * i numeri si ripetono — il 20/09/2026, 48 corse su 117 — fra la
+             * Monserrato-Isili e la Sassari-Sorso, che sono in due angoli opposti
+             * dell'isola. Senza, la AT9 presa a Sassari apriva quella di Senorbi'.
              */
-            ?: previstoDaOggi(sources)
+            ?: arst.takeIf { DataSource.ARST in sources && it.covers(boardingCode) }
+                ?.dettaglioCorsa(trainNumber, date, boardingCode, boardingAt)
+            /*
+             * Ferrotramviaria: le fermate stanno solo nella ricerca del suo
+             * portale, che risponde per qualunque giorno. Serve l'ora di salita,
+             * perche' il numero da solo li' non si cerca.
+             */
+            ?: fnb.takeIf { DataSource.FNB in sources && it.covers(boardingCode) }
+                ?.dettaglioCorsa(trainNumber, boardingCode, alightingCode, boardingAt ?: date.atTime(4, 0))
+            // Per un giorno futuro: le fermate di quel giorno da Le Frecce.
+            ?: delGiornoDaLeFrecce(sources)
 
         /*
          * Del futuro nessuno conosce il tempo reale, nemmeno le fonti che per
          * quel giorno rispondono: quel che torna e' orario, e come tale va detto.
          */
-        if (status == null || !date.isAfter(LocalDate.now())) return status
-        val futuro = status.perGiornoFuturo()
-        return if (status.realtime) futuro.conBinariDiTabellaDaOggi(sources) else futuro
+        val delGiorno = when {
+            status == null -> return null
+            date.isAfter(oggiInItalia()) -> status.perGiornoFuturo().conBinariDelGiorno()
+            else -> status
+        }
+        /*
+         * Il perche', per quel giorno: le note SmartCaring dei regionali
+         * Trenitalia (`TrainStatusRepository.conNoteDelGiorno`) e le notizie
+         * delle direttrici Trenord che nominano la corsa (`notizieDiTrenord`).
+         * Dopo `perGiornoFuturo`, che gli avvisi di oggi li toglie: queste sono
+         * proprio di quel giorno. Le due chiamate in parallelo, e tenute cinque
+         * minuti: aggiornare la schermata non le ripete.
+         */
+        val nuovi = coroutineScope {
+            val note = async { trains.noteDelGiorno(delGiorno, date, originCode ?: origineCorsa) }
+            val trenordDice = async {
+                if (DataSource.TRENORD in sources) trains.notizieDiTrenord(delGiorno, date) else emptyList()
+            }
+            note.await() + trenordDice.await()
+        }
+        if (nuovi.isEmpty()) return delGiorno
+        return delGiorno.copy(avvisi = (nuovi + delGiorno.avvisi).distinct())
     }
 
     /**
-     * I binari di tabella di un giorno futuro, dalla corsa di oggi, quando chi
-     * ha risposto non ne ha nemmeno uno.
+     * La corsa di un giorno futuro da Le Frecce, con le fermate e gli orari **di
+     * quel giorno**: vedi `JourneyRepository.corsaDelGiorno`.
      *
-     * Trenord risponde per qualunque giorno, ma coi soli binari effettivi, che
-     * per domani non esistono ancora: il 19/09/2026 il REG 2613 di domani si
-     * apriva con zero binari, mentre la corsa di oggi li aveva programmati su
-     * tutte e undici le fermate. Una Freccia, che Trenord non conosce, i binari
-     * li aveva gia': li porta [previstoDaOggi]. Qui si prendono solo i
-     * programmati, accoppiati per stazione e orario come in `conBinariDa`: sono
-     * orario, e restano «previsto».
+     * Prima si ricavava dalla corsa di oggi con lo stesso numero, ed era
+     * sbagliato tre volte: un treno che oggi non circola restava senza niente —
+     * domenica 20/09/2026 i RE 22111 e 21905 Acireale-Catania, che il sabato non
+     * circolano —, una corsa oggi variata prestava il percorso sbagliato, e il
+     * binario di oggi non e' quello di quel giorno. Deciso con l'utente il
+     * 19/09/2026: si butta, e la corsa va dalla sua origine al capolinea.
+     *
+     * Il capolinea Le Frecce non lo dice: lo indicano il tabellone di quel giorno
+     * alla salita e, se c'e', la corsa di oggi. Sono solo indizi: vale quello che
+     * la ricerca di quel giorno conferma con lo stesso treno alla stessa ora.
      */
-    private suspend fun TrainStatus.conBinariDiTabellaDaOggi(sources: Set<DataSource>): TrainStatus {
-        if (stops.any { it.scheduledPlatform != null }) return this
-        val oggi = runCatching { realtime(LocalDate.now(), sources) }.getOrNull() ?: return this
-        // Come in [previstoDaOggi]: una corsa che non passa da dove si sale e' un altro treno.
-        if (boardingCode != null && oggi.stops.none { stessaStazione(it.stationCode, boardingCode) }) return this
-        val completa = conBinariDa(oggi.soloOrarioPrevistoPer(giorno = date))
-        if (completa.stops.none { it.scheduledPlatform != null }) return this
-        // Da dove vengono va detto, come nella nota di [previstoDaOggi].
-        return completa.copy(
-            notice = listOfNotNull(notice, "Binari di tabella dalla corsa di oggi.").joinToString(" "),
+    private suspend fun delGiornoDaLeFrecce(sources: Set<DataSource>): TrainStatus? {
+        if (!date.isAfter(oggiInItalia())) return null
+        val salitaAlle = boardingAt ?: return null
+        val salita = boardingCode?.takeIf { it.isNotBlank() }?.let { Station(it, 0, boardingName.orEmpty()) } ?: return null
+        val capolinea = buildList {
+            rigaDiSalita()?.direction?.let { add(Station(null, 0, it)) }
+            runCatching { realtime(oggiInItalia(), sources) }.getOrNull()?.let { oggi ->
+                val ultima = oggi.stops.lastOrNull()
+                add(Station(ultima?.stationCode, 0, oggi.destination ?: ultima?.stationName.orEmpty()))
+            }
+        }
+        /*
+         * Senza una discesa — si arriva dal tabellone, o dalla notifica di una
+         * corsa sola — vale il **capolinea di quel giorno**: è dove il treno va, e
+         * cercare la tratta fin lì dà comunque tutte le fermate. Prima, in quel
+         * caso, la corsa di un giorno futuro non usciva affatto.
+         */
+        val discesa = alightingCode?.takeIf { it.isNotBlank() }
+            ?.let { Station(it, 0, alightingName.orEmpty()) }
+            ?: capolinea.firstOrNull { it.name.isNotBlank() }
+            ?: return null
+        return runCatching { journeys.corsaDelGiorno(trainNumber, salita, discesa, salitaAlle, capolinea) }.getOrNull()
+    }
+
+    /** La riga del treno nel tabellone di quel giorno alla salita, letta una volta sola. */
+    private var rigaDiSalitaLetta = false
+    private var rigaDiSalitaValore: BoardEntry? = null
+
+    /**
+     * Il lucchetto c'e' perche' [conBinariDelGiorno] chiede le fermate in
+     * parallelo: senza, la seconda coroutine trovava il segno «gia' letta»
+     * messo prima della chiamata e tornava un valore ancora vuoto — il binario
+     * di salita, proprio quello che serve, spariva a intermittenza.
+     */
+    private val letturaRigaDiSalita = Mutex()
+
+    private suspend fun rigaDiSalita(): BoardEntry? = letturaRigaDiSalita.withLock {
+        if (rigaDiSalitaLetta) return@withLock rigaDiSalitaValore
+        val codice = boardingCode?.takeIf { it.startsWith("S") }
+        val quando = boardingAt
+        if (codice == null || quando == null || !entroITabelloni()) {
+            rigaDiSalitaLetta = true
+            return@withLock null
+        }
+        /*
+         * Un tabellone che non risponde non si ricorda: questo caricatore vive
+         * quanto la schermata, e l'aggiornamento automatico ripassa di qui. Se un
+         * intoppo di rete valesse «letta», il binario di salita — quello che si
+         * guarda — resterebbe vuoto fino a che non si esce dalla pagina, e
+         * nemmeno tirando giu' per aggiornare tornerebbe.
+         */
+        val esito = runCatching { trains.rigaDelGiorno(codice, trainNumber, quando) }
+        if (esito.isFailure) return@withLock null
+        rigaDiSalitaValore = esito.getOrNull()
+        rigaDiSalitaLetta = true
+        rigaDiSalitaValore
+    }
+
+    /** I tabelloni di ViaggiaTreno rispondono fino a otto giorni avanti. */
+    private fun entroITabelloni(): Boolean = !date.isAfter(oggiInItalia().plusDays(TabelloniFuturi.GIORNI))
+
+    /**
+     * I binari di tabella **di quel giorno**, su **tutte** le fermate, dai
+     * tabelloni di ViaggiaTreno di quella data: partenze dove si sale e in
+     * mezzo, arrivi all'ultima. Entro otto giorni: oltre nessuna fonte ha un
+     * binario, e la corsa resta senza.
+     *
+     * Prima si chiedevano solo la salita e la discesa, e il dettaglio di domani
+     * usciva con due binari e tutte le fermate in mezzo vuote. Il binario pero'
+     * c'e' anche li': il 20/09/2026 il REG 2623 di lunedi' aveva «3» a Milano
+     * Lambrate e «1» a Brescia. Costa una chiamata per fermata, quindi si
+     * chiedono **insieme**, poche alla volta, e solo dove il binario manca.
+     *
+     * Si usano solo i programmati: per un giorno futuro un effettivo non esiste
+     * ancora (a Bologna le Frecce del 22/09 portavano «AV», che e' il piazzale).
+     * Restano «previsto».
+     */
+    private suspend fun TrainStatus.conBinariDelGiorno(): TrainStatus {
+        if (!entroITabelloni()) return this
+        val ultima = stops.lastIndex
+        val porta = Semaphore(TabelloniFuturi.INSIEME)
+
+        val binari = coroutineScope {
+            stops.mapIndexed { i, fermata ->
+                async {
+                    // Solo dove manca, solo sulla rete RFI, e solo se si sa quando ci passa.
+                    if (fermata.scheduledPlatform != null) return@async null
+                    val codice = fermata.stationCode?.takeIf { it.startsWith("S") } ?: return@async null
+                    // All'ultima fermata il treno arriva e basta: li' vale il tabellone degli arrivi.
+                    val arrivo = i == ultima
+                    val quando = (if (arrivo) fermata.scheduledArrival else fermata.scheduledDeparture)
+                        ?: fermata.scheduledArrival ?: fermata.scheduledDeparture ?: return@async null
+                    // Alla salita la riga serve anche altrove: si legge una volta sola.
+                    val riga = if (!arrivo && stessaStazione(codice, boardingCode)) {
+                        rigaDiSalita()
+                    } else {
+                        porta.withPermit {
+                            runCatching { trains.rigaDelGiorno(codice, trainNumber, quando, arrivo = arrivo) }.getOrNull()
+                        }
+                    }
+                    riga?.scheduledPlatform?.let { i to it }
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
+
+        if (binari.isEmpty()) return this
+        // Nessuna nota: sono binari di tabella come gli altri, e la corsa dice gia'
+        // «orario previsto». La nota esce in rosso, il colore delle variazioni.
+        return copy(
+            stops = stops.mapIndexed { i, fermata ->
+                binari[i]?.let { fermata.copy(scheduledPlatform = it) } ?: fermata
+            },
         )
     }
 
@@ -154,7 +315,7 @@ internal class CaricatoreCorsa(
     private suspend fun realtime(giorno: LocalDate, sources: Set<DataSource>): TrainStatus? {
         val at = if (giorno == date) boardingAt else null
         val nazionale = (if (giorno == date) exactRef()?.let { trains.status(it) } else null)
-            ?: trains.statusByNumber(trainNumber, giorno, boardingCode, at)
+            ?: trains.statusByNumber(trainNumber, giorno, boardingCode, at, origine = origineCorsa)
 
         /*
          * I binari che ViaggiaTreno non ha spesso li ha Trenord, e viceversa:
@@ -177,35 +338,6 @@ internal class CaricatoreCorsa(
         return trenord.takeIf { DataSource.TRENORD in sources }?.trainStatus(trainNumber, giorno)
             ?: italo.takeIf { DataSource.ITALO in sources }
                 ?.trainStatus(trainNumber, giorno, boardingCode, boardingName, alightingCode)
-    }
-
-    /**
-     * L'orario previsto ricavato dalla corsa di oggi con lo stesso numero.
-     *
-     * Vale per **qualsiasi fonte in tempo reale** — Trenitalia, Trenord, Italo —
-     * non solo per la rete nazionale: un treno che circola ogni giorno con lo
-     * stesso numero ha lo stesso tragitto, e da chiunque lo pubblichi oggi si
-     * ricava il percorso di domani. Della corsa di oggi si tiene **solo** il
-     * tragitto, binari di tabella compresi: ritardo, stato, binario effettivo e
-     * orari reali restano a oggi, dove sono veri — vedi [soloOrarioPrevistoPer].
-     *
-     * Vale solo per una data futura: per oggi risponde gia' [realtime], e
-     * ricopiare se stessi non avrebbe senso.
-     */
-    private suspend fun previstoDaOggi(sources: Set<DataSource>): TrainStatus? {
-        if (date == LocalDate.now()) return null
-        val oggi = runCatching { realtime(LocalDate.now(), sources) }.getOrNull() ?: return null
-
-        // Se la corsa di oggi non tocca la stazione da cui si sale, e' un altro
-        // treno con lo stesso numero: non lo si spaccia per quello cercato.
-        if (boardingCode != null && oggi.stops.none { stessaStazione(it.stationCode, boardingCode) }) return null
-
-        return oggi.soloOrarioPrevistoPer(
-            giorno = date,
-            notice = "Percorso, orari e binari di tabella dalla corsa di oggi con lo " +
-                "stesso numero. Ritardo, stato e binario effettivo saranno disponibili " +
-                "il giorno della partenza.",
-        )
     }
 
     /**
@@ -235,4 +367,5 @@ internal class CaricatoreCorsa(
                     "binario effettivo saranno disponibili il giorno della partenza.",
             )
         }
+
 }

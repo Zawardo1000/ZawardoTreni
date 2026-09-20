@@ -126,7 +126,6 @@ internal object HubAV {
     }
 
     /** L'hub con quel codice RFI, se e' un hub. */
-    fun byRfi(rfi: String?): Hub? = rfi?.let { r -> ELENCO.firstOrNull { it.rfi == r } }
 
     /** Distanza in chilometri, emisenoverso. La preselezione non ha bisogno di piu'. */
     private fun distanza(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

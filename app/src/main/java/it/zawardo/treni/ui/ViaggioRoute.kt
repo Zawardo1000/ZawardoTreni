@@ -1,7 +1,6 @@
 package it.zawardo.treni.ui
 
 import it.zawardo.treni.domain.model.Journey
-import it.zawardo.treni.domain.model.Leg
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -48,6 +47,8 @@ data class TrattaViaggio(
      */
     val partenzaEpochSec: Long,
     val arrivoEpochSec: Long,
+    /** L'origine della corsa, quando la ricerca la dice: vedi `Leg.origineCorsa`. */
+    val origineRfi: String? = null,
 ) {
     val giorno: LocalDate get() = LocalDate.ofEpochDay(giornoEpoch)
     val partenza: LocalDateTime get() = LocalDateTime.ofEpochSecond(partenzaEpochSec, 0, ZoneOffset.UTC)
@@ -106,5 +107,6 @@ fun Journey.tratteDelViaggio(): List<TrattaViaggio> = legs.map { leg ->
         discesaNome = leg.to.name,
         partenzaEpochSec = leg.departure.toEpochSecond(ZoneOffset.UTC),
         arrivoEpochSec = leg.arrival.toEpochSecond(ZoneOffset.UTC),
+        origineRfi = leg.origineCorsa,
     )
 }

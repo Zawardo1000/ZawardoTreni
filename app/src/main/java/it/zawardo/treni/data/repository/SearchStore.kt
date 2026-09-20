@@ -59,7 +59,6 @@ class SearchStore(
         saved.countFor(from.locationId, to.locationId) > 0
 
     suspend fun deleteSaved(id: Long) = saved.delete(id)
-    suspend fun renameSaved(id: Long, label: String) = saved.rename(id, label)
 
     /** Suggerimenti offline, serviti prima della chiamata di rete. */
     suspend fun suggestOffline(query: String): List<Station> =

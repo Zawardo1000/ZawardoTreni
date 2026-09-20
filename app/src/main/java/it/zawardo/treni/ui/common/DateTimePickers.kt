@@ -1,5 +1,6 @@
 package it.zawardo.treni.ui.common
 
+import it.zawardo.treni.domain.model.oggiInItalia
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,7 +38,7 @@ fun DatePickerModal(
     onDismiss: () -> Unit,
     onConfirm: (LocalDate) -> Unit,
 ) {
-    val today = LocalDate.now()
+    val today = oggiInItalia()
     val state = rememberDatePickerState(
         initialSelectedDateMillis = initial.toPickerMillis(),
         selectableDates = object : SelectableDates {

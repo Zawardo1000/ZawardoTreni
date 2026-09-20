@@ -34,8 +34,10 @@ interface LefrecceApi {
     ): LocationDto
 
     /**
-     * Apre una sessione di ricerca. [departureTime] in ISO locale senza offset,
-     * es. `2026-08-28T08:00:00.000`.
+     * Apre una sessione di ricerca. [departureTime] in ISO **con il fuso**, es.
+     * `2026-08-28T08:00:00.000+02:00`: senza, il BFF non da' errore ma cerca da
+     * mezzanotte (vedi `JourneyRepository.bffFormat`). La porta del sito invece
+     * lo vuole senza fuso.
      *
      * Il `searchId` restituito **scade dopo 15 minuti** (misurato il 18/09/2026).
      */
@@ -83,4 +85,16 @@ interface LefrecceApi {
      */
     @POST("https://www.lefrecce.it/Channels.Website.BFF.WEB/website/ticket/solutions")
     suspend fun soluzioniDelSito(@Body richiesta: RichiestaSito): RispostaSito
+
+    /**
+     * Le fermate di una soluzione, tratta per tratta, per il giorno di quella
+     * soluzione: e' la chiamata del sito quando si apre «Dettagli». Solo il pezzo
+     * percorso, senza binari; con `summary.bdoOrigin`, l'origine della corsa.
+     * [cartId] vale solo nella sessione della ricerca che l'ha dato.
+     */
+    @GET("https://www.lefrecce.it/Channels.Website.BFF.WEB/website/stops")
+    suspend fun fermateDelSito(
+        @Query("cartId") cartId: String,
+        @Query("solutionId") solutionId: String,
+    ): List<TrattaDelSito>
 }

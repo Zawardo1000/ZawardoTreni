@@ -5,7 +5,8 @@ Ricognizione del 28/08/2026. Tre fonti indipendenti, nessuna delle quali basta d
 | Fonte | Cosa dà | Autenticazione | Formato |
 |---|---|---|---|
 | `orariotreni.eavsrl.it` | tabellone live di stazione | nessuna | HTML |
-| GTFS open data | orario ufficiale fino a maggio 2027 | nessuna | ZIP di CSV |
+| GTFS open data | orario ufficiale, oggi fino al 31/12/2026 | nessuna | ZIP di CSV |
+| `planner.eavsrl.it/Home/Create` | A→B per data, con **ritardo e soppressione per corsa** (19/09/2026) | nessuna | JSON |
 | `unicocampania.it` | tariffe comune→comune | token CSRF di sessione | HTML |
 
 Nessuna richiede chiavi, nessuna è offuscata. La licenza del GTFS è **Italian Open Data
@@ -116,8 +117,16 @@ Napoli–Caserta–Piedimonte Matese (7). Alcuni `route_id` usano il punto come 
 variante: `1`, `1.`, `1..` sono Napoli–Sorrento, Napoli–Torre Annunziata e
 Napoli–Torre del Greco.
 
-**Copertura fino a maggio 2027**: è l'unica delle fonti dell'app che permette di
-rispondere su date future. ViaggiaTreno risponde `204` oltre la giornata corrente.
+**Copertura**: il 28/08/2026 arrivava a maggio 2027; il feed ripubblicato il 16/09/2026
+si ferma al **31/12/2026** e pesa 6,2 MB. È comunque la fonte dell'app che permette di
+rispondere su date future per EAV; ViaggiaTreno risponde `204` oltre la giornata corrente.
+
+**Aggiornamento del 19/09/2026.** Il ritardo per corsa, che qui sopra risultava
+inesistente, lo dà il pianificatore `planner.eavsrl.it/Home/Create` (A→B per data, JSON,
+con `ritardo` e `soppressa` di ogni corsa di oggi, gli stessi minuti del tabellone), e il
+monitor segna il treno in banchina nella colonna `blink`. La Campania Express (10821,
+11918) sta sui tabelloni e nel pianificatore ma non nel GTFS. Dettagli in
+[`fonti/MINORI.md`](fonti/MINORI.md).
 
 ---
 

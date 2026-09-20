@@ -3,7 +3,6 @@ package it.zawardo.treni.domain.model
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
-import kotlin.math.abs
 
 /**
  * Quanto possono discostarsi gli orari di tabella di due letture della stessa
@@ -33,8 +32,7 @@ private val Stop.orarioDiTabella: LocalDateTime?
 private fun Stop.eLaStessaFermataDi(altra: Stop): Boolean {
     val qui = orarioDiTabella ?: return false
     val la = altra.orarioDiTabella ?: return false
-    val secondi = abs(Duration.between(qui.toLocalTime(), la.toLocalTime()).seconds)
-    return minOf(secondi, 86_400 - secondi) <= SCARTO_AMMESSO.seconds
+    return secondiCircolari(qui.toLocalTime(), la.toLocalTime()) <= SCARTO_AMMESSO.seconds
 }
 
 /**

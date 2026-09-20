@@ -95,9 +95,12 @@ class SvizzeraLiveTest {
      * rivedere — ma va rivista, non lasciata cadere.
      */
     @Test
-    fun `il tabellone degli arrivi e' vuoto per scelta`() = runBlocking {
+    fun `gli arrivi hanno l'origine e nessun tempo reale`() = runBlocking {
         val arrivi = svizzera.board(santaMariaMaggiore, arrivals = true)
-        assertEquals(emptyList<Any>(), arrivi)
+        arrivi.take(6).forEach { println("  arrivo ${it.label} ${it.trainRef.number} da ${it.direction} ${it.scheduledTime}") }
+        org.junit.Assume.assumeTrue("nessun arrivo a quest'ora", arrivi.isNotEmpty())
+        assertTrue("l'origine c'e'", arrivi.all { !it.direction.isNullOrBlank() })
+        assertTrue("il tempo reale degli arrivi e' finto: niente ritardi", arrivi.none { it.realtime })
     }
 
     @Test
