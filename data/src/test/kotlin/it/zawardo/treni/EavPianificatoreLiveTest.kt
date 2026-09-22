@@ -97,6 +97,39 @@ class EavPianificatoreLiveTest {
         }
     }
 
+    /**
+     * Il ritardo deve arrivare **fino alla riga dell'elenco**, non fermarsi nel
+     * repository.
+     *
+     * E' la catena intera: la fonte che risponde, `conRitardi` che accoppia per
+     * numero di treno, e il `Journey` che esce con un ritardo invece che con
+     * nulla. Se si spezzasse in mezzo, l'elenco EAV tornerebbe a essere solo
+     * orario senza che nessun altro test se ne accorga — e con lui sparirebbe
+     * la regola dei treni ancora prendibili, che su EAV vive di questo ritardo.
+     *
+     * Conta che il campo sia **valorizzato**, non che sia diverso da zero: una
+     * corsa in orario e' una notizia quanto una in ritardo, ed e' la differenza
+     * fra «so che va bene» e «non so niente».
+     */
+    @Test
+    fun `il ritardo arriva fino alle corse dell'elenco`() = runBlocking {
+        val adesso = LocalDateTime.now()
+        val ritardi = eav.ritardiFraStazioni(portaNolana, sorrento, adesso)
+        assumeTrue("nessuna corsa da nessuna delle due fonti EAV adesso", ritardi.isNotEmpty())
+
+        val corse = eav.itinerario(portaNolana, sorrento)
+        assumeTrue("l'orario imbarcato non ha corse Porta Nolana-Sorrento oggi", corse.isNotEmpty())
+        val conRitardi = eav.conRitardi(corse, portaNolana, sorrento, adesso)
+
+        val note = conRitardi.filter { it.delayMinutes != null }
+        println("\n=== EAV: ${note.size} corse su ${conRitardi.size} col ritardo, da ${ritardi.values.first().fonte.comeSiChiama} ===")
+        note.take(5).forEach { println("  ${it.legs.first().trainNumber}: ${it.delayMinutes} min${if (it.cancelled) ", soppressa" else ""}") }
+        assertTrue(
+            "nessuna corsa dell'elenco ha preso il ritardo: la catena fonte -> conRitardi -> riga e' rotta",
+            note.isNotEmpty(),
+        )
+    }
+
     @Test
     fun `per un altro giorno nessuna delle due fonti promette ritardi`() = runBlocking {
         val domani = LocalDate.now().plusDays(1).atTime(9, 0)

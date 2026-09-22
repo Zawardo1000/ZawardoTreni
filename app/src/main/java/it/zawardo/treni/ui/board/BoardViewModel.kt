@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -299,14 +300,32 @@ class BoardViewModel : ViewModel() {
         verificate.clear()
         chieste.clear()
         val arriviQui = _state.value.mode == BoardMode.ARRIVALS
-        orarioTrenord = if (DataSource.TRENORD in sources) {
-            viewModelScope.async {
-                runCatching { trenord.timetable(code, arriviQui) }.getOrDefault(emptyList())
-            }
-        } else {
-            null
-        }
         caricamento = viewModelScope.launch {
+            /*
+             * Le reti accese **prima** di chiedere, come fa gia' la ricerca.
+             *
+             * Le impostazioni si leggono in asincrono, e fino alla prima
+             * emissione [sources] vale il default — dove, fra le opzionali, c'e'
+             * solo Trenord. Il tabellone pero' partiva subito, e cosi' la prima
+             * apertura su una stazione di una rete locale non interrogava quella
+             * rete affatto: il 22/09/2026 Napoli Porta Nolana si apriva con
+             * «Nessun treno tracciato in questa fascia oraria», e bastava
+             * «Aggiorna» per popolarla. Il messaggio era anche la bugia
+             * peggiore, perche' diceva che i treni non erano tracciati mentre
+             * nessuno li aveva chiesti.
+             */
+            sources = runCatching { ServiceLocator.settings.enabledSources.first() }
+                .getOrDefault(sources)
+            // Dipende dalle fonti, quindi si decide qui e non prima. Resta
+            // appeso al viewModelScope, non a questo caricamento: lo aspettano
+            // anche i soppressi, che sopravvivono al giro che li ha chiesti.
+            orarioTrenord = if (DataSource.TRENORD in sources) {
+                viewModelScope.async {
+                    runCatching { trenord.timetable(code, arriviQui) }.getOrDefault(emptyList())
+                }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(loading = true, message = null, noMore = false, generazione = it.generazione + 1)
             }

@@ -1119,9 +1119,16 @@ private fun StatoSoluzione(row: JourneyRow) {
     val scheme = MaterialTheme.colorScheme
     val stato = row.state
     when {
-        // Va detto, invece di lasciare il posto vuoto come se l'informazione
-        // stesse ancora arrivando.
-        !row.realtimePossible -> Text(
+        /*
+         * Va detto, invece di lasciare il posto vuoto come se l'informazione
+         * stesse ancora arrivando.
+         *
+         * Ma solo se di questa corsa non si sa davvero niente: vedi
+         * [JourneyRow.statoNoto]. Una riga EAV di cui il pianificatore o il
+         * tabellone hanno detto il ritardo — o la soppressione — ha un dato
+         * vero da mostrare, e scriverci sopra «senza tempo reale» lo cancellava.
+         */
+        !row.realtimePossible && !row.statoNoto -> Text(
             "senza tempo reale",
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,

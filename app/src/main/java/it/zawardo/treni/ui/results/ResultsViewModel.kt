@@ -173,6 +173,26 @@ data class JourneyRow(
     val realtimeNow: Boolean get() = realtimePossible && isRealtimeDay
 
     /**
+     * Di **questa** corsa qualcuno ha detto qualcosa, anche se la sua rete un
+     * tempo reale generale non ce l'ha.
+     *
+     * Serve a non dare della stessa rete due risposte diverse. «Senza tempo
+     * reale» e' vero di una rete, non sempre di una riga: le corse EAV il
+     * ritardo ce l'hanno quando il pianificatore o il tabellone della stazione
+     * di salita rispondono per quel numero (`EavRepository.conRitardi`), e
+     * Ferrotramviaria lo stesso. Finche' l'etichetta guardava solo la rete, una
+     * corsa EAV **soppressa** usciva scritta «senza tempo reale» invece che
+     * «Soppresso»: il dato c'era, e lo copriva la frase che diceva che non
+     * poteva esserci.
+     *
+     * Falso quando nessuna fonte ha parlato di quel numero, ed e' li' che
+     * «senza tempo reale» torna a essere la risposta giusta. Non basta il
+     * ritardo a zero di una corsa non trovata, perche' quelle righe nascono con
+     * [delayMinutes] nullo e nullo restano.
+     */
+    val statoNoto: Boolean get() = state != null || delayMinutes != null
+
+    /**
      * Quando questa soluzione parte davvero, per quel che se ne sa: l'ora di
      * tabella piu' il ritardo del primo treno.
      *
