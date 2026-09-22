@@ -171,6 +171,39 @@ data class JourneyRow(
 
     /** Interrogabile davvero: un treno, e nella giornata in cui il dato esiste. */
     val realtimeNow: Boolean get() = realtimePossible && isRealtimeDay
+
+    /**
+     * Quando questa soluzione parte davvero, per quel che se ne sa: l'ora di
+     * tabella piu' il ritardo del primo treno.
+     *
+     * Su una riga gia' passata in tabella e' [partenzaStimata], che chi l'ha
+     * messa in elenco ha calcolato sulla corsa vera.
+     */
+    val partenzaAttesa: LocalDateTime
+        get() = partenzaStimata
+            ?: journey.departure.plusMinutes((delayMinutes ?: 0).coerceAtLeast(0).toLong())
+
+    /**
+     * Vero quando quell'ora e' passata: il treno non si prende piu'.
+     *
+     * **L'elenco invecchia.** Le righe nascono da una ricerca fatta a un'ora
+     * precisa e non vengono piu' riviste: il 22/09/2026 alle 08:23 una ricerca
+     * delle 08:11 da Vignate mostrava ancora, bianco come gli altri, il 24604
+     * delle 08:18 partito alle 08:21 — ViaggiaTreno la partenza reale ce
+     * l'aveva, ed era scritta in rosso sulla scheda stessa. Nessuno pero'
+     * ripeteva la domanda, perche' tutti i filtri sono ancorati all'ora
+     * **cercata**, non a quella di adesso.
+     *
+     * Si decide qui, sull'orologio, e non con una nuova interrogazione: il dato
+     * serve a ogni minuto e la risposta e' gia' a schermo — l'ora di tabella e
+     * il ritardo. Una chiamata al minuto per riga sarebbe il contrario di come
+     * l'app tratta la rete altrui.
+     *
+     * La riga **resta**, come resta barrato un soppresso e come resta la
+     * coincidenza persa: sparire sotto gli occhi di chi legge dice di meno che
+     * dire «e' partito», e la scheda accanto e' proprio quella da prendere.
+     */
+    fun giaPartita(adesso: LocalDateTime): Boolean = adesso.isAfter(partenzaAttesa)
 }
 
 data class ResultsUiState(

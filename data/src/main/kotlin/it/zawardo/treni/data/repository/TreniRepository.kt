@@ -42,6 +42,7 @@ import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.conAvvisiDa
 import it.zawardo.treni.domain.model.conBinariDa
 import it.zawardo.treni.domain.model.conRitardoDaFermo
+import it.zawardo.treni.domain.model.conRitardoDalTempoPassato
 import it.zawardo.treni.domain.model.matchesCategory
 import it.zawardo.treni.domain.model.prezzoDaTrenord
 import it.zawardo.treni.domain.model.stessaStazione
@@ -1321,15 +1322,22 @@ class TrainStatusRepository(
      * non nel mapper, perche' e' il solo punto da cui passano tutte le corse
      * ViaggiaTreno e perche' vuole l'ora di adesso. Non dove la corsa di ieri
      * prova il contrario: vedi [nonPartitoVuolDireFermo].
+     *
+     * Lo stesso vale in mezzo al percorso, dove pero' non serve nessuna prova:
+     * il ritardo dell'ultimo rilevamento non puo' reggere oltre l'ora della
+     * fermata successiva. Vedi `conRitardoDalTempoPassato`.
      */
     suspend fun status(ref: TrainRef): TrainStatus? = withContext(Dispatchers.IO) {
         val resp = runCatching {
             viaggiaTreno.andamentoTreno(ref.originCode, ref.number, ref.departureDateMillis)
         }.getOrElse { return@withContext null }
         if (!resp.isSuccessful || resp.code() == 204) return@withContext null
+        val adesso = LocalDateTime.now(ROME)
         val stato = resp.body()?.toTrainStatus() ?: return@withContext null
-        val daFermo = stato.conRitardoDaFermo(LocalDateTime.now(ROME))
-        if (daFermo.delayMinutes != stato.delayMinutes && nonPartitoVuolDireFermo(ref)) daFermo else stato
+        val daFermo = stato.conRitardoDaFermo(adesso)
+        val partenza =
+            if (daFermo.delayMinutes != stato.delayMinutes && nonPartitoVuolDireFermo(ref)) daFermo else stato
+        partenza.conRitardoDalTempoPassato(adesso)
     }
 
     /**

@@ -44,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -65,6 +66,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import it.zawardo.treni.domain.model.DataSource
+import it.zawardo.treni.domain.model.adessoInItalia
 import it.zawardo.treni.domain.model.Journey
 import it.zawardo.treni.domain.model.comeDistinguerlaDa
 import it.zawardo.treni.domain.model.nomeDelCambio
@@ -99,6 +101,7 @@ import it.zawardo.treni.ui.common.lateColor
 import it.zawardo.treni.ui.common.onLateColor
 import it.zawardo.treni.ui.common.scartoColor
 import it.zawardo.treni.ui.theme.Cifre
+import kotlinx.coroutines.delay
 import java.time.Duration
 import it.zawardo.treni.ui.common.TreniTopBar
 import it.zawardo.treni.ui.common.delayLabel
@@ -113,6 +116,29 @@ import java.util.Locale
 import androidx.compose.foundation.layout.widthIn
 
 private val FULL_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALIAN)
+
+/**
+ * L'ora di adesso, che avanza da sola finche' l'elenco resta a schermo.
+ *
+ * Serve perche' **le righe invecchiano**: una ricerca delle 08:11 guardata alle
+ * 08:23 conteneva ancora un treno partito alle 08:21. Vedi
+ * `JourneyRow.giaPartita`.
+ *
+ * Mezzo minuto, e non uno: al minuto tondo una riga poteva restare «da
+ * prendere» per cinquantanove secondi dopo esserlo diventata. Non costa nessuna
+ * chiamata — e' l'orologio, non la rete — e una sola per tutto l'elenco, non una
+ * per riga.
+ */
+@Composable
+private fun adessoOgniMezzoMinuto(): LocalDateTime {
+    val ora by produceState(adessoInItalia()) {
+        while (true) {
+            delay(30_000)
+            value = adessoInItalia()
+        }
+    }
+    return ora
+}
 
 /**
  * Le colonne di stato e prezzo in fondo alla scheda: vedi [RigaColonne].
@@ -158,6 +184,7 @@ fun ResultsScreen(
         },
     )
     val state by vm.state.collectAsState()
+    val adesso = adessoOgniMezzoMinuto()
 
     val listState = rememberLazyListState()
 
@@ -371,7 +398,12 @@ fun ResultsScreen(
                     }
 
                     items(state.journeys, key = { it.key }) { row ->
-                        JourneyCard(row, requestedDate = departure.toLocalDate(), cercata = from) { tratta ->
+                        JourneyCard(
+                            row,
+                            requestedDate = departure.toLocalDate(),
+                            cercata = from,
+                            adesso = adesso,
+                        ) { tratta ->
                             apri(row.journey, tratta, onOpenTrain, onOpenViaggio)
                         }
                     }
@@ -430,6 +462,8 @@ private fun JourneyCard(
     requestedDate: LocalDate,
     /** La stazione di partenza cercata: il binario, se e' di un'altra, lo dice. */
     cercata: Station,
+    /** L'ora di adesso, che avanza mentre la scheda resta a schermo: vedi [adessoOgniMezzoMinuto]. */
+    adesso: LocalDateTime,
     /** L'indice della tratta toccata; `0` quando si tocca la scheda altrove. */
     onApri: (Int) -> Unit,
 ) {
@@ -437,6 +471,19 @@ private fun JourneyCard(
     val otherDay = j.departure.toLocalDate() != requestedDate
     // Barrato come su un tabellone: la corsa c'e' in orario, ma non si fa.
     val cancelled = row.state == TrainState.CANCELLED
+    /*
+     * Il treno se n'e' andato mentre l'elenco era a schermo: vedi
+     * `JourneyRow.giaPartita`. Non toglie la riga — resta, spenta, e lo dice —
+     * ma le leva ogni promessa: niente «fai ancora in tempo», niente coincidenza
+     * da giudicare, perche' quel treno non lo prende piu' nessuno.
+     *
+     * **Mai su un «non partito»**, che e' il contrario: quel treno e' ancora
+     * all'origine oltre la sua ora, e l'orologio da solo lo direbbe andato
+     * proprio mentre lo si sta rincorrendo. Lo stato viene prima dell'orologio.
+     */
+    val partito = !cancelled && row.state != TrainState.NOT_DEPARTED && row.giaPartita(adesso)
+    /** La fermata da cui saliresti: e' di li' che il treno e' partito, non dal suo capolinea. */
+    val partenzaDa = j.legs.firstOrNull { it.isTrain }?.from?.name
     val scheme = MaterialTheme.colorScheme
 
     /*
@@ -456,16 +503,16 @@ private fun JourneyCard(
      * rosso appena accennato e' quello del ritardo, che e' il motivo per cui la
      * scheda sta li'.
      */
-    val ancoraInTempo = row.partenzaStimata != null
+    val ancoraInTempo = row.partenzaStimata != null && !partito
     /*
      * Lo stesso rosso per il cambio che coi ritardi di adesso non regge: anche
      * li' e' il ritardo a cambiare la soluzione, e la scheda lo dice prima
      * delle parole. Come la scheda della coincidenza nella pagina del viaggio.
      */
-    val cambioSaltato = row.coincidenza != Coincidenza.REGGE
+    val cambioSaltato = row.coincidenza != Coincidenza.REGGE && !partito
     val fondo = when {
         ancoraInTempo || cambioSaltato -> lateColor().copy(alpha = 0.07f).compositeOver(scheme.surfaceContainerLowest)
-        soloPrevisto -> scheme.surfaceContainerLow
+        soloPrevisto || partito -> scheme.surfaceContainerLow
         else -> scheme.surfaceContainerLowest
     }
 
@@ -480,7 +527,7 @@ private fun JourneyCard(
     val partenzaReale = scarto?.let { j.departure.plusMinutes(it.toLong()) }
     val arrivoReale = scarto?.takeIf { j.isDirect }?.let { j.arrival.plusMinutes(it.toLong()) }
     val barrato = if (cancelled) TextDecoration.LineThrough else null
-    val inchiostro = if (cancelled) scheme.onSurfaceVariant else scheme.onSurface
+    val inchiostro = if (cancelled || partito) scheme.onSurfaceVariant else scheme.onSurface
 
     Card(
         /*
@@ -502,7 +549,7 @@ private fun JourneyCard(
 
             // Dove si scende e, fra due gemelle, dove si risale: vedi `nomeDelCambio`.
             val stazioneDelCambio = j.primoCambio()?.let { (primo, poi) -> nomeDelCambio(primo.to, poi.from) }.orEmpty()
-            if (otherDay || j.assembled || ancoraInTempo || cambioSaltato) {
+            if (otherDay || j.assembled || ancoraInTempo || cambioSaltato || partito) {
                 Row(
                     Modifier.padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -572,6 +619,49 @@ private fun JourneyCard(
                                     color = lateColor(),
                                 )
                             }
+                        }
+                    }
+                    /*
+                     * Partito mentre guardavi. In grigio e non in rosso: non e'
+                     * un guasto ne' un ritardo, e' solo il treno di prima. Il
+                     * rosso resta a cio' su cui si puo' ancora fare qualcosa.
+                     *
+                     * **Anche su chi e' gia' «Arrivato»**, che pure lo dice nella
+                     * colonna dello stato: sono due fatti diversi — partito e'
+                     * da dove sali, arrivato e' al suo capolinea — e soprattutto
+                     * il bollo assente su una scheda spenta in mezzo ad altre che
+                     * ce l'hanno si legge come una svista dell'app. Provato a
+                     * schermo il 22/09/2026: l'S5 24518 senza bollo e' saltato
+                     * all'occhio prima di qualunque ragionamento.
+                     */
+                    if (partito) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = scheme.onSurfaceVariant,
+                            )
+                            /*
+                             * **Col nome della stazione, non «Partito» e basta.**
+                             * Secco si legge «partito dal suo capolinea», che e'
+                             * un'altra cosa e lascia sperare di prenderlo: un
+                             * treno partito da Treviglio a Vignate ci deve ancora
+                             * arrivare. Qui si parla della fermata dove sali —
+                             * quella del primo treno, che fra due gemelle non e'
+                             * sempre quella cercata.
+                             */
+                            Text(
+                                partenzaDa?.let { "Partito da $it" } ?: "Partito",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = scheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                     /*

@@ -213,8 +213,14 @@ class EavRepository(
      * Vale solo per oggi: per un altro giorno il campo c'e' ma e' zero, e uno
      * zero che vuol dire "non si sa" e' peggio di niente.
      *
-     * Vuoto se non risponde, se le stazioni non sono EAV o se il giorno non e'
-     * oggi: chi chiama resta con l'orario di tabella, come prima.
+     * **Due fonti, in quest'ordine.** Il pianificatore per primo, perche' sa
+     * tutta la corsa; se non risponde corse, il monitor della stazione di salita
+     * ([ritardiDalMonitor]), che per l'unica cosa che qui serve — il ritardo da
+     * dove sali — basta e avanza. Le due cadono a turno, e finche' ne resta in
+     * piedi una i ritardi EAV si sanno.
+     *
+     * Vuoto se tacciono tutt'e due, se le stazioni non sono EAV o se il giorno
+     * non e' oggi: chi chiama resta con l'orario di tabella, come prima.
      */
     suspend fun ritardiFraStazioni(
         fromCode: String,
@@ -233,19 +239,77 @@ class EavRepository(
                 data = quando.format(GIORNO_PIANIFICATORE),
                 ora = quando.format(ORA_PIANIFICATORE),
             )
-        }.getOrNull() ?: return@withContext emptyMap()
+        }.getOrNull()
 
-        risposta.corse
+        val dalPianificatore = risposta?.corse.orEmpty()
             .flatMap { it.percorsi }
             .mapNotNull { tratto ->
                 val numero = tratto.codice?.toString() ?: return@mapNotNull null
-                numero to RitardoEav(minuti = tratto.ritardo ?: 0, soppressa = tratto.soppressa)
+                numero to RitardoEav(
+                    minuti = tratto.ritardo ?: 0,
+                    soppressa = tratto.soppressa,
+                    fonte = FonteRitardo.PIANIFICATORE,
+                )
             }
             .toMap()
+
+        if (dalPianificatore.isNotEmpty()) return@withContext dalPianificatore
+        ritardiDalMonitor(fromCode)
     }
 
-    /** Come va una corsa EAV oggi, secondo il pianificatore: vedi [ritardiFraStazioni]. */
-    data class RitardoEav(val minuti: Int, val soppressa: Boolean)
+    /**
+     * I ritardi EAV dal **monitor della stazione da cui sali**, quando il
+     * pianificatore tace.
+     *
+     * Il pianificatore resta la fonte principale, perche' sa come va la corsa
+     * lungo tutto il percorso. Ma puo' smettere: il 22/09/2026 rispondeva 200
+     * con JSON valido e `CorsePercorso` vuoto — su ogni tratta e su ogni data
+     * provata, dal 21 al 24 — mentre il monitor mostrava le partenze da Porta
+     * Nolana come sempre. I treni c'erano; a mancare era solo chi lo raccontava.
+     * Due giorni prima era successo l'opposto, col monitor a 503 e il
+     * pianificatore in piedi: le due fonti EAV cadono a turno, e tenerne una
+     * sola significa restare senza ritardi a ogni caduta.
+     *
+     * Per quello che serve qui il monitor e' anzi **piu' preciso**: il ritardo
+     * che vogliamo e' quello alla fermata dove sali, e il monitor parla proprio
+     * di quella — il limite che lo rende insufficiente altrove (vedi la sua
+     * documentazione) qui non morde.
+     *
+     * Solo le righe col tempo reale: [board] ripiega sull'orario quando il
+     * monitor non risponde, e li' lo zero non e' puntualita', e' ignoranza.
+     * Prenderlo per un ritardo misurato direbbe «in orario» di una corsa di cui
+     * non si sa niente.
+     */
+    private suspend fun ritardiDalMonitor(fromCode: String): Map<String, RitardoEav> =
+        board(fromCode)
+            .filter { it.realtime }
+            .associate {
+                it.trainRef.number to RitardoEav(
+                    minuti = it.delayMinutes,
+                    soppressa = it.state == TrainState.CANCELLED,
+                    fonte = FonteRitardo.MONITOR,
+                )
+            }
+
+    /** Chi ha detto il ritardo: le due fonti EAV non sono intercambiabili a parole. */
+    enum class FonteRitardo(val comeSiChiama: String) {
+        PIANIFICATORE("pianificatore EAV"),
+        MONITOR("tabellone EAV della stazione di partenza"),
+    }
+
+    /**
+     * Come va una corsa EAV oggi: dal pianificatore, o dal monitor della
+     * stazione di salita se il pianificatore tace. Vedi [ritardiFraStazioni].
+     *
+     * La [fonte] viaggia col dato perche' finisce scritta a schermo: l'app dice
+     * sempre da dove viene un numero, e quando le fonti sono due dirne una a
+     * caso sarebbe peggio che tacere.
+     */
+    data class RitardoEav(
+        val minuti: Int,
+        val soppressa: Boolean,
+        val fonte: FonteRitardo = FonteRitardo.PIANIFICATORE,
+    )
 
     suspend fun dettaglioCorsa(
         numero: String,
@@ -344,9 +408,9 @@ class EavRepository(
                 else -> TrainState.REGULAR
             },
             notice = if (suo.soppressa) {
-                "Corsa soppressa secondo il pianificatore EAV."
+                "Corsa soppressa secondo il ${suo.fonte.comeSiChiama}."
             } else {
-                "Ritardo di oggi dal pianificatore EAV. I passaggi EAV non li rileva: " +
+                "Ritardo di oggi dal ${suo.fonte.comeSiChiama}. I passaggi EAV non li rileva: " +
                     "gli orari sono quelli di tabella, spostati del ritardo."
             },
             stops = stops.map { it.projectedBy(suo.minuti) },

@@ -51,16 +51,33 @@ fun TrainStatus.partenzaStimataDa(codice: String?, previsto: LocalDateTime): Loc
     if (state == TrainState.CANCELLED) return null
     val fermata = fermataA(codice, previsto.toLocalTime()) ?: return null
     if (fermata.status == StopStatus.CANCELLED) return null
-
-    val dopo = stops.drop(stops.indexOf(fermata) + 1)
-    val partita = fermata.actualDeparture != null ||
-        (fermata.status == StopStatus.DONE && !fermata.detected) ||
-        dopo.any { it.status == StopStatus.DONE || it.status == StopStatus.CURRENT }
-    if (partita) return null
+    if (giaPartitoDa(codice, previsto)) return null
 
     val tabella = fermata.scheduledDeparture ?: return null
     val stima = fermata.projectedDeparture ?: tabella.plusMinutes(delayMinutes.toLong())
     return maxOf(tabella, stima)
+}
+
+/**
+ * Vero se la corsa e' **gia' passata** da [codice]: da li' non si sale piu'.
+ *
+ * Lo dice l'orario reale di partenza, non lo stato della fermata: ViaggiaTreno
+ * la segna effettuata gia' all'arrivo, e un treno fermo in banchina e' proprio
+ * quello che si sta rincorrendo. Contano anche la fermata effettuata senza
+ * rilevamento — il passaggio c'e' stato, l'ora no — e quella dopo la quale il
+ * treno e' gia' stato visto.
+ *
+ * Falso, e non «non si sa», dove la fermata manca o e' soppressa: chi lo chiede
+ * lo fa per togliere una soluzione dall'elenco, e toglierla per un dato assente
+ * sarebbe peggio che lasciarla.
+ */
+fun TrainStatus.giaPartitoDa(codice: String?, previsto: LocalDateTime): Boolean {
+    val fermata = fermataA(codice, previsto.toLocalTime()) ?: return false
+    if (fermata.status == StopStatus.CANCELLED) return false
+    val dopo = stops.drop(stops.indexOf(fermata) + 1)
+    return fermata.actualDeparture != null ||
+        (fermata.status == StopStatus.DONE && !fermata.detected) ||
+        dopo.any { it.status == StopStatus.DONE || it.status == StopStatus.CURRENT }
 }
 
 /**

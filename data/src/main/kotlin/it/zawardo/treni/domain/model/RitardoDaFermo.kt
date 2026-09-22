@@ -62,6 +62,54 @@ fun TrainStatus.conRitardoDaFermo(adesso: LocalDateTime): TrainStatus {
 }
 
 /**
+ * Il ritardo che il tempo passato impone, fra un rilevamento e il successivo.
+ *
+ * Il ritardo di ViaggiaTreno e' quello dell'**ultimo rilevamento**, ed e' giusto
+ * cosi'. Ma se il treno si pianta subito dopo, quel numero resta fermo mentre
+ * l'orologio no: rilevato alle 08:30 a +2, con la fermata dopo prevista alle
+ * 08:35, alle 08:40 la corsa diceva ancora +2 — e insieme che sarebbe arrivata
+ * alle 08:37, tre minuti prima di adesso. Due cose che non possono essere vere
+ * insieme, e quella sbagliata e' il ritardo: se alle 08:40 nessuno l'ha ancora
+ * visto passare, il ritardo e' almeno di cinque minuti, e cresce ogni minuto
+ * finche' un rilevamento non dice altro.
+ *
+ * E' la stessa regola del treno fermo all'origine ([conRitardoDaFermo]), spostata
+ * al punto dove la corsa e' arrivata: **un orario previsto non puo' stare nel
+ * passato**. Si misura sulla prima fermata non ancora effettuata, ed e' un
+ * minimo — quando la fonte dichiara di piu', vale il suo.
+ *
+ * Tre condizioni, tutte necessarie:
+ *
+ *  - **la corsa dev'essere seguita davvero** ([lastDetectionTime] non nullo).
+ *    Senza alcun rilevamento non si deduce niente: una corsa che nessuno traccia
+ *    ha tutte le fermate future per sempre, e da qui uscirebbe un ritardo
+ *    inventato che cresce all'infinito. Il treno non ancora partito ha la sua
+ *    regola, che guarda l'origine;
+ *  - **dev'essere in viaggio**: arrivata o soppressa, non c'e' piu' niente da
+ *    aspettare;
+ *  - **dev'esserci un orario di tabella** sulla prima fermata che manca.
+ *
+ * Resta un limite noto, ed e' lo stesso di ogni deduzione dal silenzio: dove i
+ * rilevamenti sono radi il treno puo' essere passato in orario senza che nessuno
+ * lo scriva, e li' questo ritardo e' di troppo. Vale comunque la pena: il caso
+ * frequente e' il treno fermo, e dire «+2, arrivo alle 08:37» alle 08:40 e'
+ * sbagliato in un modo che si vede.
+ */
+fun TrainStatus.conRitardoDalTempoPassato(adesso: LocalDateTime): TrainStatus {
+    if (!realtime) return this
+    if (state == TrainState.CANCELLED || state == TrainState.ARRIVED) return this
+    // Il non partito ha la sua regola, ed e' l'unica che sappia guardare l'origine.
+    if (state == TrainState.NOT_DEPARTED) return this
+    if (lastDetectionTime == null) return this
+
+    val prossima = stops.firstOrNull { it.status == StopStatus.FUTURE } ?: return this
+    val tabella = prossima.scheduledArrival ?: prossima.scheduledDeparture ?: return this
+    val passato = Duration.between(tabella, adesso).toMinutes().toInt()
+    if (passato <= delayMinutes) return this
+    return copy(delayMinutes = passato, stops = stops.map { it.projectedBy(passato) })
+}
+
+/**
  * Lo stesso minimo sul tabellone delle partenze, nella stazione d'origine della
  * corsa: li' l'ora della riga e' proprio quella di partenza dall'origine.
  *
