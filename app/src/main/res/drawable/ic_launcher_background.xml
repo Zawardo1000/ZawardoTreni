@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Il fondo dell'icona: blu notte con un chiarore al centro.
+
+  Era una tinta piatta. Il disegno nuovo nasce con una vignettatura radiale, e
+  senza di questa la locomotiva stava su un rettangolo spento mentre sullo store
+  la stessa icona aveva profondita'. I due colori sono misurati sull'originale:
+  #08213C al centro, #03132A agli angoli.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="radial"
+        android:centerX="0.5"
+        android:centerY="0.5"
+        android:gradientRadius="72%"
+        android:startColor="@color/ic_launcher_notte"
+        android:endColor="@color/ic_launcher_notte_bordo" />
+</shape>

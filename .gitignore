@@ -12,6 +12,14 @@ keystore.properties
 PLAN.md
 CLAUDE.md
 
+# Note sulle fonti dati: dicono quel che il codice gia' fa, e restano in locale
+data/*.md
+data/fonti/*.md
+
+# Tranne i viaggi misti, a cui il README rimanda: e' la spiegazione di una
+# funzione dell'app, non un appunto su un servizio altrui
+!data/VIAGGI-MISTI.md
+
 # APK distribuibili: non vanno nel repository
 dist/
 
