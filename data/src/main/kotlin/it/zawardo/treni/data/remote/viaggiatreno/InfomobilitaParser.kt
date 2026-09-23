@@ -116,8 +116,20 @@ internal object InfomobilitaParser {
     private val PARAMETRO = Regex("""[?&](treno|origine|datapartenza)=([^&#]*)""")
     private val CODICE_RFI = Regex("""[A-Z]\d{4,6}""")
 
-    /** Dove finisce un blocco: paragrafi, voci, riquadri, punti elenco. */
-    private val FINE_BLOCCO = Regex("""</?(?:p|li|ul|ol|div|h\d|tr|td|table)\b[^>]*>|•""")
+    /**
+     * Dove finisce un blocco: paragrafi, voci, riquadri, punti elenco.
+     *
+     * **Il punto elenco conta comunque sia scritto**, carattere o entita'. La
+     * pagina RSS scrive `•`, il JSON scrive `&bull;`, ed e' lo stesso elenco:
+     * il 23/09/2026 la notizia della Verona-Brennero elencava cosi' l'FR 8505 e
+     * l'8513, col collegamento che ne porta origine e giorno. Dividendo solo sul
+     * carattere, dal JSON quei due treni uscivano **senza origine e senza ora**,
+     * perche' il segnaposto non si trovava piu' a inizio riga e restava solo il
+     * numero nudo dei `trainTags`. Le entita' si sciolgono piu' avanti
+     * ([pulitoConACapo]), cioe' troppo tardi per chi divide.
+     */
+    private val FINE_BLOCCO =
+        Regex("""</?(?:p|li|ul|ol|div|h\d|tr|td|table)\b[^>]*>|•|&bull;|&#8226;""")
     private val A_CAPO = Regex("""<br\s*/?>""")
     private val A_CAPO_IN_FONDO = Regex("""<br\s*/?>(\s|</[^>]+>)*$""")
     private val TAG = Regex("""<[^>]*>""")

@@ -174,4 +174,36 @@ class NotizieJsonTest {
         )
         assertEquals("Ritardo < 30 minuti.", InfomobilitaParser.daJson(listOf(voce)).single().testo)
     }
+
+    /**
+     * Il punto elenco scritto come entita' non deve far perdere il treno.
+     *
+     * La notizia della Verona-Brennero del 23/09/2026 elencava l'FR 8505 e
+     * l'8513 con `&bull;` davanti al collegamento, mentre la pagina RSS scrive
+     * `•`. Chi divideva in blocchi conosceva solo il carattere, quindi dal JSON
+     * quei due uscivano **senza origine e senza ora** — restava il numero nudo
+     * dei `trainTags`, che vale meno: lo stesso numero puo' essere di due treni
+     * diversi nello stesso giorno.
+     */
+    @Test
+    fun `un punto elenco scritto come entita' non perde origine e ora`() {
+        val voci = json.decodeFromString<List<NotiziaInfomobilitaDto>>(
+            risorsa("infomobilita-punto-elenco-2026-09-23.json"),
+        )
+        val lette = InfomobilitaParser.daJson(voci)
+        lette.forEach { println("  ${it.numero} ${it.origine} ${it.partenza} ${it.soloNumero}") }
+
+        val ottomilacinquecentocinque = lette.firstOrNull { it.numero == "8505" }
+        assertTrue("l'8505 non e' stato letto affatto", ottomilacinquecentocinque != null)
+        assertEquals("S02026", ottomilacinquecentocinque!!.origine)
+        assertEquals(LocalTime.of(5, 12), ottomilacinquecentocinque.partenza)
+        assertFalse(
+            "letto solo dai trainTags: il collegamento nel testo non e' stato visto",
+            ottomilacinquecentocinque.soloNumero,
+        )
+        assertTrue(
+            "anche l'8513 dello stesso elenco deve avere la sua origine",
+            lette.any { it.numero == "8513" && it.origine == "S02026" && !it.soloNumero },
+        )
+    }
 }
