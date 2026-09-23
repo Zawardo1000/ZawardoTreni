@@ -87,6 +87,28 @@ val rigeneraOrarioArst = tasks.register<JavaExec>("rigeneraOrarioArst") {
     outputs.upToDateWhen { false }
 }
 
+/**
+ * Cerca le stazioni che RFI scrive con due codici: vedi `ControllaStazioniDoppie`.
+ *
+ * Non tocca nessun file e non fallisce mai — **avvisa e basta**, con la riga
+ * gia' pronta da incollare in `DOPPI`. Le coppie le propone, non le decide:
+ * su Genova Piazza Principe il giro diceva «unisci» e la risposta giusta era
+ * «sono gemelle».
+ */
+val controllaStazioniDoppie = tasks.register<JavaExec>("controllaStazioniDoppie") {
+    group = "orari"
+    description = "Cerca stazioni con due codici RFI che la ricerca non distingue"
+    mainClass.set("it.zawardo.treni.tools.ControllaStazioniDoppieKt")
+    classpath = classpathStrumenti
+    dependsOn(tasks.named("compileKotlin"))
+    // Come i due orari: l'input sta su un altro server, "up-to-date" non vuol dire niente.
+    outputs.upToDateWhen { false }
+    // Un catalogo irraggiungibile non deve fermare una pubblicazione: lo
+    // strumento lo dice e torna a zero, ma se morisse davvero non si eredita
+    // il suo codice d'uscita.
+    isIgnoreExitValue = true
+}
+
 /*
  * Le release partono sempre da orari appena scaricati.
  *
@@ -103,6 +125,13 @@ tasks.named("processResources") {
     if (staFacendoUnaRelease) {
         dependsOn(rigeneraOrarioEav)
         dependsOn(rigeneraOrarioArst)
+        /*
+         * E il controllo delle stazioni con due codici, per lo stesso motivo
+         * degli orari: un difetto che non si vede — una fascia gialla che
+         * sparisce su una tratta sola — resta li' finche' qualcuno non ci
+         * passa. Napoli Afragola c'e' rimasta per mesi.
+         */
+        dependsOn(controllaStazioniDoppie)
     }
 }
 

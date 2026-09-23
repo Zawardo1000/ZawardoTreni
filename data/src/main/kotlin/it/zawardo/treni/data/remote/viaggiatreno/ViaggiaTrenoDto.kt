@@ -165,4 +165,9 @@ data class TrenoSmartCaringDto(
  * `/elencoStazioni/{codReg}`. Sono usciti insieme all'endpoint: la loro KDoc
  * diceva «per popolare il DB offline», ma quel database lo riempie
  * `SearchStore.cache` con le stazioni di Le Frecce, e nessuno li leggeva.
+ *
+ * Non sono tornati nemmeno quando e' servito il catalogo intero per scovare le
+ * stazioni con due codici: quel giro lo fa `StazioniDoppieLiveTest`, che si
+ * legge l'endpoint per conto suo. Un'interfaccia di produzione non si allarga
+ * per un test — e questa la implementano anche quattro finti ViaggiaTreno.
  */
