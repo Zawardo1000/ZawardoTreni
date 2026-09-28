@@ -281,11 +281,31 @@ private val SOPPRESSO_IN_PARTE = setOf("PP", "SI", "SF", "SM")
 private fun List<FermataDto>.inOrdineDiPercorso(): List<FermataDto> {
     val tratti = mutableListOf<MutableList<FermataDto>>()
     forEachIndexed { i, fermata ->
-        if (i == 0 || fermata.tipoFermata == "P") tratti += mutableListOf<FermataDto>()
+        if (i == 0 || fermata.tipoFermata == "P" || fermata.progressivo == RIPARTE) {
+            tratti += mutableListOf<FermataDto>()
+        }
         tratti.last() += fermata
     }
     return tratti.flatMap { tratto -> tratto.sortedBy { it.progressivo } }
 }
+
+/**
+ * Il progressivo di una corsa che ricomincia: un tratto nuovo, anche senza «P».
+ *
+ * Il «P» da solo non basta. Il 25/09/2026 il REG 24559, cancellato da Varese a
+ * Milano Certosa, aveva la testa soppressa numerata 1, 2, 3, 4 e la parte che
+ * circola **anch'essa** da 1, ma con la nuova origine rimasta «F». Finiva tutto
+ * in un tratto solo, e ordinare per progressivo le intrecciava a pettine: una
+ * soppressa, una vera, una soppressa — Varese, Milano Certosa, Gazzada
+ * Schianno, Milano Villapizzone. Con orari a cinquanta minuti di distanza,
+ * perche' erano due pezzi diversi del viaggio.
+ *
+ * **E non basta «il numero scende».** Nel REG 2833 i progressivi fanno 38, 41,
+ * 39: la risposta mette in coda il capolinea aggiunto, e rimetterlo al suo
+ * posto e' proprio il lavoro di questo ordinamento. Un tratto nuovo comincia
+ * quando la numerazione **riparte da capo**, non quando fa un passo indietro.
+ */
+private const val RIPARTE = 1
 
 private fun FermataDto.toStop() = Stop(
     index = progressivo,

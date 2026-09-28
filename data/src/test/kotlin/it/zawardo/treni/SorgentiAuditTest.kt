@@ -120,22 +120,37 @@ class SorgentiAuditTest {
         )
     }
 
+    /**
+     * EAV dichiara il tempo reale solo dove qualcuno gliel'ha detto.
+     *
+     * **La regola non e' piu' «solo dal tabellone».** Da quando il tabellone,
+     * col monitor muto, chiede i ritardi al pianificatore
+     * (`EavRepository.board`), anche una stazione senza monitor puo' portare il
+     * tempo reale — ma **solo per oggi**, perche' solo per oggi il pianificatore
+     * risponde. Il 28/09/2026, col monitor a righe vuote su tutta la rete, il
+     * tabellone di Porta Nolana usciva con 13 corse su 96 col ritardo, e a
+     * Piedimonte Matese, che un monitor non ce l'ha affatto, una.
+     *
+     * Quel che resta vero e non deve cedere: **un altro giorno non ha tempo
+     * reale da nessuna parte**, e una riga che non lo dichiara non puo' portare
+     * un ritardo — quello zero li' vuol dire «non si sa», e spacciarlo per
+     * puntualita' misurata e' la bugia peggiore su una rete come questa.
+     */
     @Test
-    fun `EAV dichiara il tempo reale solo quando viene dal tabellone`() = runBlocking {
+    fun `EAV dichiara il tempo reale solo dove qualcuno gliel'ha detto`() = runBlocking {
         val oggi = eav.board("EAV1", date = LocalDate.now())
         val domani = eav.board("EAV1", date = LocalDate.now().plusDays(1))
         val senzaMonitor = eav.board("EAV430", date = LocalDate.now())
 
         println("\n=== EAV ===")
-        println("  oggi (tabellone):        ${oggi.size} righe, realtime=${oggi.map { it.realtime }.distinct()}")
+        println("  oggi:                    ${oggi.size} righe, realtime=${oggi.map { it.realtime }.distinct()}")
         println("  domani (orario):         ${domani.size} righe, realtime=${domani.map { it.realtime }.distinct()}")
-        println("  senza monitor (orario):  ${senzaMonitor.size} righe, realtime=${senzaMonitor.map { it.realtime }.distinct()}")
+        println("  senza monitor, oggi:     ${senzaMonitor.size} righe, realtime=${senzaMonitor.map { it.realtime }.distinct()}")
 
         assertTrue("domani non puo' essere tempo reale", domani.none { it.realtime })
-        assertTrue("una stazione senza monitor non ha tempo reale", senzaMonitor.none { it.realtime })
         assertTrue(
-            "una riga d'orario non puo' portare un ritardo misurato",
-            (domani + senzaMonitor).all { it.delayMinutes == 0 },
+            "una riga che non dichiara il tempo reale non puo' portare un ritardo misurato",
+            (oggi + domani + senzaMonitor).none { !it.realtime && it.delayMinutes != 0 },
         )
     }
 

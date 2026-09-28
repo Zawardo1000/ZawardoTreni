@@ -44,10 +44,22 @@ import java.time.format.DateTimeFormatter
  * corsa, e regge anche quando il monitor non risponde — il 20/09/2026
  * `orariotreni.eavsrl.it` dava 503 su tutto, e il pianificatore rispondeva.
  * Tutto il resto — i giorni futuri, e le ventiquattro stazioni delle altre
- * reti EAV — viene dall'orario ufficiale imbarcato ([EavOrario]), le cui righe
- * escono con [BoardEntry.realtime] falso perche' un ritardo non lo conoscono.
- * Dove entrambe potrebbero rispondere comanda il tabellone: sa cose che
- * l'orario non puo' sapere.
+ * reti EAV — viene dall'orario ufficiale imbarcato ([EavOrario]). Dove entrambe
+ * potrebbero rispondere comanda il tabellone: sa cose che l'orario non puo'
+ * sapere.
+ *
+ * **Le due cadono a turno, e nessuna delle tre schermate deve restare a secco.**
+ * Il 20/09/2026 il monitor dava 503 su tutto e reggeva il pianificatore; il
+ * 22/09 il pianificatore rispondeva vuoto su ogni tratta e reggeva il monitor;
+ * il 28/09 il monitor tornava dieci righe vuote su nove stazioni su nove e
+ * reggeva di nuovo il pianificatore. In tre osservazioni su otto giorni non
+ * sono mai state giu' insieme. Per questo il ritardo di una corsa si chiede
+ * prima al pianificatore e poi al monitor ([ritardiFraStazioni]), e il
+ * **tabellone** fa la strada opposta: monitor, e se tace pianificatore
+ * ([conRitardiDelPianificatore]). Ne segue che perfino una stazione senza
+ * monitor puo' portare il tempo reale, per oggi. Dove non risponde nessuno le
+ * righe escono con [BoardEntry.realtime] falso: quel ritardo non e' zero, e'
+ * sconosciuto.
  */
 class EavRepository(
     private val api: EavApi,
@@ -129,26 +141,98 @@ class EavRepository(
          * non sia oggi, perche' l'endpoint una data non la accetta. In tutti e
          * due si ripiega sull'orario ufficiale, che quelle risposte le ha.
          */
+        /*
+         * Se il tabellone risponde, e' lui a comandare: ha i ritardi e le
+         * soppressioni, che l'orario non puo' sapere. Si ripiega sull'orario
+         * solo quando non risponde affatto — rete assente, servizio giu' —
+         * invece di lasciare la schermata vuota.
+         */
         if (stazione.tabellone && oggi) {
-            val corpo = runCatching {
-                api.tabellone(
-                    codLoc = stazione.id,
-                    tipoLista = if (arrivals) EavApi.ARRIVI else EavApi.PARTENZE,
-                ).string()
-            }.getOrNull()
-
-            val righe = EavBoardParser.parse(corpo, millis(date))
-            /*
-             * Se il tabellone risponde, e' lui a comandare: ha i ritardi e le
-             * soppressioni, che l'orario non puo' sapere. Si ripiega sull'orario
-             * solo quando non risponde affatto — rete assente, servizio giu' —
-             * invece di lasciare la schermata vuota.
-             */
+            val righe = dalMonitor(stazione.id, arrivals, date)
             if (righe.isNotEmpty()) return@withContext righe
         }
 
-        dallOrario(stazione.id, arrivals, date)
+        val daOrario = dallOrario(stazione.id, arrivals, date)
+        if (oggi) conRitardiDelPianificatore(daOrario, stazione.id, arrivals) else daOrario.map { it.voce }
     }
+
+    /**
+     * Il tabellone del monitor, e nient'altro: vuoto se non risponde.
+     *
+     * Separato da [board] perche' lo legge anche [ritardiDalMonitor], e passare
+     * di li' vorrebbe dire ricorsione — `board` chiederebbe i ritardi, i ritardi
+     * chiederebbero `board`. Qui non c'e' nessun ripiego, per costruzione.
+     */
+    private suspend fun dalMonitor(codLoc: Int, arrivals: Boolean, date: LocalDate): List<BoardEntry> {
+        val corpo = runCatching {
+            api.tabellone(
+                codLoc = codLoc,
+                tipoLista = if (arrivals) EavApi.ARRIVI else EavApi.PARTENZE,
+            ).string()
+        }.getOrNull()
+        return EavBoardParser.parse(corpo, millis(date))
+    }
+
+    /**
+     * I ritardi del pianificatore sulle righe che vengono dall'orario, quando il
+     * monitor tace.
+     *
+     * **Le due fonti EAV cadono a turno, e il tabellone finora ne usava una
+     * sola.** Il 28/09/2026 il monitor rispondeva dieci righe vuote su nove
+     * stazioni su nove — partenze, arrivi e perfino l'endpoint di riserva
+     * `moova` — mentre il pianificatore dava le sue corse regolarmente: la
+     * ricerca e il dettaglio avevano i ritardi, e chi stava in banchina no. Il
+     * 22/09 era successo l'opposto. In tre osservazioni su otto giorni una
+     * delle due era giu' due volte, e non sono mai state giu' insieme.
+     *
+     * Il pianificatore ragiona per **relazione**, non per stazione: si chiede
+     * una tratta per ogni capolinea diverso fra quelli che il tabellone mostra
+     * — a Porta Nolana sono una manciata — e si tengono le destinazioni piu'
+     * frequenti, [CAPI_AL_PIU], per non trasformare un tabellone in una raffica
+     * di richieste. Sugli arrivi la relazione e' al contrario: li' l'altro capo
+     * e' l'origine della corsa.
+     *
+     * Le righe che il pianificatore non conosce restano com'erano, cioe' orario
+     * previsto dichiarato tale. Non si inventa un ritardo zero.
+     */
+    private suspend fun conRitardiDelPianificatore(
+        righe: List<RigaDaOrario>,
+        stazione: Int,
+        arrivals: Boolean,
+    ): List<BoardEntry> {
+        if (righe.isEmpty()) return emptyList()
+        val quando = LocalDateTime.now(ROME).minusMinutes(RITARDI_DA_PRIMA)
+        val capi = righe.mapNotNull { it.altroCapo }
+            .groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }
+            .take(CAPI_AL_PIU)
+            .map { it.key }
+
+        val ritardi = mutableMapOf<String, RitardoEav>()
+        for (capo in capi) {
+            if (capo == stazione) continue
+            val da = if (arrivals) capo else stazione
+            val a = if (arrivals) stazione else capo
+            ritardi += ritardiFraStazioni(EavStations.PREFIX + da, EavStations.PREFIX + a, quando)
+        }
+        if (ritardi.isEmpty()) return righe.map { it.voce }
+
+        return righe.map { r ->
+            val suo = ritardi[r.voce.trainRef.number] ?: return@map r.voce
+            r.voce.copy(
+                delayMinutes = suo.minuti,
+                state = when {
+                    suo.soppressa -> TrainState.CANCELLED
+                    suo.minuti > 0 -> TrainState.DELAYED
+                    else -> TrainState.REGULAR
+                },
+                realtime = true,
+            )
+        }
+    }
+
+    /** Una riga dall'orario, con l'altro capo del suo viaggio: serve al pianificatore. */
+    private data class RigaDaOrario(val voce: BoardEntry, val altroCapo: Int?)
 
     /**
      * Il tabellone ricostruito dall'orario ufficiale.
@@ -160,17 +244,22 @@ class EavRepository(
      * soppressioni sono all'ordine del giorno, come si e' visto, sarebbe anche
      * la bugia piu' dannosa possibile.
      */
-    private fun dallOrario(codLoc: Int, arrivals: Boolean, date: LocalDate): List<BoardEntry> {
+    private fun dallOrario(codLoc: Int, arrivals: Boolean, date: LocalDate): List<RigaDaOrario> {
         val o = orario() ?: return emptyList()
         if (!o.copre(date)) return emptyList()
 
         return o.passaggi(codLoc, date, partenze = !arrivals).map { p ->
             val minuti = if (arrivals) p.fermata.arrivo else p.fermata.partenza
+            // L'altro capo del viaggio: l'origine sugli arrivi, il capolinea
+            // sulle partenze. Serve due volte — per il nome che si legge e per
+            // la tratta da chiedere al pianificatore (`conRitardiDelPianificatore`).
+            val capo = if (arrivals) p.origineCodLoc else p.corsa.fermate.last().codLoc
             val altroCapo = if (arrivals) {
                 EavStations.byId(p.origineCodLoc)?.nome
             } else {
                 p.corsa.destinazione.ifBlank { EavStations.byId(p.corsa.fermate.last().codLoc)?.nome }
             }
+            RigaDaOrario(
             BoardEntry(
                 trainRef = TrainRef(
                     number = p.corsa.numero,
@@ -189,6 +278,8 @@ class EavRepository(
                 state = TrainState.REGULAR,
                 inStation = false,
                 realtime = false,
+            ),
+                altroCapo = capo,
             )
         }
     }
@@ -280,8 +371,19 @@ class EavRepository(
      * Prenderlo per un ritardo misurato direbbe «in orario» di una corsa di cui
      * non si sa niente.
      */
-    private suspend fun ritardiDalMonitor(fromCode: String): Map<String, RitardoEav> =
-        board(fromCode)
+    private suspend fun ritardiDalMonitor(fromCode: String): Map<String, RitardoEav> {
+        /*
+         * **Il monitor, non [board].** Passare di li' sarebbe una ricorsione:
+         * `board`, quando il monitor tace, chiede i ritardi al pianificatore, e
+         * i ritardi — se anche il pianificatore tacesse per quella tratta —
+         * tornerebbero a chiedere `board`. Provato il 28/09/2026: con quattro
+         * destinazioni per tabellone la chiamata non si avvita e basta, esplode.
+         *
+         * Qui si legge il monitor e si accetta il vuoto, che e' esattamente il
+         * caso in cui chi chiama deve arrangiarsi altrove.
+         */
+        val stazione = EavStations.byCodice(fromCode)?.takeIf { it.tabellone } ?: return emptyMap()
+        return dalMonitor(stazione.id, arrivals = false, date = LocalDate.now(ROME))
             .filter { it.realtime }
             .associate {
                 it.trainRef.number to RitardoEav(
@@ -290,6 +392,7 @@ class EavRepository(
                     fonte = FonteRitardo.MONITOR,
                 )
             }
+    }
 
     /** Chi ha detto il ritardo: le due fonti EAV non sono intercambiabili a parole. */
     enum class FonteRitardo(val comeSiChiama: String) {
@@ -540,6 +643,17 @@ class EavRepository(
          * prendibili sulla rete nazionale.
          */
         const val RITARDI_DA_PRIMA = 60L
+
+        /**
+         * Quante destinazioni diverse si chiedono al pianificatore per un
+         * tabellone, le piu' frequenti.
+         *
+         * Il pianificatore ragiona per relazione, quindi un tabellone costa una
+         * chiamata per capolinea. A Porta Nolana le destinazioni di dieci righe
+         * sono una manciata; il tetto serve a una stazione di nodo, dove
+         * altrimenti un tabellone diventerebbe una raffica.
+         */
+        const val CAPI_AL_PIU = 4
 
         /** I formati che il pianificatore vuole: giorno e ora, separati. */
         val GIORNO_PIANIFICATORE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")

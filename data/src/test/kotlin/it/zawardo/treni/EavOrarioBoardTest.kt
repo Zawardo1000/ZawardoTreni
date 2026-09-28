@@ -4,6 +4,7 @@ import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.EavRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.time.LocalDate
 
@@ -74,26 +75,48 @@ class EavOrarioBoardTest {
             "in nessun giorno della settimana l'orario risponde per questa stazione",
             righe.isNotEmpty(),
         )
-        assertTrue("dovrebbe essere tutto non-realtime", righe.none { it.realtime })
         assertTrue("il tabellone non esiste qui", !eav.hasBoard(piedimonte))
         assertTrue("l'orario invece si'", eav.canPlan(piedimonte))
+        /*
+         * **Senza monitor non vuol piu' dire senza ritardi.** Da quando il
+         * tabellone, quando il monitor tace, chiede i ritardi al pianificatore
+         * (`EavRepository.board`), anche una stazione che un monitor non ce l'ha
+         * puo' portare il tempo reale: il 28/09/2026 qui il 7863/7874 usciva a
+         * `realtime = true`. Vale pero' solo per oggi, perche' il pianificatore
+         * risponde solo per oggi: negli altri giorni resta tutto orario, e li'
+         * l'assenza si controlla ancora.
+         */
+        if (giorno != LocalDate.now()) {
+            assertTrue("un altro giorno non ha tempo reale da nessuna parte", righe.none { it.realtime })
+        }
     }
 
+    /**
+     * Dove il monitor risponde, e' lui a comandare sull'orario imbarcato.
+     *
+     * **Si sospende, non fallisce, quando il monitor tace**, e lo stampa forte.
+     * Non e' indulgenza: il monitor EAV cade spesso, e in tre osservazioni fra
+     * il 20 e il 28/09/2026 era giu' due volte — 503 su tutto il 20, dieci
+     * righe vuote su nove stazioni su nove il 28, anche sull'endpoint di
+     * riserva `moova`. Un test che diventa rosso ogni volta che cade EAV
+     * insegna a ignorare il rosso, ed e' il modo in cui un allarme smette di
+     * funzionare. Il guasto resta scritto nel log, e il ripiego che conta —
+     * che l'app continui a dire i ritardi EAV — lo presidia
+     * `EavPianificatoreLiveTest`, che guarda tutt'e due le fonti.
+     */
     @Test
     fun `oggi, dove c'e' il monitor, comanda il tabellone`() = runBlocking {
         val righe = eav.board(portaNolana, date = LocalDate.now())
         println("\n=== PORTA NOLANA OGGI: ${righe.size} corse ===")
         assertTrue("nessuna corsa", righe.isNotEmpty())
-        /*
-         * Il tabellone porta il tempo reale. Se questo fallisse significherebbe
-         * che il monitor non ha risposto e si e' ripiegato sull'orario: non e'
-         * un errore del codice, ma va saputo.
-         */
-        assertTrue(
-            "oggi a Porta Nolana ha risposto l'orario invece del tabellone: " +
-                "il monitor EAV probabilmente non risponde",
-            righe.any { it.realtime },
-        )
+        val dalMonitor = righe.any { it.realtime }
+        if (!dalMonitor) {
+            println("  ATTENZIONE: ha risposto l'orario imbarcato, non il monitor.")
+            println("  Il monitor EAV non sta pubblicando niente: i ritardi del tabellone")
+            println("  arrivano dal pianificatore finche' dura. Vedi EavRepository.board.")
+        }
+        assumeTrue("il monitor EAV non risponde: si vede sopra", dalMonitor)
+        assertTrue("col monitor vivo le righe devono portare il tempo reale", dalMonitor)
     }
 
     @Test

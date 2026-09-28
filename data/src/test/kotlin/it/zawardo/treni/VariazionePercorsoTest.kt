@@ -171,6 +171,52 @@ class VariazionePercorsoTest {
         )
     }
 
+    /**
+     * La testa soppressa resta in testa, invece di intrecciarsi col resto.
+     *
+     * Il REG 24559 del 25/09/2026, cancellato da Varese a Milano Certosa: la
+     * testa soppressa numerata 1, 2, 3, 4 e la parte che circola **anch'essa**
+     * da 1, ma con la nuova origine rimasta «F» invece che «P». Senza il «P»
+     * finiva tutto in un tratto solo, e ordinare per progressivo le intrecciava
+     * a pettine — Varese, Milano Certosa, Gazzada Schianno, Milano Villapizzone
+     * — con orari a cinquanta minuti di distanza l'uno dall'altro.
+     *
+     * A differenza del 4972 qui la nuova origine non si annuncia: a dirlo e'
+     * solo il progressivo che ricomincia.
+     */
+    @Test
+    fun `la testa soppressa non si intreccia con la corsa che resta`() {
+        val corsa = AndamentoTrenoDto(
+            numeroTreno = 24559,
+            categoria = "REG",
+            tipoTreno = "SI",
+            nonPartito = true,
+            subTitle = "Treno cancellato da VARESE a MILANO CERTOSA. Parte da MILANO CERTOSA.",
+            fermate = listOf(
+                fermata(1, "S01205", "VARESE", 3, null, "16:12").copy(tipoFermata = "P"),
+                fermata(2, "S01213", "GAZZADA SCHIANNO MORAZZONE", 3, "16:17", "16:18"),
+                fermata(3, "S01214", "CASTRONNO", 3, "16:22", "16:23"),
+                fermata(4, "S01215", "ALBIZZATE SOLBIATE ARNO", 3, "16:26", "16:27"),
+                // Da qui la corsa che si fa davvero, e il progressivo ricomincia:
+                // la nuova origine pero' resta "F", non diventa "P".
+                fermata(1, "S01049", "MILANO CERTOSA", 0, null, "17:15"),
+                fermata(2, "S01048", "MILANO VILLAPIZZONE", 0, "17:17", "17:18"),
+                fermata(3, "S01047", "MILANO LANCETTI", 0, "17:21", "17:22"),
+            ),
+        ).toTrainStatus()
+
+        assertEquals(
+            listOf(
+                "Varese", "Gazzada Schianno Morazzone", "Castronno", "Albizzate Solbiate Arno",
+                "Milano Certosa", "Milano Villapizzone", "Milano Lancetti",
+            ),
+            corsa.stops.map { it.stationName },
+        )
+        // E gli orari salgono: e' il segno che i due pezzi non si sono mischiati.
+        val orari = corsa.stops.mapNotNull { it.scheduledDeparture ?: it.scheduledArrival }
+        assertEquals("gli orari devono salire", orari.sorted(), orari)
+    }
+
     @Test
     fun `soppressa all'inizio, ma finche' e' ferma e' un treno non partito`() {
         // E' su "non partito" che si calcola il ritardo di chi e' fermo all'origine.
