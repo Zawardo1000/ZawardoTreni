@@ -4,6 +4,8 @@ import it.zawardo.treni.data.remote.NetworkModule
 import it.zawardo.treni.data.repository.JourneyRepository
 import it.zawardo.treni.data.repository.StationRepository
 import it.zawardo.treni.data.repository.TrenordRepository
+import it.zawardo.treni.data.repository.chiaveSoluzione
+import it.zawardo.treni.domain.model.DataSource
 import it.zawardo.treni.domain.model.Journey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -191,4 +193,70 @@ class PrezziLiveTest {
             res.none { it.price?.amount?.toDoubleOrNull() == 0.0 },
         )
     }
+
+    /**
+     * La riga non costa piu' della piu' economica delle due fonti.
+     *
+     * Le due sorgenti prezzano la stessa corsa in modo diverso, e non per un
+     * errore di lettura nostro: Trenord tariffa ricostruendo il percorso dalle
+     * fermate che la soluzione nomina, e dove quelle non bastano prende la via
+     * piu' lunga. Milano Centrale-Calolziocorte, il 30/09/2026: il RE 2836 delle
+     * 18:20, che ferma solo a Monza, gli usciva «via MONZA» a 57 km e 6,30 €,
+     * mentre le soluzioni col cambio, che nominano Carnate Usmate, erano 43 km e
+     * 5,40 € — sulla stessa linea, e il 2836 ferma a Calolziocorte e *poi* a
+     * Lecco, quindi da Carnate ci passa. Il sito di Trenitalia diceva 5,40 € su
+     * ogni riga.
+     *
+     * Quel che si presidia qui non e' la cifra, che una revisione tariffaria puo'
+     * cambiare, ma la regola: dove tutte e due vendono, la riga porta il meno
+     * caro (vedi `ilPrezzoPiuBasso`). Se una delle due tace non c'e' niente da
+     * confrontare e il test lo dice invece di fallire.
+     */
+    @Test
+    fun `la riga non costa piu' della piu' economica delle due fonti`() = runBlocking {
+        val from = stations.search("Milano Centrale").first()
+        val to = stations.search("Calolziocorte").first()
+        val quando = LocalDateTime.now().plusDays(1).withHour(18).withMinute(0)
+
+        val dalNazionale = journeys.search(from, to, quando).prezziPerCorsa()
+        val daTrenord = trenord.search(from, to, quando).journeys.prezziPerCorsa()
+        val unite = journeys.searchAll(
+            from, to, quando,
+            sources = setOf(DataSource.TRENITALIA, DataSource.TRENORD),
+        ).journeys.prezziPerCorsa()
+
+        val comuni = dalNazionale.keys.intersect(daTrenord.keys).intersect(unite.keys)
+        println("\n=== ${from.name} -> ${to.name} ($quando): ${comuni.size} corse in tutte e due ===")
+        var diverse = 0
+        for (chiave in comuni.sorted()) {
+            val sito = dalNazionale.getValue(chiave)
+            val tn = daTrenord.getValue(chiave)
+            val riga = unite.getValue(chiave)
+            if (sito != tn) diverse++
+            println(
+                "  %-40s sito=%-6s trenord=%-6s riga=%s%s".format(
+                    chiave, sito, tn, riga, if (sito != tn) "   <<< le fonti non concordano" else "",
+                ),
+            )
+            assertTrue(
+                "la riga $chiave costa $riga, piu' del meno caro fra $sito (Le Frecce) e $tn (Trenord)",
+                riga <= minOf(sito, tn) + 0.001,
+            )
+        }
+        if (comuni.isEmpty()) {
+            println("  nessuna corsa prezzata da tutte e due adesso: niente da confrontare")
+        } else {
+            println("  fonti discordi su $diverse corse su ${comuni.size}")
+        }
+    }
+
+    /**
+     * Il prezzo di ogni corsa acquistabile, per chiave di soluzione: solo quelle
+     * in vendita, perche' un prezzo che non si compra non entra nel confronto.
+     */
+    private fun List<Journey>.prezziPerCorsa(): Map<String, Double> = mapNotNull { j ->
+        val p = j.price ?: return@mapNotNull null
+        if (!p.saleable || p.esaurito) return@mapNotNull null
+        p.amount.toDoubleOrNull()?.let { chiaveSoluzione(j) to it }
+    }.toMap()
 }

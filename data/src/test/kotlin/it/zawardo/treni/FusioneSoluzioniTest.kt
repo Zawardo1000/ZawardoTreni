@@ -57,7 +57,7 @@ class FusioneSoluzioniTest {
     }
 
     @Test
-    fun `il prezzo di Trenord, quando c'e', resta il suo`() {
+    fun `il prezzo di Trenord, quando e' il piu' basso, resta il suo`() {
         val unite = unisciSoluzioni(
             lefrecce = listOf(soluzione(JourneySource.LEFRECCE, Price("9.50"))),
             trenord = listOf(soluzione(JourneySource.TRENORD, Price("8.00"))),
@@ -66,6 +66,91 @@ class FusioneSoluzioniTest {
         )
 
         assertEquals("8.00", unite.single().price?.amount)
+    }
+
+    /**
+     * Il caso di Milano Centrale-Calolziocorte, il 30/09/2026: il RE 2836 delle
+     * 18:20 usciva a 6,30 € e le soluzioni col cambio delle 18:43 a 5,40 €, sulla
+     * stessa linea e con lo stesso biglietto. Trenord tariffa ricostruendo il
+     * percorso dalle fermate che la soluzione nomina, e il 2836 ferma solo a
+     * Monza: gli attribuiva 57 km, cioe' una via che non fa, mentre il sito di
+     * Trenitalia diceva 5,40 € a ogni riga. Vedi `ilPrezzoPiuBasso`.
+     */
+    @Test
+    fun `fra i due prezzi della stessa corsa resta il piu' basso`() {
+        val unite = unisciSoluzioni(
+            lefrecce = listOf(soluzione(JourneySource.LEFRECCE, Price("5.40"))),
+            trenord = listOf(soluzione(JourneySource.TRENORD, Price("6.30"), ritardo = 4)),
+            departure = partenza,
+            limit = 10,
+        )
+
+        assertEquals("5.40", unite.single().price?.amount)
+        // Del prezzo si prende solo la cifra: la riga resta quella di Trenord,
+        // col ritardo che Le Frecce non ha.
+        assertEquals(JourneySource.TRENORD, unite.single().source)
+        assertEquals(4, unite.single().delayMinutes)
+    }
+
+    @Test
+    fun `un prezzo che non si compra non vince per essere piu' basso`() {
+        val unite = unisciSoluzioni(
+            lefrecce = listOf(soluzione(JourneySource.LEFRECCE, Price("5.40", saleable = false))),
+            trenord = listOf(soluzione(JourneySource.TRENORD, Price("6.30"))),
+            departure = partenza,
+            limit = 10,
+        )
+
+        assertEquals("6.30", unite.single().price?.amount)
+    }
+
+    @Test
+    fun `nemmeno un prezzo esaurito`() {
+        val unite = unisciSoluzioni(
+            lefrecce = listOf(soluzione(JourneySource.LEFRECCE, Price("5.40", esaurito = true))),
+            trenord = listOf(soluzione(JourneySource.TRENORD, Price("6.30"))),
+            departure = partenza,
+            limit = 10,
+        )
+
+        assertEquals("6.30", unite.single().price?.amount)
+    }
+
+    /**
+     * Il confronto sta fra due prezzi dell'intero viaggio. Le Frecce il tratto
+     * urbano lo lascia fuori dichiarandolo, e li' la sua cifra e' piu' bassa
+     * perche' comprende di meno: prenderla direbbe meno del vero.
+     */
+    @Test
+    fun `col tratto urbano non si confronta niente`() {
+        val conUrbano = soluzione(JourneySource.LEFRECCE, Price("2.20")).let {
+            it.copy(legs = it.legs + Leg(null, "UB", napoli, salerno, partenza, partenza.plusMinutes(10)))
+        }
+        val unite = unisciSoluzioni(
+            lefrecce = listOf(conUrbano),
+            trenord = listOf(soluzione(JourneySource.TRENORD, Price("4.40"))),
+            departure = partenza,
+            limit = 10,
+        )
+
+        assertEquals("4.40", unite.single().price?.amount)
+    }
+
+    /**
+     * Il rovescio: se a non vendere e' Trenord, il prezzo del sito vale anche
+     * essendo il piu' caro. Altrimenti la riga direbbe «vendita chiusa» avendo
+     * accanto un biglietto in vendita.
+     */
+    @Test
+    fun `se a non vendere e' Trenord, vale il prezzo del sito`() {
+        val unite = unisciSoluzioni(
+            lefrecce = listOf(soluzione(JourneySource.LEFRECCE, Price("9.50"))),
+            trenord = listOf(soluzione(JourneySource.TRENORD, Price("8.00", saleable = false))),
+            departure = partenza,
+            limit = 10,
+        )
+
+        assertEquals("9.50", unite.single().price?.amount)
     }
 
     /**

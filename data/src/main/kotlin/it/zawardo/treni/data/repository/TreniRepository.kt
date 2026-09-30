@@ -1196,7 +1196,7 @@ fun chiavePrezzoLeFrecce(j: Journey): String =
  * quella di Le Frecce che il prezzo ce l'aveva. Misurato l'11/09/2026: l'ICN
  * 797 Napoli-Salerno a 9,50 € usciva senza cifra, e cosi' due RV Torino-Milano.
  * Ora la copia Trenord vince ancora, ma eredita il prezzo. Se il prezzo ce l'ha
- * gia', resta il suo.
+ * anche lei, si tiene il piu' basso: vedi [ilPrezzoPiuBasso].
  *
  * **E nemmeno gli avvisi.** I messaggi che il sito di Le Frecce scrive sulla
  * soluzione — «Il treno non effettua servizio viaggiatori», «Posti Esauriti sul
@@ -1217,7 +1217,7 @@ internal fun unisciSoluzioni(
         when {
             tn == null -> byKey[chiave] = lf
             else -> {
-                val prezzo = tn.price ?: lf.price
+                val prezzo = ilPrezzoPiuBasso(tn, lf)
                 val avvisi = (tn.avvisi + lf.avvisi).distinct()
                 if (prezzo !== tn.price || avvisi != tn.avvisi) {
                     byKey[chiave] = tn.copy(price = prezzo, avvisi = avvisi)
@@ -1242,6 +1242,55 @@ internal fun unisciSoluzioni(
         .sortedBy { it.departure }
         .take(limit)
 }
+
+/**
+ * Fra i due prezzi della stessa soluzione, quello da mostrare: **il piu' basso**.
+ *
+ * Trenord tariffa ricostruendo il percorso dalle fermate che la soluzione nomina,
+ * e quando quelle non bastano prende la via piu' lunga. Milano
+ * Centrale-Calolziocorte, misurato il 30/09/2026: il RE 2836 delle 18:20, che
+ * ferma solo a Monza, veniva conteggiato «via MONZA» per 57 km, 6,30 €; le
+ * soluzioni col cambio, che nominano Carnate Usmate, «via CARNATE USMATE» per 43
+ * km, 5,40 €. Ma la linea e' la stessa per tutti — il 2836 ferma a Calolziocorte
+ * e *poi* a Lecco, quindi passa da Carnate, e i 57 km sono di un percorso che non
+ * fa — e il sito di Trenitalia diceva 5,40 € su ogni riga. Lo stesso per Lecco, 72
+ * km invece di 46. Dove la fermata di via c'e', le due fonti tornano identiche:
+ * Bergamo, cinque righe su cinque.
+ *
+ * Il minimo, non «vince Le Frecce»: e' la stessa scelta che si fa gia' fra i
+ * titoli di viaggio di una tratta Trenord (vedi `toPrice`), e non ha bisogno di
+ * sapere quale fonte abbia ragione — solo che per lo stesso treno, nello stesso
+ * minuto, un biglietto piu' caro del necessario non si annuncia.
+ *
+ * **Non e' il rischio di pescare una tariffa ridotta.** I due numeri che arrivano
+ * qui sono gia' due volte la stessa cosa: l'intero viaggio, un adulto, seconda
+ * classe. Trenord le riduzioni per eta' le ha scartate prima (`toPrice`:
+ * `tariffaIntera`, `secondaClasse` — a Calolziocorte il ragazzo era 2,70 € e
+ * l'anziano 4,30 €, e nessuno dei due arriva fin qui); al sito di Trenitalia si
+ * chiede `adults = 1, children = 0`. Il confronto sta fra due tariffe piene.
+ *
+ * **Ne' di pescare un prezzo che copre meno strada.** Le Frecce il tratto urbano
+ * lo lascia fuori dichiarandolo ("not included in the price"), e li' la sua cifra
+ * e' piu' bassa perche' comprende di meno: dove c'e' un tratto urbano non si
+ * confronta niente e resta il prezzo di Trenord, come prima.
+ *
+ * Un prezzo che non si compra, infine, non vince per il solo fatto di essere piu'
+ * basso. Il sito pubblica la cifra anche delle soluzioni partite, dichiarandole
+ * `NOT_SALEABLE`: mostrarla al posto di un biglietto ancora in vendita scriverebbe
+ * «vendita chiusa» su un treno che si prende.
+ */
+private fun ilPrezzoPiuBasso(trenord: Journey, lefrecce: Journey): Price? {
+    val tn = trenord.price
+    val lf = lefrecce.price
+    if (tn == null || lf == null) return tn ?: lf
+    if ((trenord.legs + lefrecce.legs).any { it.urbano }) return tn
+    val comprabili = listOf(tn, lf).filter { it.saleable && !it.esaurito }
+    if (comprabili.size == 1) return comprabili.single()
+    return if (lf.euro() < tn.euro()) lf else tn
+}
+
+/** Il prezzo come numero. Una cifra illeggibile vale «piu' caro di qualunque altra». */
+private fun Price.euro(): Double = amount.toDoubleOrNull() ?: Double.MAX_VALUE
 
 /**
  * Fin dove rispondono i tabelloni futuri di ViaggiaTreno, e quanti chiederne
