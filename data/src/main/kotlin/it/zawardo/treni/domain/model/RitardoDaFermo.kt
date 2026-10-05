@@ -111,23 +111,37 @@ fun TrainStatus.conPassaggiDa(altra: TrainStatus): TrainStatus {
     }
     if (copiate == 0) return this
 
-    val ultima = nuove.last { it.status == StopStatus.DONE }
+    /*
+     * Le fermate prima dell'ultima rilevata che Trenord non ha accoppiato sono
+     * passate anche loro: fatte e non rilevate, come le da' ViaggiaTreno dove
+     * manca il punto di rilevamento. Lasciate da fare, avrebbero portato un
+     * orario stimato prima di una fermata gia' fatta.
+     */
+    val indiceUltima = nuove.indexOfLast { it.status == StopStatus.DONE }
+    val coerenti = nuove.mapIndexed { i, fermata ->
+        if (i < indiceUltima && fermata.status == StopStatus.FUTURE) {
+            fermata.copy(status = StopStatus.DONE, detected = false, projectedArrival = null, projectedDeparture = null)
+        } else {
+            fermata
+        }
+    }
+    val ultima = coerenti[indiceUltima]
     val ritardo = if (ultima.actualDeparture != null) ultima.departureDelayMinutes else ultima.arrivalDelayMinutes
-    val arrivata = nuove.all { it.status == StopStatus.DONE || it.status == StopStatus.CANCELLED }
+    val arrivata = coerenti.all { it.status == StopStatus.DONE || it.status == StopStatus.CANCELLED }
     return copy(
         delayMinutes = ritardo,
         state = when {
             arrivata -> TrainState.ARRIVED
             // Le variazioni che il «non partito» copriva, dalle fermate come nel
             // mapper di ViaggiaTreno: Trenord dice solo che il treno si muove.
-            nuove.any { it.status == StopStatus.CANCELLED } -> TrainState.PARTIALLY_CANCELLED
-            nuove.any { it.straordinaria } -> TrainState.DIVERTED
+            coerenti.any { it.status == StopStatus.CANCELLED } -> TrainState.PARTIALLY_CANCELLED
+            coerenti.any { it.straordinaria } -> TrainState.DIVERTED
             ritardo > 0 -> TrainState.DELAYED
             else -> TrainState.REGULAR
         },
         lastDetectionStation = ultima.stationName,
         lastDetectionTime = ultima.actualDeparture ?: ultima.actualArrival,
-        stops = nuove.map { it.projectedBy(ritardo) },
+        stops = coerenti.map { it.projectedBy(ritardo) },
         ritardoDedotto = false,
     )
 }

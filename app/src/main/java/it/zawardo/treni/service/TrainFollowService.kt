@@ -100,6 +100,12 @@ class TrainFollowService : Service() {
         /** Scarto dell'ultimo avviso emesso, non dell'ultimo rilevamento. */
         var lastAlertedDelay: Int? = null
 
+        /**
+         * Una lettura di questa corsa ha gia' visto il treno muoversi. Da li' un
+         * ritardo dedotto non e' una notizia ma un buco nei dati: vedi `maybeAlert`.
+         */
+        var vistaMuoversi = false
+
         /** La soppressione si annuncia una volta sola, non a ogni giro. */
         var alertedCancellation = false
 
@@ -719,6 +725,15 @@ class TrainFollowService : Service() {
          * aggiornato e lo scarto risultera' ancora nuovo.
          */
         if (alertPlatform(corsa)) return
+
+        /*
+         * Un ritardo dedotto dopo una lettura misurata e' un giro in cui le fonti
+         * hanno taciuto, non un treno tornato fermo all'origine: annunciarlo
+         * sarebbe «da +3 a +60», e al giro dopo il contrario. Il riferimento
+         * resta quello misurato.
+         */
+        if (status.stops.any { it.actualArrival != null || it.actualDeparture != null }) corsa.vistaMuoversi = true
+        if (status.ritardoDedotto && corsa.vistaMuoversi) return
 
         val previous = corsa.lastAlertedDelay
         if (previous == null) {

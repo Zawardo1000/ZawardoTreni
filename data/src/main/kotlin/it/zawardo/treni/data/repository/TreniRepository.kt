@@ -1499,11 +1499,19 @@ class TrainStatusRepository(
 
         val chiave = "$numero|$date"
         val adesso = System.currentTimeMillis()
-        senzaTrenord[chiave]?.let { if (adesso - it < RICHIEDI_DOPO_MS) return status }
+        /*
+         * Col ritardo dedotto la dimenticanza non vale: quel null puo' essere una
+         * rete caduta per un attimo, e ricordarlo un quarto d'ora vorrebbe dire un
+         * quarto d'ora di «+58» per un treno che Trenord ha visto partire — e in
+         * «Segui treno» un avviso a ogni passaggio fra i due numeri. Si richiede a
+         * ogni lettura, che e' una chiamata sola e solo su queste corse.
+         */
+        val ricorda = !status.ritardoDedotto
+        if (ricorda) senzaTrenord[chiave]?.let { if (adesso - it < RICHIEDI_DOPO_MS) return status }
 
         val altra = runCatching { trenord.trainStatus(numero, date) }.getOrNull()
         if (altra == null) {
-            senzaTrenord[chiave] = adesso
+            if (ricorda) senzaTrenord[chiave] = adesso
             return status
         }
         senzaTrenord.remove(chiave)

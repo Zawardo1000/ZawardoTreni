@@ -70,7 +70,7 @@ class PassaggiDaTrenordTest {
      * [ritardo] minuti; [spostata] sposta l'orario di tabella, per fingere un
      * altro treno con lo stesso numero.
      */
-    private fun daTrenord(finoA: Int, ritardo: Int = 3, spostata: Long = 0) = TrainStatus(
+    private fun daTrenord(finoA: Int, ritardo: Int = 3, spostata: Long = 0, senza: Int? = null) = TrainStatus(
         number = "24860",
         category = "S8",
         label = "S8 24860",
@@ -99,7 +99,7 @@ class PassaggiDaTrenordTest {
                 actualPlatform = null,
                 status = if (fatta) StopStatus.DONE else StopStatus.FUTURE,
             )
-        },
+        }.filterIndexed { i, _ -> i != senza },
     )
 
     private val alle1750 = ora("17:50")
@@ -186,5 +186,16 @@ class PassaggiDaTrenordTest {
         val aggiornata = riga().conRitardoDa(corsa)
         assertEquals(58, aggiornata.delayMinutes)
         assertTrue(aggiornata.ritardoDedotto)
+    }
+
+    /** Una fermata che Trenord non elenca, prima dell'ultima rilevata: passata, non rilevata. */
+    @Test
+    fun `una fermata senza gemella prima dell'ultima rilevata e' passata`() {
+        val corsa = daViaggiaTreno().conRitardoDaFermo(alle1750).conPassaggiDa(daTrenord(finoA = 3, senza = 1))
+        val monza = corsa.stops[1]
+        assertEquals(StopStatus.DONE, monza.status)
+        assertFalse(monza.detected)
+        assertEquals(null, monza.projectedArrival)
+        assertEquals("Airuno", corsa.lastDetectionStation)
     }
 }

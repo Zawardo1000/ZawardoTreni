@@ -619,6 +619,13 @@ private fun JourneyCard(
                                     color = lateColor(),
                                 )
                             }
+                            /*
+                             * «Fai ancora in tempo» per un ritardo che nessuno ha
+                             * misurato: il REG 24860 del 04/10/2026, cercato da
+                             * Calolziocorte alle 17:50, risultava in partenza alle
+                             * 18:41 ed era partito alle 17:43.
+                             */
+                            if (row.ritardoDedotto) NotaSenzaRilevamenti()
                         }
                     }
                     /*
@@ -698,13 +705,7 @@ private fun JourneyCard(
                              * misurato: resta, ma dice su cosa si regge. Il REG 24860
                              * del 04/10/2026 la dava persa a Lecco, ed era partito.
                              */
-                            if (row.ritardoDedotto) {
-                                Text(
-                                    "Nessun rilevamento: il treno potrebbe essere partito senza che le fonti lo dicano",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = scheme.onSurfaceVariant,
-                                )
-                            }
+                            if (row.ritardoDedotto) NotaSenzaRilevamenti()
                         }
                     }
                 }
@@ -1480,6 +1481,20 @@ private fun Message(text: String, modifier: Modifier = Modifier) {
         text,
         modifier.padding(32.dp),
         style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * Il ritardo del primo treno non l'ha misurato nessuno: e' il tempo passato
+ * dall'ora di partenza. Vedi `TrainStatus.ritardoDedotto`.
+ */
+@Composable
+private fun NotaSenzaRilevamenti() {
+    Text(
+        "Nessun rilevamento: il treno potrebbe essere partito senza che le fonti lo dicano",
+        Modifier.padding(top = 2.dp),
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
