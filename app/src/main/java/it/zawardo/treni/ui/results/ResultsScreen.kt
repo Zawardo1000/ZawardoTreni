@@ -671,26 +671,40 @@ private fun JourneyCard(
                      * sapere perche' non si fa dice di piu' che vederla sparire.
                      */
                     if (!ancoraInTempo && cambioSaltato) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.SwapHoriz,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = lateColor(),
-                            )
-                            Text(
-                                if (row.coincidenza == Coincidenza.PERSA) {
-                                    "Coincidenza persa a $stazioneDelCambio"
-                                } else {
-                                    "Coincidenza a $stazioneDelCambio a rischio"
-                                },
-                                style = MaterialTheme.typography.labelLarge,
-                                color = lateColor(),
-                                fontWeight = FontWeight.Bold,
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.SwapHoriz,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = lateColor(),
+                                )
+                                Text(
+                                    if (row.coincidenza == Coincidenza.PERSA) {
+                                        "Coincidenza persa a $stazioneDelCambio"
+                                    } else {
+                                        "Coincidenza a $stazioneDelCambio a rischio"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = lateColor(),
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            /*
+                             * La coincidenza persa per un ritardo che nessuno ha
+                             * misurato: resta, ma dice su cosa si regge. Il REG 24860
+                             * del 04/10/2026 la dava persa a Lecco, ed era partito.
+                             */
+                            if (row.ritardoDedotto) {
+                                Text(
+                                    "Nessun rilevamento: il treno potrebbe essere partito senza che le fonti lo dicano",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }

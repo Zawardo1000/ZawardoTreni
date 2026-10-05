@@ -442,6 +442,14 @@ private fun BoardRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // Il ritardo a destra non l'ha misurato nessuno: vedi `ritardoDedotto`.
+                if (entry.realtime && !cancelled && entry.ritardoDedotto) {
+                    Text(
+                        "  nessun rilevamento",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (cancelled) {
                     Text(
                         if (entry.state == TrainState.CANCELLED) "  Soppresso"

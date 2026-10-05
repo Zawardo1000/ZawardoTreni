@@ -533,6 +533,15 @@ private fun SchedaTratta(
         status?.avvisiDaMostrare()?.forEach {
             Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.tertiary)
         }
+        // Il ritardo in cima non l'ha misurato nessuno: vedi `TrainStatus.ritardoDedotto`.
+        if (status?.ritardoDedotto == true) {
+            Text(
+                "Nessun rilevamento: il ritardo è il tempo passato dall'ora di partenza, " +
+                    "e il treno potrebbe essere partito senza che le fonti lo dicano.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
 
         /*
          * I tuoi due capi, scritti anche qui e non solo evidenziati fra le
@@ -716,7 +725,23 @@ private fun CambioRiga(riga: RigaViaggio.Cambio) {
             fontWeight = if (allarme) FontWeight.SemiBold else FontWeight.Normal,
             color = if (allarme) rosso else scheme.onSurfaceVariant,
         )
+        if (riga.dedotto) AvvisoSenzaRilevamenti()
     }
+}
+
+/**
+ * Il cambio misurato su un ritardo che nessuno ha rilevato: la conclusione resta,
+ * ma con cio' su cui si regge. Il REG 24860 del 04/10/2026 dava la coincidenza
+ * persa a Lecco per +58, ed era partito: ViaggiaTreno non l'aveva visto.
+ */
+@Composable
+private fun AvvisoSenzaRilevamenti() {
+    Text(
+        "È una stima: nessuna fonte ha rilevato il treno, che potrebbe essere partito senza che lo dicano.",
+        Modifier.padding(top = 2.dp),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** Uno dei due orari del cambio: colorato solo se viene dal tempo reale. */
@@ -845,6 +870,7 @@ private fun TrattaSenzaPercorso(tratta: TrattaViaggio, cambio: RigaViaggio.Cambi
                 fontWeight = if (allarme) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (allarme) lateColor() else scheme.onSurfaceVariant,
             )
+            if (cambio.dedotto) AvvisoSenzaRilevamenti()
         }
     }
 
@@ -927,6 +953,11 @@ private sealed interface RigaViaggio {
         val binarioEffettivo: String? = null,
         /** Dove va, per te, il treno dopo: «il treno per Brescia». */
         val verso: String,
+        /**
+         * I minuti vengono da un ritardo che nessuno ha misurato: uno dei due treni
+         * non e' mai stato visto partire. Vedi `TrainStatus.ritardoDedotto`.
+         */
+        val dedotto: Boolean = false,
     ) : RigaViaggio {
         override val chiave get() = "cambio-$dopo"
 
@@ -1128,6 +1159,7 @@ private fun cambio(i: Int, qui: TrattaUiState, poi: TrattaUiState): RigaViaggio.
         binarioProgrammato = salita?.scheduledPlatform,
         binarioEffettivo = salita?.actualPlatform,
         verso = poi.tratta.discesaNome,
+        dedotto = reale && (qui.status?.ritardoDedotto == true || poi.status?.ritardoDedotto == true),
     )
 }
 

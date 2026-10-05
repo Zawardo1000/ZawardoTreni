@@ -29,7 +29,7 @@ private val Stop.orarioDiTabella: LocalDateTime?
  * Si confronta l'ora del giorno e non l'istante, perche' una corsa che scavalca
  * la mezzanotte le due fonti possono datarla in modo diverso.
  */
-private fun Stop.eLaStessaFermataDi(altra: Stop): Boolean {
+internal fun Stop.eLaStessaFermataDi(altra: Stop): Boolean {
     val qui = orarioDiTabella ?: return false
     val la = altra.orarioDiTabella ?: return false
     return secondiCircolari(qui.toLocalTime(), la.toLocalTime()) <= SCARTO_AMMESSO.seconds

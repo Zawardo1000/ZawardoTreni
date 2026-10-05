@@ -60,6 +60,12 @@ data class JourneyRow(
     val variato: Boolean = false,
     val delayMinutes: Int? = null,
     /**
+     * Il ritardo del primo treno non l'ha misurato nessuno: e' l'ora passata da
+     * quella di partenza, con il treno mai visto partire. La coincidenza persa
+     * che ne esce resta, ma dice su cosa si regge. Vedi `TrainStatus.ritardoDedotto`.
+     */
+    val ritardoDedotto: Boolean = false,
+    /**
      * Il binario da cui parti: la fermata di salita del **primo** treno.
      *
      * Su un viaggio con cambio è l'unico che serva prima di uscire di casa —
@@ -107,6 +113,7 @@ data class JourneyRow(
         state = letta.state,
         variato = letta.variato,
         delayMinutes = letta.delayMinutes,
+        ritardoDedotto = letta.ritardoDedotto,
         scheduledPlatform = letta.scheduledPlatform,
         actualPlatform = letta.actualPlatform,
     )
@@ -1219,6 +1226,7 @@ class ResultsViewModel(
                     maxOf(status.delayMinutes, row.journey.delayMinutes ?: 0)
                 else -> status.delayMinutes
             },
+            ritardoDedotto = status?.ritardoDedotto ?: row.ritardoDedotto,
         )
         return arricchita to status
     }
@@ -1247,7 +1255,8 @@ class ResultsViewModel(
         giorno: LocalDate,
     ): TrainStatus {
         if (DataSource.TRENORD !in sources) return status
-        if (status.fermataDiSalita(leg)?.platform != null) return status
+        // Col ritardo dedotto la chiamata serve comunque: Trenord puo' averlo visto partire.
+        if (!status.ritardoDedotto && status.fermataDiSalita(leg)?.platform != null) return status
         return runCatching { trains.completaBinari(status, giorno) }.getOrDefault(status)
     }
 

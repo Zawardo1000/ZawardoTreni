@@ -50,6 +50,12 @@ internal fun Stop.projectedBy(delayMinutes: Int): Stop {
  * cosa che questa funzione non puo' sapere: lo decide chi la chiama, con
  * [vedePartireDa] sulla corsa del giorno prima quando c'e'. Vedi
  * `TrainStatusRepository.nonPartitoVuolDireFermo`.
+ *
+ * **Ed e' una deduzione, e lo dichiara** ([TrainStatus.ritardoDedotto]): «non
+ * partito» vuol dire anche «nessuno l'ha visto partire», e le due cose non si
+ * distinguono finche' nessuna fonte rileva niente. Il REG 24860 del 04/10/2026
+ * era partito, e ViaggiaTreno non l'ha visto in nessuna stazione. Prima di
+ * fidarsene si chiede a Trenord: vedi [conPassaggiDa].
  */
 fun TrainStatus.conRitardoDaFermo(adesso: LocalDateTime): TrainStatus {
     if (!realtime || state != TrainState.NOT_DEPARTED) return this
@@ -58,7 +64,72 @@ fun TrainStatus.conRitardoDaFermo(adesso: LocalDateTime): TrainStatus {
     val tabella = origine.scheduledDeparture ?: return this
     val fermo = Duration.between(tabella, adesso).toMinutes().toInt()
     if (fermo <= delayMinutes) return this
-    return copy(delayMinutes = fermo, stops = stops.map { it.projectedBy(fermo) })
+    return copy(delayMinutes = fermo, stops = stops.map { it.projectedBy(fermo) }, ritardoDedotto = true)
+}
+
+/**
+ * I passaggi di un'altra lettura della stessa corsa, su una corsa che non ne ha
+ * nessuno.
+ *
+ * Per il treno che ViaggiaTreno non ha visto partire ([TrainStatus.ritardoDedotto]):
+ * Trenord rileva le sue corse per conto suo — il 05/10/2026 sull'S8 24829 aveva
+ * partenza e arrivo reali a ognuna delle 14 fermate, al mezzo minuto — e se li'
+ * il treno e' partito, il «non partito» era solo silenzio. Allora la corsa
+ * prende gli orari veri di Trenord fermata per fermata, e ritardo, stato e
+ * ultimo rilevamento si ricalcolano da quelli.
+ *
+ * Solo su una corsa **senza alcun rilevamento**: dove ViaggiaTreno ha misurato
+ * qualcosa le due misure non si mescolano. E solo se le due letture sono **la
+ * stessa corsa**, per stazione e orario di tabella come in [conBinariDa]: lo
+ * stesso numero puo' essere di due treni diversi.
+ *
+ * Se anche Trenord tace, la corsa resta com'era, col suo ritardo dedotto e col
+ * segno che lo dice.
+ */
+fun TrainStatus.conPassaggiDa(altra: TrainStatus): TrainStatus {
+    if (!realtime) return this
+    if (stops.any { it.actualArrival != null || it.actualDeparture != null }) return this
+    val fatte = altra.stops.filter { it.actualArrival != null || it.actualDeparture != null }
+    if (fatte.isEmpty()) return this
+
+    var copiate = 0
+    val nuove = stops.map { fermata ->
+        if (fermata.status == StopStatus.CANCELLED) return@map fermata
+        val fonte = fatte.firstOrNull {
+            stessaStazione(fermata.stationCode, it.stationCode) && fermata.eLaStessaFermataDi(it)
+        } ?: return@map fermata
+        copiate++
+        fermata.copy(
+            actualArrival = fonte.actualArrival,
+            arrivalDelayMinutes = fonte.actualArrival?.let { fonte.arrivalDelayMinutes } ?: 0,
+            actualDeparture = fonte.actualDeparture,
+            departureDelayMinutes = fonte.actualDeparture?.let { fonte.departureDelayMinutes } ?: 0,
+            status = StopStatus.DONE,
+            projectedArrival = null,
+            projectedDeparture = null,
+        )
+    }
+    if (copiate == 0) return this
+
+    val ultima = nuove.last { it.status == StopStatus.DONE }
+    val ritardo = if (ultima.actualDeparture != null) ultima.departureDelayMinutes else ultima.arrivalDelayMinutes
+    val arrivata = nuove.all { it.status == StopStatus.DONE || it.status == StopStatus.CANCELLED }
+    return copy(
+        delayMinutes = ritardo,
+        state = when {
+            arrivata -> TrainState.ARRIVED
+            // Le variazioni che il «non partito» copriva, dalle fermate come nel
+            // mapper di ViaggiaTreno: Trenord dice solo che il treno si muove.
+            nuove.any { it.status == StopStatus.CANCELLED } -> TrainState.PARTIALLY_CANCELLED
+            nuove.any { it.straordinaria } -> TrainState.DIVERTED
+            ritardo > 0 -> TrainState.DELAYED
+            else -> TrainState.REGULAR
+        },
+        lastDetectionStation = ultima.stationName,
+        lastDetectionTime = ultima.actualDeparture ?: ultima.actualArrival,
+        stops = nuove.map { it.projectedBy(ritardo) },
+        ritardoDedotto = false,
+    )
 }
 
 /**
@@ -124,7 +195,7 @@ fun BoardEntry.conRitardoDaFermo(stazione: String, adesso: LocalDateTime): Board
     // Mezzanotte in mezzo: le 23:55 viste alle 00:05 sono dieci minuti fa.
     val fermo = minutiCircolari(tabella, adesso.toLocalTime())
     if (fermo <= delayMinutes) return this
-    return copy(delayMinutes = fermo)
+    return copy(delayMinutes = fermo, ritardoDedotto = true)
 }
 
 /**
@@ -156,9 +227,20 @@ fun TrainStatus.vedePartireDa(origine: String): Boolean? {
  * Solo in quel caso. A treno partito il ritardo del tabellone e' una misura, e
  * sostituirlo con quello della corsa vorrebbe dire scegliere fra due misure;
  * qui invece c'e' una misura sola, e l'altro e' uno zero che non dice niente.
+ *
+ * **Salvo un ritardo dedotto che la corsa smentisce**: se la riga contava il
+ * tempo passato da un treno mai visto partire ([BoardEntry.ritardoDedotto]) e
+ * la corsa, coi passaggi di Trenord ([conPassaggiDa]), l'ha visto partire, quel
+ * «non partito» era solo silenzio, e valgono stato e ritardo della corsa, che
+ * sono misure. Senza ritardo dedotto la regola di sopra resta com'era.
  */
 fun BoardEntry.conRitardoDa(corsa: TrainStatus): BoardEntry {
-    if (state != TrainState.NOT_DEPARTED || corsa.state != TrainState.NOT_DEPARTED) return this
+    if (state != TrainState.NOT_DEPARTED) return this
+    val partita = corsa.stops.any { it.actualArrival != null || it.actualDeparture != null }
+    if (ritardoDedotto && corsa.state != TrainState.NOT_DEPARTED && partita) {
+        return copy(delayMinutes = corsa.delayMinutes, state = corsa.state, ritardoDedotto = false)
+    }
+    if (corsa.state != TrainState.NOT_DEPARTED) return this
     if (corsa.delayMinutes <= delayMinutes) return this
-    return copy(delayMinutes = corsa.delayMinutes)
+    return copy(delayMinutes = corsa.delayMinutes, ritardoDedotto = corsa.ritardoDedotto)
 }

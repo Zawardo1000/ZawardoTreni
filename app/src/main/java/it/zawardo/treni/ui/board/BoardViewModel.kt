@@ -737,7 +737,8 @@ class BoardViewModel : ViewModel() {
         orario: Deferred<List<BoardEntry>>?,
     ): TrainStatus {
         if (DataSource.TRENORD !in sources || stazione == null || orario == null) return corsa
-        if (entry.conBinarioDa(corsa, stazione).actualPlatform != null) return corsa
+        // Col ritardo dedotto si chiede comunque: Trenord puo' averlo visto partire.
+        if (!corsa.ritardoDedotto && entry.conBinarioDa(corsa, stazione).actualPlatform != null) return corsa
         when (corsa.impresa) {
             Imprese.TRENORD -> Unit
             null -> {

@@ -452,6 +452,20 @@ data class TrainStatus(
      * se la corsa viene da un'altra fonte, che non lo dice.
      */
     val impresa: Int? = null,
+    /**
+     * Il ritardo non l'ha misurato nessuno: e' l'ora passata da quella di
+     * partenza, perche' nessuna fonte ha visto partire il treno. Vedi
+     * `conRitardoDaFermo`.
+     *
+     * Il numero resta, ed e' spesso giusto — il RE 2824 del 17/09/2026 era in
+     * banchina davvero — ma va detto su cosa si regge. Il 04/10/2026 il REG
+     * 24860 delle 16:52 da Milano Porta Garibaldi alle 17:50 era «+58, coincidenza
+     * persa a Lecco», e il treno era partito: ViaggiaTreno quella corsa non
+     * l'ha rilevata in nessuna stazione, mentre le S8 prima e dopo le aveva
+     * tutte. Trenord, quando li ha, porta i passaggi veri e il segno sparisce
+     * (`conPassaggiDa`).
+     */
+    val ritardoDedotto: Boolean = false,
 ) {
     /** Indice dell'ultima fermata effettuata, -1 se non ancora partito. */
     val currentStopIndex: Int
@@ -544,6 +558,11 @@ data class BoardEntry(
      * un'informazione diversa che l'utente ha diritto di distinguere.
      */
     val realtime: Boolean = true,
+    /**
+     * Il ritardo e' l'ora passata da quella di partenza, con il treno mai visto
+     * partire: come [TrainStatus.ritardoDedotto], sulla riga del tabellone.
+     */
+    val ritardoDedotto: Boolean = false,
 ) {
     /** Come su [Stop]: il binario vero se c'e', altrimenti quello di tabella. */
     val platform: String? get() = binarioDaMostrare(scheduledPlatform, actualPlatform)

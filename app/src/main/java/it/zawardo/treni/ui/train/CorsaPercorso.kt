@@ -205,6 +205,8 @@ internal fun StatoCorsa(status: TrainStatus, modifier: Modifier = Modifier) {
                     } else if (status.delayMinutes != 0) {
                         Text(
                             when {
+                                // Senza rilevamenti non lo sa nessuno: vedi `ritardoDedotto`.
+                                fermo && status.ritardoDedotto -> "  non risulta partito"
                                 fermo -> "  non ancora partito"
                                 status.delayMinutes > 0 -> "  di ritardo"
                                 else -> "  di anticipo"
@@ -264,7 +266,8 @@ internal fun ColumnScope.DettagliCorsa(
             when {
                 !status.realtime -> "Orario previsto"
                 fermoInRitardo(status.state, status.delayMinutes) ->
-                    delayLabel(status.delayMinutes) + " · non ancora partito"
+                    delayLabel(status.delayMinutes) +
+                        if (status.ritardoDedotto) " · non risulta partito" else " · non ancora partito"
                 status.state.variazione ->
                     delayLabel(status.delayMinutes) + " · " + stateLabel(status.state).orEmpty().lowercase()
                 else -> stateLabel(status.state) ?: delayLabel(status.delayMinutes)
@@ -295,6 +298,17 @@ internal fun ColumnScope.DettagliCorsa(
             when {
                 rilevamento != null -> Text(
                     "Ultimo rilevamento: $rilevamento alle ${status.lastDetectionTime.hhmm()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                /*
+                 * Il ritardo di un treno che nessuno ha visto partire e' il tempo
+                 * passato dall'ora di partenza: spesso e' giusto, ma va detto su
+                 * cosa si regge. Vedi `TrainStatus.ritardoDedotto`.
+                 */
+                status.ritardoDedotto -> Text(
+                    "Nessun rilevamento: il ritardo è il tempo passato dall'ora di partenza. " +
+                        "Il treno potrebbe essere partito senza che le fonti lo dicano.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

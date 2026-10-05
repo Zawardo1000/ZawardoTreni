@@ -570,7 +570,17 @@ class TrainFollowService : Service() {
         return if (parola != null) "$parola · $orario" else orario
     }
 
+    /*
+     * Il ritardo di un treno che nessuno ha visto partire e' il tempo passato
+     * dall'ora di partenza: la notifica lo scrive, ma dice che e' una stima. Vedi
+     * `TrainStatus.ritardoDedotto`.
+     */
     private fun orarioTuo(corsa: Sorvegliata, status: TrainStatus): String {
+        val orario = orarioTuoSenzaNota(corsa, status)
+        return if (status.ritardoDedotto) "$orario · nessun rilevamento" else orario
+    }
+
+    private fun orarioTuoSenzaNota(corsa: Sorvegliata, status: TrainStatus): String {
         val salita = corsa.boarding
         val salito = salita != null &&
             (salita.status == StopStatus.DONE || salita.actualDeparture != null)
@@ -732,7 +742,17 @@ class TrainFollowService : Service() {
             boarding?.effectiveDeparture?.format(ORA_DEL_GIORNO)
                 ?.let { " Partenza da ${corsa.nomeSalita} prevista alle $it." }
         }.orEmpty()
-        emitAlert(corsa, "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail")
+        /*
+         * Un ritardo dedotto cresce di un minuto al minuto, e supera la soglia da
+         * solo: l'avviso suona lo stesso, perche' il treno puo' essere fermo
+         * davvero, ma dice su cosa si regge.
+         */
+        val stima = if (status.ritardoDedotto) {
+            " È una stima: nessuna fonte ha rilevato il treno, che potrebbe essere partito."
+        } else {
+            ""
+        }
+        emitAlert(corsa, "Da ${describeDelay(previous)} a ${describeDelay(current)}.$tail$stima")
     }
 
     /**

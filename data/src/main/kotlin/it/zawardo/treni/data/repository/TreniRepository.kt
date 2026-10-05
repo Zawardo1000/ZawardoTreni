@@ -41,6 +41,7 @@ import it.zawardo.treni.domain.model.StopStatus
 import it.zawardo.treni.domain.model.TrainState
 import it.zawardo.treni.domain.model.conAvvisiDa
 import it.zawardo.treni.domain.model.conBinariDa
+import it.zawardo.treni.domain.model.conPassaggiDa
 import it.zawardo.treni.domain.model.conRitardoDaFermo
 import it.zawardo.treni.domain.model.conRitardoDalTempoPassato
 import it.zawardo.treni.domain.model.matchesCategory
@@ -1491,7 +1492,10 @@ class TrainStatusRepository(
          */
         if (status.impresa != null && status.impresa != Imprese.TRENORD) return status
         val numero = status.number.takeIf { it.isNotBlank() } ?: return status
-        if (status.stops.none { it.scheduledPlatform == null || it.actualPlatform == null }) return status
+        // Col ritardo dedotto si chiede comunque: i passaggi contano piu' dei binari.
+        if (!status.ritardoDedotto &&
+            status.stops.none { it.scheduledPlatform == null || it.actualPlatform == null }
+        ) return status
 
         val chiave = "$numero|$date"
         val adesso = System.currentTimeMillis()
@@ -1503,7 +1507,14 @@ class TrainStatusRepository(
             return status
         }
         senzaTrenord.remove(chiave)
-        return status.conBinariDa(altra).conAvvisiDa(altra)
+        /*
+         * Il treno che ViaggiaTreno dice fermo all'origine senza averlo visto: se
+         * Trenord l'ha visto partire, valgono i suoi passaggi, e da li' il minimo
+         * del tempo passato come per ogni corsa in viaggio. Vedi `conPassaggiDa`.
+         */
+        val conPassaggi = status.conPassaggiDa(altra)
+            .let { if (it !== status) it.conRitardoDalTempoPassato(LocalDateTime.now(ROME)) else it }
+        return conPassaggi.conBinariDa(altra).conAvvisiDa(altra)
     }
 
     /**
