@@ -1,0 +1,10 @@
+# Dependabot apre una pull request quando esce una versione nuova delle librerie dell'app (Gradle), una volta al mese.
+# Gli aggiornamenti di sicurezza li apre da solo quando GitHub segnala una vulnerabilità (impostazioni del
+# repository: Dependabot alerts e security updates attivi).
+# Il repository non ha una CI: prima di unire una pull request, compila e prova l'app.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: monthly
