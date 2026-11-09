@@ -1,6 +1,6 @@
 [versions]
 agp = "9.3.2"
-kotlin = "2.2.10"   # imposta da AGP 9.3.2 (built-in Kotlin)
+kotlin = "2.4.21"   # imposta da AGP 9.3.2 (built-in Kotlin)
 ksp = "2.3.11"   # versionamento indipendente: compatibile con AGP 9 built-in Kotlin
 composeBom = "2026.08.00"
 coreKtx = "1.19.0"
